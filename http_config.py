@@ -75,8 +75,9 @@ def ep_locale(query, body):
 LANGUAGE = os.environ.get("FO3_LANGUAGE", "ind")
 
 
+GAME = os.environ.get("FO3_GAME", r"D:\FO3ID\32795")  # the FO3 ID client install
 # The client's own downloaded copy of the Garena CDN (externalAssets/...).
-ASSETS = os.environ.get("FO3_ASSETS", r"D:\FO3ID\32795\_cache\games\fo3id")
+ASSETS = os.environ.get("FO3_ASSETS", os.path.join(GAME, "_cache", "games", "fo3id"))
 CDN_PREFIX = "cdn/"
 
 
@@ -153,18 +154,36 @@ def coach_id(slot):
     return f"{slot + 1:024x}"  # Mongo-style _id
 
 
+def front_player(me):
+    """coachlist[].frontplayer: the 3D player on the manager select screen. Native LoadFrontPlayers
+    (0x9A09E0) reads staticdata.preferredposition1 (0 = goalie -> kit.goalie), kit.home|goalie.id,
+    spid, id (asCString: a string) and jersey; with no frontplayer the game shows its own default
+    (a Barcelona player). The club's most valuable player (user: "pemain yang muncul dengan harga
+    tertinggi")."""
+    team = me["team"]
+    p = max(team["players"], key=lambda x: x.get("price", 0), default=None)
+    if p is None:
+        return None
+    with closing(_db()) as c:
+        row = c.execute("SELECT preferredposition1 FROM players WHERE spid = ?", (int(p["spid"]),)).fetchone()
+    return {"id": str(p["_id"]), "spid": int(p["spid"]), "jersey": p.get("jersey", 0),
+            "staticdata": {"preferredposition1": row[0] if row else 25},
+            "kit": {"home": {"id": me["teamid"] << 5}, "goalie": {"id": me["teamid"] << 5 | 2}}}
+
+
 def ep_coaches(query, body):
     # StartupCoachCreationScreen: coachlist entries need _id, slot, name, state "active"
     # ("postpone" = deleted, restorable until hideat; recoveryperiod s goes in the delete notice).
     # initializeMyCoach also shows team name/crest from summary and teamvalue.val, same
-    # values as the lobby HUD (coach_me).
+    # values as the lobby HUD (coach_me); native LoadFrontPlayers reads teamid + frontplayer.
     st = _state()
     if purge_deleted_coaches(st):
         _save(st)
     def entry(c):
         me = coach_me(st, c["slot"])
+        fp = front_player(me)
         return dict(c, summary=me["summary"], teamvalue={"val": sum(p["price"] for p in me["team"]["players"])},
-                    levelinfo=me["levelinfo"],
+                    levelinfo=me["levelinfo"], teamid=me["teamid"], **({"frontplayer": fp} if fp else {}),
                     recoveryperiod=COACH_RECOVERY, **({"hideat": w3c(c["deleteat"])} if "deleteat" in c else {}))
     usable = {c["_id"] for c in st["coaches"] if c.get("state", "active") == "active"}
     return _json({"coachlist": [entry(c) for c in st["coaches"]],
@@ -244,6 +263,36 @@ POS_SUB = 28  # Enums.PLAYERPOSITION: 0..27 pitch positions, 28 SUB, 29.. RESERV
 # PAVolume, PlayerCalls, SFX, Crowd and BGM; a missing key is NaN = silent (no music).
 SOUND_DEFAULTS = {"Master": 10, "Commentary": 10, "PAVolume": 10, "PlayerCalls": 10, "SFX": 10, "Crowd": 10, "BGM": 10}
 
+# Opsi > Kontrol (OptionControlSettingScreen) edits OptionManager.controlOption in place and
+# Konfirmasi applies it (applyControlSetting -> native onOptionControlSettingChanged) and sends it
+# back. With no controlOption it edits a throwaway copy, so key changes were never applied or
+# saved; with {} (no key lists) the native input thread crashes. So /account always carries a full
+# one: the screen's own defaults (Controller 0 = keyboard; OptionManager.setDefaultControllerSetting,
+# slots 5-8 copied from 1-4 like the screen does). Key codes are Flash keyCodes, 256-258 mouse.
+_WASD = [87, 65, 68, 83, 81, 90, 67, 69]
+_ARROWS = [38, 40, 37, 39, 256, 257, 258]
+_KEY_ATT = (_WASD, _WASD, [69, 65, 68, 83, 81, 90, 67, 87], [80, 75, 186, 76, 73, 190, 191, 79])
+_KEY_DEF = (_WASD, [87, 65, 83, 81, 68, 90, 67, 69], _KEY_ATT[2], _KEY_ATT[3],
+            [87, 65, 68, 32, 81, 90, 67, 69], [87, 65, 83, 32, 68, 90, 67, 69],
+            [69, 65, 68, 32, 81, 90, 67, 87], [80, 75, 186, 32, 73, 190, 191, 79])
+_KEY_MOV = (_ARROWS, _ARROWS, _ARROWS, [87, 83, 65, 68, 256, 257, 258])
+_JOY = ([4, 3, 2, 1, 5, 7, 6, 8], [4, 2, 3, 1, 5, 6, 8, 7], [4, 3, 2, 1, 5, 7, 6, 8])
+_JOY_MOV = ([9, 11, 10], [9, 11, 10], [11, 9, 10])
+CONTROL_DEFAULTS = {"Controller": 0, "Type": 0,
+                    **{f"KeyAttType{i + 1}": _KEY_ATT[i % 4] for i in range(8)},
+                    **{f"KeyDefType{i + 1}": _KEY_DEF[i] for i in range(8)},
+                    **{f"KeyMovType{i + 1}": _KEY_MOV[i % 4] for i in range(8)},
+                    **{f"Joy{k}Type{i + 1}": (_JOY_MOV if k == "Mov" else _JOY)[i] for k in ("Att", "Def", "Mov") for i in range(3)}}
+
+
+def control_option_ok(c):
+    """True if `c` has every controlOption field with the right shape (ints, non-empty int lists)."""
+    def ok(v, want):
+        if isinstance(want, list):
+            return isinstance(v, list) and bool(v) and all(isinstance(x, int) for x in v)
+        return isinstance(v, int)
+    return isinstance(c, dict) and all(ok(c.get(k), v) for k, v in CONTROL_DEFAULTS.items())
+
 
 def ep_account(query, body):
     """GET /account (AccountProxy.accountData): responses/account_base.json, with the options
@@ -252,16 +301,22 @@ def ep_account(query, body):
         acc = json.load(f)
     acc["option"].update(_state().get("option", {}))
     acc["option"]["soundOption"] = {**SOUND_DEFAULTS, **(acc["option"].get("soundOption") or {})}
+    if not control_option_ok(acc["option"].get("controlOption")):
+        acc["option"]["controlOption"] = CONTROL_DEFAULTS
     return _json(acc)
 
 
 def ep_account_option(query, body):
-    """PUT /account/option {soundOption, screenOption, chatHotKeyOption, aiOption, cameraOption}
-    (sent e.g. when leaving a match). Never store controlOption: {} there crashes the input
-    thread (see account_base.json)."""
+    """PUT /account/option {soundOption, screenOption, controlOption, chatHotKeyOption, aiOption,
+    cameraOption} (Opsi > Konfirmasi, leaving a match). A controlOption is kept only when it is
+    complete (see CONTROL_DEFAULTS); otherwise the one saved before stays."""
     req = json.loads(body or b"{}")
     st = _state()
+    old = st.get("option", {}).get("controlOption")
     st["option"] = {k: v for k, v in req.items() if k.endswith("Option") and k != "controlOption"}
+    ctl = req.get("controlOption") if control_option_ok(req.get("controlOption")) else old
+    if ctl:
+        st["option"]["controlOption"] = ctl
     _save(st)
     return _json({"result": True})
 
@@ -599,7 +654,6 @@ def gain_exp(owner, n, need, top):
 # client's own formations table (data_0.big data/db/fifa_ng_db.db): teamid 1 holds the 33 common
 # shapes (their sweeper variants left out, like FORMATIONS_COMMON_WITHOUT_SWEEPER), other teams
 # their own. That table numbers positions without SW: client Enums.PLAYERPOSITION = code + 1 (GK 0).
-GAME = os.environ.get("FO3_GAME", r"D:\FO3ID\32795")
 FORMATIONS_CACHE = os.path.join(HERE, "gamedata", "formations.json")
 _FORMATIONS = None
 
@@ -690,7 +744,10 @@ def tc_colors():
             "description": "Pemain dari klub yang sama", "boostgroups": TC_CLUB_GROUPS}
     nation = {"teamcolorid": TC_NATION, "type": "nation", "teamid": -1, "name": f"TEAMCOLOR_ATTRIBUTES_TEAM{TC_NATION}",
               "description": "Pemain dari negara yang sama", "boostgroups": TC_GROUPS}
-    return [club, nation] + [{"teamcolorid": TC_SEASON + codes[0], "type": "special", "teamid": TC_SEASON + codes[0],
+    # a special color's teamid is a STRING: TeamColorController copies teamid to __teamid and hands
+    # the list to native (setTeamColorList); at half time native re-checks the colors (0x94EB70) and
+    # reads a special one's __teamid with asCString -- a number there crashed every second half.
+    return [club, nation] + [{"teamcolorid": TC_SEASON + codes[0], "type": "special", "teamid": str(TC_SEASON + codes[0]),
                               "name": f"Season {label}", "description": f"Pemain season {label}", "boostgroups": TC_GROUPS}
                              for label, codes in tc_seasons()]
 
@@ -741,7 +798,8 @@ def active_teamcolors(team):
         groups = TC_CLUB_GROUPS if cid == TC_CLUB else TC_GROUPS
         i = next((i for i, g in enumerate(groups) if g["count_min"] <= n <= g["count_max"]), None)
         if i is not None and teamid > 0:
-            out.append({"teamcolorid": cid, "boostindex": i, "teamid": teamid})
+            # season (special) colors carry their teamid as a string, like tc_colors()
+            out.append({"teamcolorid": cid, "boostindex": i, "teamid": str(teamid) if cid >= TC_SEASON else teamid})
     return out
 
 
@@ -795,11 +853,13 @@ def team_summary(team, teamid):
 
 
 def team_kit(teamid):
-    # kit ids go to native as-is (freeroam kicker, 3D previews); {} = default goalie kit.
-    # kit id = teamid << 10 | kittype (0 home, 1 away, 2 goalie): Enums.GOALIE_DEFAULT_KIT_ID
-    # 45058 = 44 << 10 | 2; checked in FREEROAM (Barca home kit). id = teamid alone renders
-    # a missing-texture checkerboard.
-    return {"availables": {k: {"id": teamid << 10 | t} for k, t in (("home", 0), ("away", 1), ("goalie", 2))}}
+    # kit ids go to native as-is (freeroam kicker, 3D previews, match sides); {} = default goalie kit.
+    # kit id = teamid << 5 | kittype (0 home, 1 away, 2 goalie): the match side reader (0x9480D0)
+    # builds that itself for a side with no kit id, and the kit loader splits id >> 5 / id & 31 into
+    # teamkits (teamtechid, teamkittypetechid) -> data/sceneassets/kit/kit_<team>_<type>_0.rx3.
+    # teamid << 10 only looked right in FREEROAM (that path takes the team from elsewhere); in a
+    # match it pointed at team (teamid << 5) = a checkerboard (GitHub issue #3).
+    return {"availables": {k: {"id": teamid << 5 | t} for k, t in (("home", 0), ("away", 1), ("goalie", 2))}}
 
 
 START_EP = 1000000
@@ -1406,6 +1466,21 @@ def ep_match_get(mid, query, body):
     """GET /match/<id>: the post-match screens re-read result/reward from the match."""
     match = _state().get("match") or {}
     return _json(match if match.get("id") == mid else {})
+
+
+def ep_match_gamesettings(mid, query, body):
+    """PUT /match/<id>/gamesettings {kit: home|away, side: 0 left|1 right} from the game setting
+    screen's kit steppers. gamesettings.kit is [left, right] (MatchController
+    .processMatchGamesettingsKitResource: mine = kit[mySide == left ? 0 : 1]); the updated match
+    resource brings the choice back, and native uses it at kick-off."""
+    req = json.loads(body or b"{}")
+    st = _state(); match = st.get("match") or {}
+    if match.get("id") != mid:  # e.g. a Training Ground match (not stored): as before
+        return _json({"result": True})
+    if req.get("kit") in ("home", "away") and req.get("side") in (0, 1):
+        match["gamesettings"]["kit"][req["side"]] = req["kit"]
+        _save(st)
+    return _json({"result": True, "resources": [{"uri": f"/match/{mid}", "body": match}]})
 
 
 def ep_match_end(mid, query, body):
@@ -2801,6 +2876,16 @@ ROUTES = [
     (re.compile(r"/match/([0-9a-f]+)/player/ready"), ep_match_player_ready),
     (re.compile(r"/match/([0-9a-f]+)/side/(\w+)/ready"), ep_match_ready),
     (re.compile(r"/match/([0-9a-f]+)/end"), ep_match_end),
+    (re.compile(r"/match/([0-9a-f]+)/gamesettings"), ep_match_gamesettings),
+    # StaticData bescripts go to native as-is (BeginnersGuideManager.startLeagueTutorial ->
+    # ApplyCampaignScript); "{}" for an unknown GET crashed the script parser. Ones without a
+    # responses/ file get camera_controller's do-nothing script (no tutorial prompts, no crash).
+    (re.compile(r"/static/bescript/(\w+)"), lambda name, q, b: from_file("/static/bescript/camera_controller")),
+    # GET /game/inweburl/<notice|webevent|cookie|vip_purchase|...> {url}: StartupNoticeScreen
+    # .onReceivedNoticeUrl hands url straight to native LoadWebAddress, and a missing one (the
+    # old "{}") is a NULL string there -> crash on the manager select screen whenever the notice
+    # popup opens. Garena's pages are gone: an empty page.
+    (re.compile(r"/game/inweburl/(\w+)"), lambda name, q, b: _json({"result": True, "url": "about:blank"})),
     (re.compile(r"/match/([0-9a-f]{24})"), ep_match_get),
     (re.compile(r"/league2/sponsor/(\d+)"), ep_l2_sponsor),
     (re.compile(r"/cup/([0-9a-f]{24})/match"), ep_cup_match),
@@ -2947,6 +3032,9 @@ if __name__ == "__main__":
         # surfaces as a logged traceback in the handler thread instead of vanishing.
         srv.socket = ctx.wrap_socket(srv.socket, server_side=True, do_handshake_on_connect=False)
     print(f"http config stub on 0.0.0.0:{PORT}{' (https)' if TLS else ''}, log -> {LOG}", flush=True)
+    if not os.path.isdir(os.path.join(ASSETS, "externalAssets")):
+        print(f"WARNING: no client cache at {ASSETS}: crests, faces and shop images will show the "
+              "game's defaults. Set FO3_GAME to your FO3 ID folder (or FO3_ASSETS).", flush=True)
     admin_port = int(os.environ.get("FO3_ADMIN_PORT", "8088"))  # 0 = no admin page
     if admin_port:
         import admin

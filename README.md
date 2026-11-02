@@ -30,24 +30,40 @@ Tested in the real client (Indonesian UI):
   (+1 to every attribute per level), manager LV.1-100.
 - Game sound and the EA Trax menu music; `tools/eatrax_song.py` puts your own song first in it.
 - Admin web page on http://127.0.0.1:8088/ (EP, players, packs, gifts, daily rewards, log).
+- Real club kits in matches (kit id = `teamid << 5 | type`; the old `<< 10` gave a checkerboard).
+- Matches play through the second half with **team color** on (season colors used to crash it at
+  half time), then show the EXP and reward screens.
 
 Added, passing the tests but not yet checked in the client:
 
-- **Team color**: the starting XI gets an OVR bonus for players from the same club (4-5 players
-  +1 up to 10-11 +4), nation or season (5-6 +1 up to 9-11 +3); per player only the best one
-  counts.
+- **Team color** bonus itself: the starting XI gets an OVR bonus for players from the same club
+  (4-5 players +1 up to 10-11 +4), nation or season (5-6 +1 up to 9-11 +3); per player only the
+  best one counts.
+- **Opsi > Kontrol** (keyboard and gamepad keys) is saved: the server always sends the game's own
+  default key layout, so the screen can apply and save changes (it used to drop them).
+- **Kit choice** on the game setting screen (home / away per side) is kept for the match.
+- **Manager select** shows the club's most valuable player in the club's kit (it showed the
+  game's default Barcelona player).
+- Fixed crashes: the startup notice popup (empty web URL), the Beginner's Guide league tutorial
+  (missing script).
 - **Upgrade chance**: a base chance by target grade, times the "Rasio bonus keberhasilan" label
   the Upgrade tab shows from the material's grade (Kosong x1, Low x1.1, Normal x1.25,
   High x1.5). A failed upgrade from +5 or higher drops one grade.
 - **Top 200 packs**: the extra packs now give their season's 200 best cards ("17 Top 200",
   "07 Top 200", …); **All Season Top 200 +8** gives the 200 best of any season.
 
+Known issue: after a match the game can run out of its own asset memory while it loads the Cup
+screen or the lobby again (crash in `FifaRNA::Crowd::PlacementData::Seats[]`). Still being
+narrowed down; the custom EA Trax song (stored as raw PCM, ~33 MB) is the current suspect, and
+`python -I tools/eatrax_song.py --restore` puts the game's own music back.
+
 Not done: online modes (ranked, friendly, King of the Hill), Road to World, league simulation.
 
 ## Requirements
 
 - Windows, Python 3.12, `pip install cryptography` (messenger + DB extraction).
-- An FO3 ID client install (default path `D:\FO3ID\32795`).
+- An FO3 ID client install (default path `D:\FO3ID\32795`; elsewhere, set `FO3_GAME` to its
+  folder; the server warns at startup when it cannot find the client's image cache there).
 - Optional: ffmpeg (only for `tools/eatrax_song.py`).
 
 ## Setup
@@ -80,7 +96,7 @@ Not done: online modes (ranked, friendly, King of the Hill), Road to World, leag
 
 | File | Role |
 |---|---|
-| `http_config.py` | The REST backend the client calls (`https://APSEODESK172`): login, account, coaches, club creation, squad, league, cup, market, upgrade, trades, shop, items, Bag, daily reward, static tables, and `/cdn/` (serves crests and cards from the client's own `_cache`). State lives in `gamedata/state.json`. Env: `FO3_LANGUAGE` (default `ind`), `FO3_ASSETS`, `FO3_HALF_LENGTH`, `FO3_ADMIN_PORT`. |
+| `http_config.py` | The REST backend the client calls (`https://APSEODESK172`): login, account, coaches, club creation, squad, league, cup, market, upgrade, trades, shop, items, Bag, daily reward, static tables, and `/cdn/` (serves crests and cards from the client's own `_cache`). State lives in `gamedata/state.json`. Env: `FO3_LANGUAGE` (default `ind`), `FO3_GAME` (client folder), `FO3_ASSETS`, `FO3_HALF_LENGTH`, `FO3_ADMIN_PORT`. |
 | `messenger.py` | Notification server on `:28002`. Frames `<u16 LE len><u16 type=2><Blowfish-CBC(key "kueec", IV 0) of JSON+"\n">`; answers `auth`, `ping`, `signon`. `python messenger.py --selftest`. |
 | `admin.py` + `admin/index.html` | Admin page (started by `http_config.py`, localhost only, no password). |
 | `responses/` | Per-endpoint JSON bodies (`/a/b/c` → `responses/a_b_c.json`, re-read on every request). Shapes come from the client's AS3 code. |
@@ -88,7 +104,7 @@ Not done: online modes (ranked, friendly, King of the Hill), Road to World, leag
 | `gen_teams.py` | Starter squads and club summaries from `gamedata/fifadb.sqlite`. |
 | `tools/eatrax_song.py` | Puts a song first in the game's EA Trax menu music (edits `data_0.big` / `data_1.big` by appending; `--restore` puts the originals back). |
 | `tools/fa_sync.py` | fifaaddict.com price sync. |
-| `tools/fa_faces.py` | Adds the player mini faces missing from the client's cache (fifaaddict serves the same 128x128 PNGs); resumable, `--remove` undoes it. |
+| `tools/fa_faces.py` | Adds the player mini faces missing from the client's cache (fifaaddict serves the same 128x128 PNGs); `--crests` adds the missing club crests (most clubs have none in the cache, so the game shows a default one). Resumable, `--remove` undoes it. |
 | `tools/re/` | Reverse-engineering helpers: `bigdir.py` (BIg4 archive tables), `refpack.py` (RefPack codec), `eadb.py` (EA "DB" database tables), `abc*.py` (AS3 bytecode parser / grep / schema miner), `gfxx.py` (UI SWFs), `memgrab.py`, `gamectl.ps1` (drive the client window for tests). |
 | `blaze.py`, `server.py`, `test_client.py`, `analyze_capture.py` | EA Blaze framing (Fire/TDF) and a loopback test server from the first phase of the project; the client turned out to use REST + the messenger instead. |
 | `analysis/` | Early client analysis scripts (strings, PE sections, network endpoints). |

@@ -57,12 +57,28 @@ def main():
             assert hc.coach_me(st, 0)["team"]["squad"]["formation"] == forms[0]["formationid"]
         # team color: feature on, the colors table, and the XI's active colors (a fresh Barcelona
         # XI = 11 Barcelona players: the top club tier); AI match sides get none
+        # Opsi > Kontrol: /account always has a full controlOption (none = key changes never
+        # apply or save, {} crashes the client); a saved one comes back, an incomplete one is ignored
+        acc_ctl = lambda: body(hc.ENDPOINTS["/account"]("", b""))["option"]["controlOption"]
+        assert acc_ctl() == hc.CONTROL_DEFAULTS and len(acc_ctl()) == 35
+        # Controller 1 = the Gamepad tab (Joy* lists); the next login's OptionManager.initialize
+        # then starts with the pad (keyboardControl = Controller == 0)
+        mine = dict(hc.CONTROL_DEFAULTS, Controller=1, Type=2, JoyAttType3=[3, 4, 2, 1, 5, 7, 6, 8])
+        save_opt = lambda o: hc.ENDPOINTS["/account/option"]("", json.dumps(o).encode())
+        save_opt({"soundOption": {"BGM": 3}, "controlOption": mine})
+        save_opt({"soundOption": {"BGM": 4}, "controlOption": {}})  # e.g. leaving a match
+        assert acc_ctl() == mine and body(hc.ENDPOINTS["/account"]("", b""))["option"]["soundOption"]["BGM"] == 4
+        save_opt({"soundOption": {"BGM": 10}, "controlOption": hc.CONTROL_DEFAULTS})
         assert "teamcolor" in body(hc.ENDPOINTS["/account"]("", b""))["features"]
         tc = body(hc.ENDPOINTS["/static/info/teamcolor"]("", b""))
         assert {hc.TC_CLUB, hc.TC_NATION} <= {c["teamcolorid"] for c in tc["teamColors"]}
         assert set(tc["teamColorSpecials"]) == {str(c["teamid"]) for c in tc["teamColors"] if c["type"] == "special"}
         active = hc.coach_me(st, 0)["team"]["teamcolors"]
         assert {"teamcolorid": hc.TC_CLUB, "boostindex": 3, "teamid": 241} in active, active
+        # a season (special) color's teamid must be a string: native reads it with asCString at
+        # half time (a number crashed every second half)
+        assert all(isinstance(c["teamid"], str) for c in tc["teamColors"] if c["type"] == "special")
+        assert all(isinstance(c["teamid"], str) for c in active if c["teamcolorid"] >= hc.TC_SEASON)
         assert hc.match_side(st["teams"]["0"], 241, user={"id": "me"})["team"]["teamcolors"] == active
         assert hc.match_side(st["teams"]["0"], 241)["team"]["teamcolors"] == []
         res = next(p for p in st["teams"]["0"]["players"] if not hc.in_squad(st["teams"]["0"], p))
@@ -154,6 +170,13 @@ def main():
             if leg is not None and "score" not in leg:
                 m = body(hc.route(f"/cup/{cid}/match")("", b"{}"))["resources"][0]["body"]
                 assert m["type"] == "Cup_PvE"
+                # kits: native reads teamid = id >> 5, kit type = id & 31; the game setting
+                # screen's kit stepper (side 0 = left) comes back in the match resource
+                left = m["side"]["left"]["team"]
+                assert left["kit"]["availables"]["away"]["id"] == left["teamid"] << 5 | 1
+                put = lambda kit, side: body(hc.route(f"/match/{m['id']}/gamesettings")("", json.dumps({"kit": kit, "side": side}).encode()))
+                assert put("away", 0)["resources"][0]["body"]["gamesettings"]["kit"][0] == "away"
+                assert put("home", 0)["resources"][0]["body"]["gamesettings"]["kit"][0] == "home"
                 mine_home = g["teams"][leg["homeidx"]]["coach"] is not None
                 stats = {"home": {"id": m["side"]["left" if mine_home else "right"]["team"]["teamid"], "score": 3 if mine_home else 0},
                          "away": {"id": m["side"]["right" if mine_home else "left"]["team"]["teamid"], "score": 0 if mine_home else 3}}
@@ -479,6 +502,16 @@ def main():
         mine_c = lambda: next((x for x in coaches()["coachlist"] if x["_id"] == cid), None)
         postpone = lambda key, method: body(hc.route(f"/coach/{key}/postponed")("", json.dumps({"_method": method}).encode()))
         assert mine_c()["recoveryperiod"] == hc.COACH_RECOVERY and "hideat" not in mine_c()
+        # manager select screen: native LoadFrontPlayers needs teamid + frontplayer (captain, club kit)
+        fp = mine_c()["frontplayer"]
+        assert isinstance(fp["id"], str) and fp["kit"]["home"]["id"] == mine_c()["teamid"] << 5
+        assert fp["spid"] and "preferredposition1" in fp["staticdata"]
+        mine_team = hc.coach_me(hc._state(), slot)["team"]["players"]
+        assert fp["spid"] == max(mine_team, key=lambda x: x.get("price", 0))["spid"]  # most valuable
+        # Beginner's Guide league tutorial script: a JS source string, never "{}" (crashed native)
+        assert body(hc.route("/static/bescript/campaign_tutorial01")("", b"")).startswith("function main()")
+        # the startup notice popup passes url to native LoadWebAddress: never missing
+        assert body(hc.route("/game/inweburl/notice")("", b""))["url"]
         assert postpone(slot, "PUT")["result"]
         assert mine_c()["state"] == "postpone" and mine_c()["hideat"].endswith(".000Z") and coaches()["defaultcoachid"] == ""
         assert postpone(cid, "DELETE")["result"] and mine_c()["state"] == "active" and coaches()["defaultcoachid"] == cid
