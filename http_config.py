@@ -889,7 +889,7 @@ def coach_me(st, slot):
         "id": coach["_id"], "name": coach["name"], "slot": slot, "teamid": coach["teamid"], "team": team,
         # CoachProxy.expandMoney parses money.mpdata.until as a W3C date; an exception there
         # silently aborts onChangeCoachMeResource before squad/players are read.
-        "money": {"ep": coach.get("ep", START_EP), "cash": 0, "mp": 0, "useable_mp": 0,
+        "money": {"ep": coach.get("ep", START_EP), "es": coach.get("es", 0), "cash": 0, "mp": 0, "useable_mp": 0,
                   "mpdata": {"point": 0, "until": "2030-01-01T00:00:00.000Z"}},
         # always a VIP member playing from an official PC warnet (IGR / GCA): CoachProxy.igr,
         # isVip() = vipDetail > 0 and vipExpireAt in the future; vipStatus.VIP1 = VIP expiry
@@ -1969,17 +1969,27 @@ ENHANCE_DROP_FROM = 5  # a failed upgrade from +5 or higher drops one grade
 def enhance_pair(team, a, b):
     pa = next((p for p in team["players"] if iid(p) == str(a)), None)
     pb = next((p for p in team["players"] if iid(p) == str(b)), None)
-    if pa is None or pb is None or pa is pb or pa["spid"] != pb["spid"] or grade_of(pa) >= 10:
+    if pa is None or pb is None or pa is pb or pa["spid"] != pb["spid"]:
+        return None, None
+    if grade_of(pa) >= 10 and grade_of(pb) > 0:  # a +10 may take only a +0 (onListItemClick)
         return None, None
     return pa, pb
+
+
+def enhance_grade(target, material):
+    """Grade after a successful upgrade: a +0 material (a club's own card) adds none (issue #5)."""
+    return grade_of(target) + (grade_of(material) > 0)
 
 
 def enhance_rate(target, material):
     """Base chance by target grade times the bonus the Upgrade tab shows as "Rasio bonus
     keberhasilan" (TeamManagementPlayerEnhancementOldTabPage.updatePreviewText): material +1 or
     lower = Kosong, at least 2/3 of the target grade = High, at least 1/3 = Normal, else Low.
-    The multipliers are ours (user: "Ya, samakan"); the original ones were server data."""
+    The multipliers are ours (user: "Ya, samakan"); the original ones were server data.
+    A +0 material keeps the grade, so it always succeeds."""
     tg, mg = grade_of(target), grade_of(material)
+    if mg == 0:
+        return 1.0
     bonus = 1.0 if mg <= 1 else 1.5 if mg >= tg * 2 / 3 else 1.25 if mg >= tg / 3 else 1.1
     return min(1.0, ENHANCE_RATE[tg] * bonus)
 
@@ -1997,6 +2007,7 @@ def merge_into(team, keep, gone):
         if k in slot:
             sq["positions"].remove(slot[k])
         slot[g]["id"] = k
+        keep.pop("team2", None)  # the 18 of the squad stay in Tim inti (ep_player_move)
         if str(sq.get("captain")) == g:
             sq["captain"] = k
         sq["kickers"] = [k if str(x) == g else x for x in sq.get("kickers", [])]
@@ -2009,7 +2020,7 @@ def ep_enhance_preview(a, b, query, body):
     pa, pb = enhance_pair(team, a, b)
     if pa is None:
         return _json({"result": False, "reason": "INVALID_PARAM"})
-    g = grade_of(pa) + 1
+    g = enhance_grade(pa, pb)
     return _json({"result": True, "grade": g, "levelinfo": pa.get("levelinfo", {"level": 1, "exp": 0}),
                   "price": card_price(pa["spid"], g), "enhancepay": enhance_cost(pa),
                   "probability": round(enhance_rate(pa, pb) * 100)})
@@ -2028,13 +2039,152 @@ def ep_enhance(a, b, boost, guard, query, body):
     add_ep(st, -cost)
     before = grade_of(pa)
     success = random.random() < enhance_rate(pa, pb)
-    after = before + 1 if success else before - 1 if before >= ENHANCE_DROP_FROM else before
+    after = enhance_grade(pa, pb) if success else before - 1 if before >= ENHANCE_DROP_FROM else before
     pa["grade"] = after
     merge_into(team, pa, pb)
     _save(st)
     return _json({"result": True, "success": success, "grade": after, "rgrade": after,
                   "rprice": card_price(pa["spid"], after), "attribPlus": GRADE_BOOST[after] - GRADE_BOOST[before],
                   "resources": coach_me_resources(st, slot)})
+
+
+# --------------------------------------------------------------------------- #
+# Upgrade 2.5 (features.teammanagement.playermanagement.enhancement.v2_5 ->
+# TeamManagementPlayerEnhancement2_5TabPage: EnhanceControlPanel, EnhancementInfoPanel, popup
+# version "v2_5"). Same pairs, grades and drop as v1, plus (user: "di upgrade belum ada tambahan
+# item dan point upgrade"):
+#   upgrade points (money.es): a failed upgrade grants enhance_es(target) points; "Gunakan poin"
+#     spends that many for +ES_BOOST chance (PE2STATICVALUES bonus.use = ES_BOOST in 1/100 %);
+#   boost items (coach items of type ENHANCEMENT_BOOST, sent by itemid): +their chance, one used;
+#   a failure that dropped a grade shows "Coba pengembalian lagi": PUT /player/enhance2.5/restore
+#     gives the grade back for usepoint.price points.
+# The original numbers were server data; these are ours.
+# --------------------------------------------------------------------------- #
+ES_BOOST = 0.10
+ES_RESTORE = 3  # restoring a dropped grade costs the points of this many failures
+# GET /static/db/PE2STATICVALUES. The popup's constructor reads all three keys (a missing one
+# threw #1010 there, so the popup came up half-built with dead buttons): bonus.use = the point
+# boost in 1/100 %; simplify_step.use = cards cheaper than this restore without the button
+# (isSimplify; 0 = never); effect_price {0..4} = EP thresholds, highest first, for the card
+# glow effect6..effect2 (setPlayerCardBackEffect; below the last one = effect1).
+PE2STATICVALUES = {"bonus": {"use": round(ES_BOOST * 10000)}, "simplify_step": {"use": 0},
+                   "effect_price": {str(i): v for i, v in enumerate((10 ** 10, 10 ** 9, 10 ** 8, 10 ** 7, 10 ** 6))}}
+# A never-ending Upgrade event (user: "aktifkan terus event upgrade"), GET /events for
+# InGameEventProxy. InGameEventController keeps an event whose condition.type is "enhance" and
+# that is active with no reason; condition.timeset dates are YYYYMMDD, times HHMM;
+# targetuser_igr 255 = every user; enhance.season [] = every season. reward is a list of lists
+# of {boosts} (getEnhanceGradeRange types each entry as Array: a flat list raised #1034 and
+# stopped the preview); boost key BOOST_PLUS_ENHANCE without a grade suffix = targets +1..+9.
+# The panel then sends its eventid with the upgrade.
+EVENT_BOOST = 0.10
+ENHANCE_EVENT = {
+    "eventid": 1001, "active": True, "reason": [],
+    "condition": {"type": "enhance", "enhance": {"season": []},
+                  "timeset": {"startdate": "20140101", "enddate": "20351231", "starttime": "0000", "endtime": "2359"},
+                  "targetuser": {"targetuser_igr": 255, "targetuser_vip": 255}},
+    "reward": [[{"boosts": {"BOOST_PLUS_ENHANCE": round(EVENT_BOOST * 100)}}]],
+    "messages": {"main": {"name": "Event Upgrade", "description": "Peluang sukses upgrade +10% untuk target +1 sampai +9."}},
+}
+
+
+def enhance_es(target):
+    """Points a failed upgrade of this card grants, and what "Gunakan poin" costs on it."""
+    return 10 * (grade_of(target) + 1)
+
+
+def add_es(st, n):
+    coach = my_coach(st)
+    coach["es"] = coach.get("es", 0) + int(n)
+
+
+def boost_stack(st, itemid):
+    """The coach's stack of that boost item, or None (-1 = none chosen, or not owned)."""
+    return next((i for i in my_coach(st).get("items", []) if str(i["itemid"]) == str(itemid) and i["remains"] > 0
+                 and i["itemid"] in ITEMS and ITEMS[i["itemid"]][2] == "ENHANCEMENT_BOOST"), None)
+
+
+def enhance25_rate(pa, pb, use_point, item, eventid):
+    rate = enhance_rate(pa, pb)
+    if grade_of(pb) > 0:  # a +0 material always succeeds: nothing to boost
+        event = eventid == str(ENHANCE_EVENT["eventid"]) and 1 <= grade_of(pa) <= 9
+        rate += ES_BOOST * use_point + (ITEMS[item["itemid"]][3]["boost"] if item else 0) + EVENT_BOOST * event
+    return min(1.0, rate)
+
+
+def ep_enhance25_preview(a, b, use_point, itemid, event, query, body):
+    """GET /player/<target>/enhance2.5/<material>/preview/<usePoint 0|1>/<boost itemid|-1>/<eventid|-1>
+    -> {grade, levelinfo, price, probability, enhancepay, needes} (EnhanceControlPanel.requestPreview)."""
+    st = _state(); team = st["teams"][str(_default_slot(st))]
+    pa, pb = enhance_pair(team, a, b)
+    if pa is None:
+        return _json({"result": False, "reason": "INVALID_PARAM"})
+    g = enhance_grade(pa, pb)
+    rate = enhance25_rate(pa, pb, use_point == "1", boost_stack(st, itemid), event)
+    return _json({"result": True, "grade": g, "levelinfo": player_levelinfo(pa), "price": card_price(pa["spid"], g),
+                  "probability": round(rate * 100), "enhancepay": enhance_cost(pa), "needes": enhance_es(pa)})
+
+
+def enhance25_result(st, slot, p, success, before, grant, price):
+    """Popup v2_5 reply: on a failure it shows the card broken, then restores it to rgrade
+    (grade after a restore); grantes = points earned, usepoint = what a restore costs."""
+    g = grade_of(p)
+    return _json({"result": True, "success": success, "grade": g, "rgrade": g, "rprice": card_price(p["spid"], g),
+                  "attribPlus": GRADE_BOOST[g] - GRADE_BOOST[before], "grantes": grant,
+                  "usepoint": {"currency": "ES", "price": price}, "getitems": [], "resources": coach_me_resources(st, slot)})
+
+
+def ep_enhance25(a, b, use_point, itemid, event, query, body):
+    """PUT /player/<target>/enhance2.5/<material>/<usePoint 0|1>/<boost itemid|-1>/<eventid|-1>."""
+    st = _state(); slot = _default_slot(st); team = st["teams"][str(slot)]
+    pa, pb = enhance_pair(team, a, b)
+    if pa is None:
+        return _json({"result": False, "reason": "INVALID_PARAM"})
+    boostable = grade_of(pb) > 0
+    use_point = use_point == "1" and boostable
+    item = boost_stack(st, itemid) if boostable else None
+    if boostable and itemid != "-1" and item is None:
+        return _json({"result": False, "reason": "expired item"})  # popup: ENHANCEMENT_25_ERROR_ITEM01
+    cost, need = enhance_cost(pa), enhance_es(pa)
+    if coach_me(st, slot)["money"]["ep"] < cost:
+        return _json({"result": False, "reason": "Invalid target ep price"})
+    if use_point and my_coach(st).get("es", 0) < need:
+        return _json({"result": False, "reason": "NOT_ENOUGH_ES"})
+    rate = enhance25_rate(pa, pb, use_point, item, event)
+    add_ep(st, -cost)
+    add_es(st, -need if use_point else 0)
+    if item:
+        item["remains"] -= 1
+        if not item["remains"]:
+            my_coach(st)["items"].remove(item)
+    before = grade_of(pa)
+    success = random.random() < rate
+    pa["grade"] = enhance_grade(pa, pb) if success else before - 1 if before >= ENHANCE_DROP_FROM else before
+    merge_into(team, pa, pb)
+    grant = 0 if success else need
+    add_es(st, grant)
+    st.pop("enhance_restore", None)
+    if grade_of(pa) < before:
+        st["enhance_restore"] = {"id": iid(pa), "grade": before, "price": ES_RESTORE * need}
+    _save(st)
+    return enhance25_result(st, slot, pa, success, before, grant, ES_RESTORE * need)
+
+
+def ep_enhance25_restore(query, body):
+    """PUT /player/enhance2.5/restore ("Coba pengembalian lagi" after a failure that dropped a
+    grade): pay the points, the card gets that grade back. The popup reads it as another failed
+    result whose grade is the restored one."""
+    st = _state(); slot = _default_slot(st); team = st["teams"][str(slot)]
+    r = st.get("enhance_restore")
+    p = next((x for x in team["players"] if r and iid(x) == r["id"]), None)
+    if p is None:
+        return _json({"result": False, "reason": "INVALID_PARAM"})
+    if my_coach(st).get("es", 0) < r["price"]:
+        return _json({"result": False, "reason": "NOT_ENOUGH_ES"})
+    add_es(st, -r["price"])
+    before, p["grade"] = grade_of(p), r["grade"]
+    del st["enhance_restore"]
+    _save(st)
+    return enhance25_result(st, slot, p, False, before, 0, r["price"])
 
 
 # --------------------------------------------------------------------------- #
@@ -2097,18 +2247,23 @@ def trade_props(give, rng):
     return props
 
 
-def ep_trade_proposal(query, body):
-    """POST /players/trade/proposal {players: [iid...]} -> {result, props}."""
+def trade_proposal(body, make_props):
+    """{players: [iid...]} -> {result, props}: Tukar v1 and v2 share the checks."""
     req = json.loads(body or b"{}")
     st = _state(); team = st["teams"][str(_default_slot(st))]
     ids = [str(i) for i in req.get("players") or []]
     give = [p for p in team["players"] if iid(p) in ids]
     if not 2 <= len(give) <= 10 or len(give) != len(set(ids)) or any(in_squad(team, p) for p in give):
         return _json({"result": False, "reason": "invalid playerid"})  # the tab lists reserves only
-    props = trade_props(give, random.Random())
+    props = make_props(give, random.Random())
     st["trade"] = {"players": ids, "props": props}
     _save(st)
     return _json({"result": True, "props": props})
+
+
+def ep_trade_proposal(query, body):
+    """POST /players/trade/proposal {players: [iid...]} -> {result, props}."""
+    return trade_proposal(body, trade_props)
 
 
 def ep_trade_contract(query, body):
@@ -2150,12 +2305,19 @@ TRADE3_STATIC = {  # GET /trade3/staticvalues -> ScouterController.staticvalues
     "playertrade3_normal": {str(n): 1 + (n >= 4) + (n >= 7) for n in range(2, 11)},  # offers by #players
     "playertrade3_effect_price": [10_000_000, 3_000_000, 1_000_000],  # popup premium effect tiers
 }
+LEGEND_SEASONS = (93, 30, 27, 71, 51, 61, 89, 48, 31, 33)  # WL UL EL ML TL VL CL MUL CEL
 SCOUTS = (  # (key = scoutid, string id, cooldown s, offer value x total, quest); always PC + VIP here
     # no cooldowns (user: "buat scout tidak ada reset"; were 1 day / 1 hour / 1 hour)
     ("default_A01", "STR_SCOUTER_KR_DEFAULT_A01", 0, (0.8, 1.1), None),
     ("default_B01", "STR_SCOUTER_KR_DEFAULT_B01", 0, (0.9, 1.3), {"require_value": 100000}),
     ("igr", "STR_SCOUTER_KR_IGR_A01", 0, (0.9, 1.4), {"require_grade": 2, "require_grade_count": 2}),
     ("vip", "STR_SCOUTER_KR_VIP_A01", 0, (1.0, 1.5), {"require_season": "88", "require_season_count": 2}),
+    # the client's other two (user: "Ya, tambahkan"); ScouterSelectedItemRenderer picks the
+    # portrait from the key (scouter_event.png / scouter_vvip.png are not in the client cache:
+    # it shows its default), an id with "vvip" uses vvip_playertrade3_limit
+    ("event", "STR_SCOUTER_KR_EVENT_A01", 0, (1.0, 1.5),
+     {"require_season": ",".join(map(str, LEGEND_SEASONS)), "require_season_count": 2}),
+    ("vvip", "STR_SCOUTER_KR_VVIP_A01", 0, (1.1, 1.6), {"require_value": 1_000_000_000}),
 )
 QUEST_BONUS = 0.2  # quest met: the offer value range moves up by this x total
 _T3_POOL = []
@@ -2247,6 +2409,84 @@ def ep_trade3_proposal(query, body):
     st["trade"] = {"players": [iid(p) for p in give], "props": props}
     _save(st)
     return _json({"result": True, "props": props, "resources": coach_me_resources(st, slot)})
+
+
+# --------------------------------------------------------------------------- #
+# Tim > Manajemen pemain > Tukar v2 (features.teammanagement.playermanagement.trade2; same
+# TeamManagementPlayerRecycleTabPage and popup; user: "Ya, buat trade2"). The tab rates the
+# chosen reserves by TP = sum(card price, x bonusplayergroup.bonus for a special card of at
+# least that grade) x playertrade2_bonus[n] x IGR x VIP, then shows from GET /static/db/TRADE
+# the level (tp: minimum TP -> possible offer grades, highest level = 15) and the number of
+# offers, and from GET /players/trade2/info what another manager got "yesterday" at that TP
+# (TRADE2_ESTIMATE "{0} merekrut {1} kemarin."). Special cards (/static/cache/
+# TRADE_SPECIALPLAYERS, {spid: 1}) are the legend seasons' cards. Offers are cards worth about
+# the TP, graded up to the level's maximum. No daily limit (usage maxcount 0) and no value cap.
+# The original numbers were server data; these are ours.
+# --------------------------------------------------------------------------- #
+TRADE2_LEVELS = (0, 10 ** 6, 3 * 10 ** 6, 10 ** 7, 3 * 10 ** 7, 10 ** 8, 3 * 10 ** 8, 10 ** 9, 2 * 10 ** 9,
+                 4 * 10 ** 9, 8 * 10 ** 9, 15 * 10 ** 9, 30 * 10 ** 9, 60 * 10 ** 9, 120 * 10 ** 9)  # levels 1..15
+TRADE2_TABLE = {
+    "bonusplayergroup": {"bonus": 1.5, "grade": 1},
+    "playertrade2_bonus": {**{str(n): round(1 + 0.02 * (n - 2), 2) for n in range(2, 11)}, "IGR": 1.05, "VIP": 1.05},
+    "legendgroup": list(LEGEND_SEASONS),
+    "playertrade2_normal": {str(n): 1 + (n >= 4) + (n >= 7) for n in range(2, 11)},  # + PC warnet and VIP offers
+    "tp": {str(tp): {"value": list(range(1, 2 + round(9 * i / 14)))} for i, tp in enumerate(TRADE2_LEVELS)},
+    "trade2_limit": {"max": NO_LIMIT, "max_trade": NO_LIMIT},
+    "trade_effect_price": [10 ** 10, 10 ** 9, 10 ** 8],  # popup premium effect tiers
+}
+TRADE2_MANAGERS = ("Budi", "Andi", "Rizky", "Dimas", "Fajar", "Yoga", "Agus", "Hendra", "Bayu", "Eko")
+
+
+@functools.lru_cache(maxsize=None)
+def trade2_special():
+    return {str(s): 1 for rows in trade_pool().values() for s, _ in rows if s // 1000000 in LEGEND_SEASONS}
+
+
+def trade2_tp(give):
+    w, b = TRADE2_TABLE["bonusplayergroup"], TRADE2_TABLE["playertrade2_bonus"]
+    tp = sum(card_price(p["spid"], grade_of(p)) * (w["bonus"] if str(p["spid"]) in trade2_special()
+                                                    and grade_of(p) >= w["grade"] else 1) for p in give)
+    return tp * b.get(str(len(give)), 1) * b["IGR"] * b["VIP"]  # always a PC warnet + VIP coach here
+
+
+def trade2_max_grade(tp):
+    level = TRADE2_LEVELS[max(0, bisect.bisect_right(TRADE2_LEVELS, tp) - 1)]
+    return TRADE2_TABLE["tp"][str(level)]["value"][-1]
+
+
+@functools.lru_cache(maxsize=None)
+def trade2_pool(max_grade):
+    return [r for r in trade3_pool() if r[3] <= max_grade]
+
+
+def trade2_pick(target, max_grade, rng):
+    """(price, spid, teamid, grade): a card of at most that grade worth within 25% of the
+    target, else the nearest one (low values come in sparse steps, so "the 20 nearest in the
+    list" could be worth twice the target)."""
+    pool = trade2_pool(max_grade)
+    lo, hi = bisect.bisect_left(pool, (target / 1.25,)), bisect.bisect_right(pool, (target * 1.25, math.inf))
+    k = bisect.bisect_left(pool, (target,))
+    return rng.choice(pool[lo:hi] or pool[max(0, k - 1):k + 1])
+
+
+def trade2_props(give, rng):
+    tp = trade2_tp(give)
+    props = []
+    for boost in [None] * TRADE2_TABLE["playertrade2_normal"][str(len(give))] + ["igr", "vip"]:
+        price, s, t, g = trade2_pick(tp * rng.uniform(0.85, 1.15), trade2_max_grade(tp), rng)
+        props.append({"spid": s, "grade": g, "teamid": t, "price": price, **({"boost": boost} if boost else {})})
+    return props
+
+
+def ep_trade2_info(query, body):
+    """GET /players/trade2/info {minimum TP: a card a manager got at that level "yesterday"}
+    (the same for the whole day; expandme lets the client fill its staticdata)."""
+    rng = random.Random(time.strftime("%Y%m%d"))
+    out = {}
+    for tp in TRADE2_LEVELS[1:]:
+        price, s, _, g = trade2_pick(tp * 1.1, trade2_max_grade(tp), rng)
+        out[str(tp)] = {"spid": s, "grade": g, "expandme": "player", "price": price, "coach": rng.choice(TRADE2_MANAGERS)}
+    return _json(out)
 
 
 def ep_player_move(pid, where, query, body):
@@ -2421,6 +2661,8 @@ def item_def(itemid):
     """Item staticdata (POST /static/cache/item, shop products, coach items)."""
     if itemid == EP_ITEM:
         return EP_ITEM_DEF
+    if itemid == ES_ITEM:
+        return ES_ITEM_DEF
     if itemid in ITEMS:
         return use_item_def(itemid)
     if itemid in PACKAGES or itemid in MONTHLY:
@@ -2449,6 +2691,9 @@ def item_def(itemid):
 EP_ITEM = 1  # externalAssets/shop/1.png = EP coin: EP in Bag entries and package contents
 EP_ITEM_DEF = {"itemid": EP_ITEM, "productid": EP_ITEM, "name": "EP", "category": "EP", "type": "EP",
                "unit": "EP", "itemicon": EP_ITEM}
+ES_ITEM = 2  # upgrade points (money.es) in package contents, credited like EP; icon 8700001 = "P"
+ES_ITEM_DEF = {"itemid": ES_ITEM, "productid": ES_ITEM, "name": "Upgrade point", "category": "USE", "type": "ES",
+               "unit": "COUNT", "itemicon": 8700001}
 ITEMS = {  # itemid: (name, icon, type, effect, description)
     501: ("Lucky EP", 501, "EP_LOTTERY", {"ep": (10_000, 1_000_000)}, "Buka kartu: dapat 10.000 - 1.000.000 EP."),
     50029: ("Lucky EP max 20.000.000", "ID50029", "EP_LOTTERY", {"ep": (100_000, 20_000_000)},
@@ -2486,6 +2731,11 @@ ITEMS = {  # itemid: (name, icon, type, effect, description)
                 "Hadiah acak: 1 juta EP, 06-11 Player Top 50 atau This Season Top 30."),
     3002: ("Ganti nama manager", 3002, "COACHNAME_CHANGE", {}, "Ganti nama manager Anda."),
     3001: ("Ganti tim", 3001, "TEAM_CHANGE", {}, "Pindah ke klub lain (logo, seragam, liga); pemain tetap."),
+    # Upgrade 2.5 boost items (EnhanceControlPanel lists type ENHANCEMENT_BOOST; names from the
+    # client's ENHANCEMENT_BOOST<id>; the cache has no icons of their own, 1000002 = green arrows)
+    1000052: ("Enhancement Boost Gold", 1000002, "ENHANCEMENT_BOOST", {"boost": 0.15}, "Upgrade: peluang sukses +15%."),
+    1000053: ("Enhancement Boost Silver", 1000002, "ENHANCEMENT_BOOST", {"boost": 0.10}, "Upgrade: peluang sukses +10%."),
+    1000054: ("Enhancement Boost Bronze", 1000002, "ENHANCEMENT_BOOST", {"boost": 0.05}, "Upgrade: peluang sukses +5%."),
 }
 PACKAGES = {  # itemid: (name, icon, [(itemid, count)], description); bought = contents to Item saya
     801: ("Paket Starter", 801, [(28006, 1), (28007, 1), (28008, 1), (28009, 1), (50020, 2)],
@@ -2500,6 +2750,10 @@ PACKAGES = {  # itemid: (name, icon, [(itemid, count)], description); bought = c
                 "'14 Top 30 +5, Europe '10 Top 30 +3, EC Top 30 +3."),
     80000001: ("VIP Premium", "vipterbaru", [(50028, 1), (50121, 1), (50021, 5)],
                "Lucky EP max 50 juta, Kotak Platinum, 5x EP +1.000.000."),
+    # upgrade points (user: "point upgrade beli dimana?"): Upgrade's "Gunakan poin" / restore
+    81000100: ("Upgrade Point 100", 8700001, [(ES_ITEM, 100)], "100 upgrade point untuk Upgrade."),
+    81000500: ("Upgrade Point 500", 8700001, [(ES_ITEM, 500)], "500 upgrade point untuk Upgrade."),
+    81001000: ("Upgrade Point 1.000", 8700001, [(ES_ITEM, 1000)], "1.000 upgrade point untuk Upgrade."),
 }
 PACKAGES.update({  # Serial product steps (CHAINED below), bought in order
     70000001: ("Paket Berantai 1/3", 200130000, [(501, 3), (28007, 1)], "Tahap 1: 3x Lucky EP dan pak MF 60+."),
@@ -2667,6 +2921,8 @@ def ep_shop_purchase(query, body):
     for i, n in contents:
         if i == EP_ITEM:
             add_ep(st, n * b["bunch"])
+        elif i == ES_ITEM:
+            add_es(st, n * b["bunch"])
         else:
             inventory_add(coach, i, n * b["bunch"])
     if itemid in MONTHLY:  # a month of daily items (renewing extends it)
@@ -2684,6 +2940,8 @@ def ep_shop_purchase(query, body):
 def use_item(st, slot, coach, it, req):
     """/item/<_id>/use for a USE item (see ITEMS): its effect, one used up."""
     _, _, typ, eff, _ = ITEMS[it["itemid"]]
+    if typ == "ENHANCEMENT_BOOST":  # spent by the Upgrade tab, not by "Gunakan"
+        return {"result": False, "reason": "ITEM_USE_ERROR"}
     out = {"result": True}
     if typ == "EP_LOTTERY":  # lower amounts more likely
         lo, hi = eff["ep"]
@@ -2747,8 +3005,7 @@ def ep_static_item(query, body):
             ids.append(int(i))
         except (TypeError, ValueError):
             pass
-    return _json({str(i): EP_ITEM_DEF if i == EP_ITEM else item_def(i) for i in ids
-                  if i == EP_ITEM or i in PACKS or i in ITEMS or i in PACKAGES})
+    return _json({str(i): item_def(i) for i in ids if i in (EP_ITEM, ES_ITEM) or i in PACKS or i in ITEMS or i in PACKAGES})
 
 
 # --------------------------------------------------------------------------- #
@@ -2867,6 +3124,8 @@ ROUTES = [
     (re.compile(r"/static/info/team/summary/(\d+)"), lambda t, q, b: _json({**roster(int(t))["summary"], "id": int(t)})),
     (re.compile(r"/player/(\w+)/move/(firstteam|secondteam)"), ep_player_move),
     (re.compile(r"/player/(\w+)/enhance/(\w+)/preview"), ep_enhance_preview),
+    (re.compile(r"/player/(\w+)/enhance2\.5/(\w+)/preview/(\d)/(-?\d+)/(-?\d+)"), ep_enhance25_preview),
+    (re.compile(r"/player/(\w+)/enhance2\.5/(\w+)/(\d)/(-?\d+)/(-?\d+)"), ep_enhance25),
     (re.compile(r"/player/(\w+)/enhance/(\w+)(?:/(-?\w+)/(-?\w+))?"), ep_enhance),
     (re.compile(r"/transfer/top/50(?:/position/(\w+))?"), ep_transfer_top),
     (re.compile(r"/transfer/search/(\d+)"), ep_transfer_search),
@@ -2939,11 +3198,18 @@ ENDPOINTS.update({
     "/transfer/offer": ep_transfer_offer, "/transfer/my/offer/list": lambda q, b: _json(offer_list(_state())),
     "/transfer/my/boostfactor": lambda q, b: _json(NO_BOOST),
     "/players/trade/proposal": ep_trade_proposal, "/players/trade/contract": ep_trade_contract,
+    "/players/trade2/proposal": lambda q, b: trade_proposal(b, trade2_props), "/players/trade2/contract": ep_trade_contract,
+    "/players/trade2/info": ep_trade2_info, "/static/db/TRADE": lambda q, b: _json(TRADE2_TABLE),
+    "/static/cache/TRADE_SPECIALPLAYERS": lambda q, b: _json(trade2_special()),
+    "/account/trade2/usage": lambda q, b: _json({"result": True, "usedcount": 0, "maxcount": 0, "remainsec": 0}),
     "/trade3/contract": ep_trade_contract, "/trade3/proposal": ep_trade3_proposal,
     "/trade3/staticvalues": lambda q, b: _json(TRADE3_STATIC), "/trade3/info": ep_trade3_info,
     "/trade3/notification": lambda q, b: _json({"result": True}),
     "/static/db/PLAYERTRADE": lambda q, b: _json({"playergrade": {str(s): trade_grades(s) for s in range(2, 101)}}),
     "/static/db/EXPPLAYER": lambda q, b: _json(EXPPLAYER), "/static/db/EXPCOACH": lambda q, b: _json(EXPCOACH),
+    "/static/db/PE2STATICVALUES": lambda q, b: _json(PE2STATICVALUES),
+    "/player/enhance2.5/restore": ep_enhance25_restore,
+    "/events": lambda q, b: _json({"events": [ENHANCE_EVENT]}),
     "/static/db/STATICVALUES/max_coachlevel": lambda q, b: _json(COACH_MAX_LEVEL),
     "/static/info/teamcolor": ep_teamcolor,
     "/shop/list": lambda q, b: _json(shop_list(_state())), "/shop/list/STSHOP": ep_stshop,

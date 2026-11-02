@@ -10,7 +10,7 @@
   "playertrade_limit": {"CardMinValue": 40, "CardMaxValue": 89, "view_CardMaxValue": "89", "popup_price": 1000000},
   "playertrade_cardovrbonus": {"2": 1, "3": 2, "4": 3, "5": 4, "6": 5, "7": 6, "8": 7, "9": 8, "10": 9},
   "playertrade_normal": {"2": 1, "3": 1, "4": 2, "5": 2, "6": 2, "7": 3, "8": 3, "9": 3, "10": 3},
-  "starplayer_price": [10000000, 3000000, 1000000],
+  "starplayer_price": [1000000000, 100000000, 10000000],
   "best_squad": {"search_limit": 2, "search_limit_on_formation_change": 2, "stamina_threshold": 0,
                  "preferred_pos_score": 3, "preferred_foot_score": 1}
 }

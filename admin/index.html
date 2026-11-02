@@ -219,7 +219,8 @@
 const $ = (s, el = document) => el.querySelector(s);
 const fmt = n => Number(n || 0).toLocaleString("id-ID");
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
-const SCOUT_NAMES = {default_A01: "Scout Amatir", default_B01: "Scout Profesional", igr: "Scout Cyberindo (PC)", vip: "Scout Spesial VIP"};
+const SCOUT_NAMES = {default_A01: "Scout Amatir", default_B01: "Scout Profesional", igr: "Scout Cyberindo (PC)", vip: "Scout Spesial VIP",
+                     event: "Scout Khusus (event)", vvip: "VVIP Scout"};
 const QUEST_TEXT = {require_value: "nilai pemain ≥", require_grade: "grade ≥", require_grade_count: "jumlah", require_season: "musim", require_season_count: "jumlah"};
 let packs = [], packsReady;
 

@@ -224,6 +224,84 @@ def main():
         rate = lambda t, m: hc.enhance_rate({"grade": t}, {"grade": m})
         assert [round(rate(6, m), 4) for m in (1, 2, 4)] == [0.15, 0.1875, 0.225]
         assert round(rate(9, 2), 4) == 0.022 and rate(2, 1) == 0.81
+        # +0 material (issue #5): a club card adds no grade, so the target keeps its grade at
+        # 100% and a +10 may take one; the copy takes its squad slot and joins Tim inti
+        st = hc._state(); t = st["teams"][str(hc._default_slot(st))]
+        sub = min((s for s in t["squad"]["positions"] if s["pos"] >= hc.POS_SUB), key=lambda s: hc.card_price(s["spid"]))
+        base = next(p for p in t["players"] if hc.iid(p) == str(sub.get("id") or sub["spid"]))
+        assert hc.grade_of(base) == 0
+        c10, c4 = (hc.add_player(t, base["spid"], g) for g in (10, 4))
+        c10["team2"] = c4["team2"] = True
+        hc.add_ep(st, 10 ** 9); hc._save(st)
+        b0, c10, c4 = hc.iid(base), hc.iid(c10), hc.iid(c4)
+        pv = body(hc.route(f"/player/{c10}/enhance/{b0}/preview")("", b""))
+        assert pv["result"] and pv["grade"] == 10 and pv["probability"] == 100, pv
+        assert not body(hc.route(f"/player/{c10}/enhance/{c4}/preview")("", b""))["result"]  # +10 with +4
+        pv = body(hc.route(f"/player/{c4}/enhance/{b0}/preview")("", b""))
+        assert pv["grade"] == 4 and pv["probability"] == 100, pv
+        up = body(hc.route(f"/player/{c4}/enhance/{b0}")("", b"{}"))
+        assert up["success"] and up["grade"] == 4 and up["attribPlus"] == 0, up
+        kept = next(p for p in team()["players"] if hc.iid(p) == c4)
+        assert not kept.get("team2") and hc.in_squad(team(), kept) and b0 not in {hc.iid(p) for p in team()["players"]}
+        st = hc._state(); t = st["teams"][str(hc._default_slot(st))]
+        hc.remove_player(t, next(p for p in t["players"] if hc.iid(p) == c10)); hc._save(st)
+        # --- Upgrade 2.5: the tab, upgrade points (money.es) and boost items
+        assert body(hc.ep_account("", b""))["features"]["teammanagement"]["playermanagement"]["enhancement"] == {"v2_5": {}}
+        pe2 = body(hc.ENDPOINTS["/static/db/PE2STATICVALUES"]("", b""))
+        # the popup constructor reads all three (a missing key left it half-built)
+        assert pe2["bonus"]["use"] == 1000 and "use" in pe2["simplify_step"]
+        ladder = [pe2["effect_price"][str(i)] for i in range(len(pe2["effect_price"]))]
+        assert ladder == sorted(ladder, reverse=True) and len(ladder) == 5  # effect6..effect2
+        es = lambda: hc.coach_me(hc._state(), hc._default_slot(hc._state()))["money"]["es"]
+        with hc.closing(hc._db()) as c:
+            s25 = next(r[0] for r in c.execute("SELECT spid FROM players WHERE overallrating BETWEEN 60 AND 65 ORDER BY spid")
+                       if hc.on_market(r[0]) and not copies(r[0]))
+        st = hc._state(); t = st["teams"][str(hc._default_slot(st))]
+        tg, mt = hc.iid(hc.add_player(t, s25, 6)), hc.iid(hc.add_player(t, s25, 2))
+        gold = hc.inventory_add(hc.my_coach(st), 1000052, 2)["_id"]
+        hc._save(st)
+        es0 = es()
+        boost_items = [i for i in hc.coach_items(hc._state(), hc._default_slot(hc._state())) if i["staticdata"]["type"] == "ENHANCEMENT_BOOST"]
+        assert [i["remains"] for i in boost_items] == [2]
+        assert not body(hc.route(f"/item/{gold}/use")("", b"{}"))["result"]  # not via "Gunakan"
+        pv = lambda u, it, ev=-1: body(hc.route(f"/player/{tg}/enhance2.5/{mt}/preview/{u}/{it}/{ev}")("", b""))
+        base = round(hc.enhance_rate({"grade": 6}, {"grade": 2}) * 100)
+        assert pv(0, -1)["probability"] == base and pv(0, -1)["grade"] == 7 and pv(0, -1)["needes"] == 70
+        assert pv(1, 1000052)["probability"] == base + 10 + 15
+        # the never-ending Upgrade event (+10% for targets +1..+9)
+        ev = body(hc.ENDPOINTS["/events"]("", b""))["events"]
+        assert [e["condition"]["type"] for e in ev] == ["enhance"] and ev[0]["active"] and ev[0]["reason"] == []
+        assert all(isinstance(r, list) for r in ev[0]["reward"])  # getEnhanceGradeRange: Array entries
+        assert pv(0, -1, ev[0]["eventid"])["probability"] == base + 10 and pv(0, -1, 999)["probability"] == base
+        # upgrade points in Shop > Paket: credited to money.es at once
+        pkg = next(e for e in hc.shop_list(hc._state()) if e["shopid"] == 81000500)
+        assert pkg["shopcategory"] == "PACKAGE" and pkg["product"]["staticdata"]["items"][0]["staticdata"]["name"] == "Upgrade point"
+        es1 = es()
+        assert body(hc.ep_shop_purchase("", json.dumps({"productid": 81000500, "bunch": 0}).encode()))["result"]
+        assert es() == es1 + 500 and body(hc.ep_static_item("", b'{"itemids": [2]}'))["2"]["itemicon"] == 8700001
+        st = hc._state(); hc.add_es(st, -500); hc._save(st)
+        assert not body(hc.route(f"/player/{tg}/enhance2.5/{mt}/0/1000053/-1")("", b"{}"))["result"]  # no Silver owned
+        roll = hc.random.random
+        try:
+            hc.random.random = lambda: 0.999  # fail: +6 drops to +5, 70 points earned
+            up = body(hc.route(f"/player/{tg}/enhance2.5/{mt}/0/-1/-1")("", b"{}"))
+            assert not up["success"] and up["grade"] == up["rgrade"] == 5 and up["grantes"] == 70, up
+            assert up["usepoint"] == {"currency": "ES", "price": 210} and es() == es0 + 70
+            assert not body(hc.ENDPOINTS["/player/enhance2.5/restore"]("", b"{}"))["result"]  # 70 < 210
+            st = hc._state(); hc.add_es(st, 300); hc._save(st)
+            rs = body(hc.ENDPOINTS["/player/enhance2.5/restore"]("", b"{}"))
+            assert rs["result"] and not rs["success"] and rs["grade"] == 6 and es() == es0 + 70 + 300 - 210, rs
+            assert not body(hc.ENDPOINTS["/player/enhance2.5/restore"]("", b"{}"))["result"]  # once
+            st = hc._state(); t = st["teams"][str(hc._default_slot(st))]
+            mt = hc.iid(hc.add_player(t, s25, 2)); hc._save(st)
+            hc.random.random = lambda: 0.0  # success with points and a Gold boost
+            up = body(hc.route(f"/player/{tg}/enhance2.5/{mt}/1/1000052/-1")("", b"{}"))
+            assert up["success"] and up["grade"] == 7 and up["grantes"] == 0 and es() == es0 + 160 - 70, up
+            assert [i["remains"] for i in hc.coach_items(hc._state(), hc._default_slot(hc._state())) if i["itemid"] == 1000052] == [1]
+        finally:
+            hc.random.random = roll
+        st = hc._state(); t = st["teams"][str(hc._default_slot(st))]
+        hc.remove_player(t, next(p for p in t["players"] if hc.iid(p) == tg)); hc._save(st)
         # --- selling: a reserve at <= market price; the NPC buys at once, EP minus fee on collect
         band = body(hc.route(f"/transfer/price/{spid}/2")("", b""))
         assert band["upper"] == hc.card_price(spid, 2) and band["lower"] < band["upper"]
@@ -256,6 +334,12 @@ def main():
         assert not post("/players/trade/proposal", {"players": [sub] + ids[:1]})["result"]  # subs neither
         pr = post("/players/trade/proposal", {"players": ids})
         sv = hc.static_values()
+        # pack opening glow (TeamManagementPlayerCardScreen.getEffectType): highest threshold
+        # first, and Market cards land in every tier (none, 1, 2, 3)
+        star = sv["starplayer_price"]
+        assert star == sorted(star, reverse=True)
+        tiers = {sum(r[0] >= t for t in star) for r in hc.trade3_pool()[::997]}
+        assert tiers == {0, 1, 2, 3}, tiers
         lo = min(int(sum(hc.card_ovr(p["spid"]) for p in reserves) / 4 + sv["playertrade_cardovrbonus"]["4"]),
                  sv["playertrade_limit"]["CardMaxValue"])
         assert pr["result"] and len(pr["props"]) == sv["playertrade_normal"]["4"] + 2, pr
@@ -272,12 +356,37 @@ def main():
         n0, card = len(team()["players"]), pr["props"][0]
         assert post("/trade3/contract", {"selectnum": 0, "slotnum": 0})["result"] and len(team()["players"]) == n0 - 1
         assert (team()["players"][-1]["spid"], team()["players"][-1]["grade"]) == (card["spid"], card["grade"])
+        # --- Tukar v2 (trade2): TP from card values, levels, "yesterday" ladder, no limits
+        assert "trade2" in body(hc.ep_account("", b""))["features"]["teammanagement"]["playermanagement"]
+        tt = body(hc.ENDPOINTS["/static/db/TRADE"]("", b""))
+        maxg = [tt["tp"][k]["value"][-1] for k in sorted(tt["tp"], key=int)]
+        assert len(maxg) == 15 and maxg == sorted(maxg) and maxg[0] == 1 and maxg[-1] == 10
+        assert tt["trade2_limit"]["max"] == hc.NO_LIMIT and set(tt["playertrade2_bonus"]) >= {"IGR", "VIP", "2", "10"}
+        assert body(hc.ENDPOINTS["/account/trade2/usage"]("", b""))["maxcount"] == 0  # unlimited
+        special = body(hc.ENDPOINTS["/static/cache/TRADE_SPECIALPLAYERS"]("", b""))
+        assert special and all(int(s) // 1000000 in hc.LEGEND_SEASONS for s in special)
+        ladder = body(hc.ENDPOINTS["/players/trade2/info"]("", b""))
+        assert len(ladder) == 14 and all(e["expandme"] == "player" and e["coach"] and e["grade"] <= hc.trade2_max_grade(int(k))
+                                         for k, e in ladder.items())
+        give = [p for p in team()["players"] if not hc.in_squad(team(), p)][:3]
+        tp = hc.trade2_tp(give)
+        pr = post("/players/trade2/proposal", {"players": [hc.iid(p) for p in give]})
+        assert pr["result"] and len(pr["props"]) == tt["playertrade2_normal"]["3"] + 2, pr
+        assert all(o["grade"] <= hc.trade2_max_grade(tp) and o["price"] == hc.card_price(o["spid"], o["grade"])
+                   and 0.5 * tp <= o["price"] <= 2 * tp for o in pr["props"]), (tp, pr)
+        assert not post("/players/trade2/proposal", {"players": [starter, hc.iid(give[0])]})["result"]  # reserves only
+        n0 = len(team()["players"])
+        assert post("/players/trade2/contract", {"select": 1})["result"] and len(team()["players"]) == n0 - 2
+        assert team()["players"][-1]["spid"] == pr["props"][1]["spid"]
         pt = body(hc.ENDPOINTS["/static/db/PLAYERTRADE"]("", b""))
         assert list(pt["playergrade"]["2"]) == ["1"] and list(pt["playergrade"]["40"])[-1] == "6"
         # --- trade3 (Scout): offers worth about the total value; scouts cool down after use
         st = hc._state(); hc.my_coach(st).pop("scout_used", None); hc._save(st)
         scouts = lambda: {s["key"]: s for s in hc.coach_me(hc._state(), hc._default_slot(hc._state()))["scouters"]}
-        assert set(scouts()) == {"default_A01", "default_B01", "igr", "vip"} and not any(s["lock"] for s in scouts().values())
+        assert set(scouts()) == {"default_A01", "default_B01", "igr", "vip", "event", "vvip"} and not any(s["lock"] for s in scouts().values())
+        assert scouts()["vvip"]["scoutername"] == "STR_SCOUTER_KR_VVIP_A01_NAME" and scouts()["vvip"]["quest"]["require_value"] > 0
+        legend = [{"spid": s, "grade": 1} for s in list(map(int, hc.trade2_special()))[:2]]
+        assert hc.quest_met(scouts()["event"]["quest"], legend) and not hc.quest_met(scouts()["event"]["quest"], legend[:1])
         for s in cheap[:3]:
             assert buy(body(hc.route(f"/transfer/search/{s}")("", b""))[0])["result"]
         give3 = [p for p in team()["players"] if not hc.in_squad(team(), p)][-3:]
@@ -353,7 +462,7 @@ def main():
         # client rating = Enums.calcPosOvr at preferredposition1 (fifaaddict shows the same):
         # Messi 2017 RW 80, Belotti 2017 ST 77, Andre Gomes 2017 CM 65 (fifadb column: 85/82/70)
         assert [hc.card_ovr(s) for s in (88158023, 88208596, 88211575)] == [80, 77, 65]
-        assert list(body(hc.ENDPOINTS["/static/cache/item"]("", json.dumps({"itemids": [pid, "x", 2]}).encode()))) == [str(pid)]
+        assert list(body(hc.ENDPOINTS["/static/cache/item"]("", json.dumps({"itemids": [pid, "x", 9]}).encode()))) == [str(pid)]
         # USE items: buy (free), then "Gunakan" -> /item/<_id>/use per type; a package fills Item saya
         def use(itemid, req=None):
             it = next(i for i in hc.coach_me(hc._state(), hc._default_slot(hc._state()))["items"] if i["itemid"] == itemid)
@@ -455,7 +564,7 @@ def main():
         assert A("daily_grant")["title"].endswith("hari ke-1") and A("daily_grant")["title"].endswith("hari ke-2")
         assert [b["items"] for b in body(hc.ENDPOINTS["/bag"]("", b""))] == [hc.reward_items(r) for r in tbl]
         st = hc._state(); hc.my_coach(st)["scout_used"] = {"vip": time.time()}; hc._save(st)
-        assert [s["lock"] for s in A("summary")["scouts"]] == [False, False, False, False]  # no cooldowns
+        assert [s["lock"] for s in A("summary")["scouts"]] == [False] * len(hc.SCOUTS)  # no cooldowns
         A("scouts_reset"); assert not any(s["lock"] for s in A("summary")["scouts"])
         assert len(A("log", n=5)["lines"]) <= 5
         # HTTP: reads are GETs; a change needs POST + X-FO3-Admin (a cross-site form can't add it)

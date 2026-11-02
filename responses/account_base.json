@@ -15,8 +15,9 @@
   "teammanagement": {
    "playermanagement": {
     "playerpool": {},
-    "enhancement": {},
+    "enhancement": {"v2_5": {}},
     "trade": {},
+    "trade2": {},
     "trade3": {},
     "craft": {}
    },

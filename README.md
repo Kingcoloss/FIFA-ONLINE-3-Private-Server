@@ -51,10 +51,28 @@ Added, passing the tests but not yet checked in the client:
   High x1.5). A failed upgrade from +5 or higher drops one grade.
 - **Top 200 packs**: the extra packs now give their season's 200 best cards ("17 Top 200",
   "07 Top 200", …); **All Season Top 200 +8** gives the 200 best of any season.
+- **Upgrade with a +0 card** (issue #5): a club's own +0 card keeps the target's grade at 100%
+  (+4 with +0 stays +4) and a +10 may take one; the kept card leaves Tim Cadangan when it takes
+  the used card's squad slot.
+- **Upgrade 2.5** (the client's newer Upgrade screen, `features...enhancement.v2_5`):
+  - **upgrade points**: a failed upgrade grants points; "Gunakan poin" spends them for +10%;
+    buy more free in Shop > Paket (Upgrade Point 100 / 500 / 1.000);
+  - **boost items** Enhancement Boost Gold / Silver / Bronze (+15 / +10 / +5%), free in
+    Shop > Dapat dikonsumsi;
+  - a permanent **upgrade event** (+10% for targets +1…+9, `GET /events`);
+  - "Coba pengembalian lagi" gives back a grade lost to a failure, for points.
+- **Tukar v2** (`trade2`): a trade is rated by its value (TP) in 15 levels, each with a maximum
+  offer grade; the tab shows what another manager got "yesterday" at that level; legend-season
+  cards count 1.5x; no daily or value limit. Tukar Scout keeps working beside it.
+- **Tukar Scout**: the client's two other scouts, Scout Khusus (event; legend-season quest) and
+  VVIP Scout (best offers; 1 billion EP quest).
+- **Pack opening glow** follows the card's value: none below 10 million EP, then levels 1-3 from
+  10 million, 100 million and 1 billion EP.
 
 Known issue: after a match the game can run out of its own asset memory while it loads the Cup
-screen or the lobby again (crash in `FifaRNA::Crowd::PlacementData::Seats[]`). Still being
-narrowed down; the custom EA Trax song (stored as raw PCM, ~33 MB) is the current suspect, and
+screen or the lobby again (crash in `FifaRNA::Crowd::PlacementData::Seats[]`). The custom EA Trax
+song (stored as raw PCM, ~33 MB) is the likely cause: without it a short Cup match went back to
+the Cup screen fine (a full match is still to be confirmed).
 `python -I tools/eatrax_song.py --restore` puts the game's own music back.
 
 Not done: online modes (ranked, friendly, King of the Hill), Road to World, league simulation.
