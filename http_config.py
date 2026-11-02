@@ -727,6 +727,14 @@ def _tc_groups(*tiers):
 
 TC_CLUB_GROUPS = _tc_groups((4, 5, 1), (6, 7, 2), (8, 9, 3), (10, 11, 4))
 TC_GROUPS = _tc_groups((5, 6, 1), (7, 8, 2), (9, 11, 3))  # nation, season
+# Upgrade colors (user: "tambah tim color untuk upgrade"): type "grade" = XI cards of at least
+# that grade (availableTeamColor: player.grade >= color.grade; native 0x94EB70 reads color.grade
+# as an int, no teamid). Names are the client's own; the boosts are ours.
+TC_GRADE = (  # (teamcolorid, grade, name key, boostgroups)
+    (10002, 2, "TEAMCOLOR_ATTRIBUTES_EVOLVE24", TC_GROUPS),
+    (10005, 5, "TEAMCOLOR_ATTRIBUTES_EVOLVE10011", _tc_groups((5, 6, 2), (7, 8, 3), (9, 11, 4))),
+    (10008, 8, "TEAMCOLOR_ATTRIBUTES_EVOLVE810", _tc_groups((5, 6, 3), (7, 8, 4), (9, 11, 5))),
+)
 
 
 def tc_seasons():
@@ -747,9 +755,11 @@ def tc_colors():
     # a special color's teamid is a STRING: TeamColorController copies teamid to __teamid and hands
     # the list to native (setTeamColorList); at half time native re-checks the colors (0x94EB70) and
     # reads a special one's __teamid with asCString -- a number there crashed every second half.
-    return [club, nation] + [{"teamcolorid": TC_SEASON + codes[0], "type": "special", "teamid": str(TC_SEASON + codes[0]),
-                              "name": f"Season {label}", "description": f"Pemain season {label}", "boostgroups": TC_GROUPS}
-                             for label, codes in tc_seasons()]
+    grades = [{"teamcolorid": cid, "type": "grade", "grade": g, "teamid": -1, "name": name,
+               "description": f"Pemain grade +{g} ke atas", "boostgroups": groups} for cid, g, name, groups in TC_GRADE]
+    return [club, nation] + grades + [{"teamcolorid": TC_SEASON + codes[0], "type": "special", "teamid": str(TC_SEASON + codes[0]),
+                                       "name": f"Season {label}", "description": f"Pemain season {label}", "boostgroups": TC_GROUPS}
+                                      for label, codes in tc_seasons()]
 
 
 def ep_teamcolor(query, body):
@@ -800,7 +810,41 @@ def active_teamcolors(team):
         if i is not None and teamid > 0:
             # season (special) colors carry their teamid as a string, like tc_colors()
             out.append({"teamcolorid": cid, "boostindex": i, "teamid": str(teamid) if cid >= TC_SEASON else teamid})
+    grade = {iid(p): grade_of(p) for p in team["players"]}
+    xi = [grade.get(str(p.get("id") or p["spid"]), 0) for p in team["squad"]["positions"] if p.get("pos", POS_SUB) < POS_SUB]
+    for cid, g, _, groups in TC_GRADE:
+        n = sum(x >= g for x in xi)
+        i = next((i for i, b in enumerate(groups) if b["count_min"] <= n <= b["count_max"]), None)
+        if i is not None:
+            out.append({"teamcolorid": cid, "boostindex": i, "teamid": -1})
     return out
+
+
+def fill_squad(sq, players):
+    """11 starters + 7 subs (Enums.PLAYERPOSITION "SUB"; without a bench the squad screen says
+    "Tidak cukup pemain"). A hole in the XI (issue #7: an upgrade of two starters of one
+    player) takes the best sub; the bench is topped up with the best Tim inti cards. One card
+    per player in the 18, like the client (PLAYERLIST_CHANGEPLAYER_FAIL_POPUP_INFO_DUPLICATIONPLAYER).
+    ponytail: by rating, not by position; the manager re-arranges in Formasi."""
+    pos = sq["positions"]
+    card = {p["id"]: p for p in players}
+    best = lambda ps: sorted(ps, key=lambda p: -player_ovr(card.get(p["id"], p)))
+    taken = {int(s["spid"]) % 1000000 for s in pos}
+    spare = []
+    for p in best(p for p in players if p.get("state") == "first"):  # Tim inti only
+        if int(p["spid"]) % 1000000 not in taken:
+            taken.add(int(p["spid"]) % 1000000)
+            spare.append({"spid": p["spid"], "pos": POS_SUB, "id": p["id"]})
+    forms = formation_table()
+    shape = next((f["positions"] for f in forms["common"] + list(forms["teams"].values())
+                  if f["formationid"] == sq.get("formation")), [f[0] for f in gen_teams.FORMATION])
+    used = {s["pos"] for s in pos if s["pos"] < POS_SUB}
+    holes = [x for x in shape if x not in used][:max(0, 11 - len(used))]
+    for hole, s in zip(holes, best(s for s in pos if s["pos"] == POS_SUB) + spare):
+        s["pos"] = hole
+        if s not in pos:
+            pos.append(s)
+    pos += [s for s in spare if s not in pos][:max(0, 7 - sum(s["pos"] == POS_SUB for s in pos))]
 
 
 def owned_team(raw):
@@ -817,19 +861,16 @@ def owned_team(raw):
     # levelinfo.level (FirstTeamInfo.updateAvgInfo average level). price = EP market value.
     # state "first" = Tim inti; no state = Tim Cadangan (Enums.getPlayerState: undefined ->
     # SECONDTEAM), set by /player/<id>/move/secondteam (stored as team2); Tukar Scout only
-    # lists Tim Cadangan cards.
-    team["players"] = [{**({} if p.get("team2") else {"state": "first"}), "grade": 0, "life": 100,
+    # lists Tim Cadangan cards. A card in the 18 is always Tim inti (Formasi hides the others;
+    # a state.json from before 5ffbfd8 can hold such a card, issue #7).
+    in18 = {str(s.get("id") or s["spid"]) for s in team["squad"]["positions"]}
+    team["players"] = [{**({} if p.get("team2") and iid(p) not in in18 else {"state": "first"}), "grade": 0, "life": 100,
                         **{k: v for k, v in p.items() if k != "team2"}, "levelinfo": player_levelinfo(p),
                         "_id": iid(p), "id": iid(p), "price": card_price(p["spid"], grade_of(p))}
                        for p in team["players"]]
     sq = dict(team["squad"])
     sq["positions"] = [dict(p, id=str(p.get("id") or p["spid"])) for p in sq["positions"]]
-    if not any(p["pos"] == POS_SUB for p in sq["positions"]):
-        # 11 starters + 7 subs (Enums.PLAYERPOSITION "SUB"); without a bench the squad screen
-        # says "Tidak cukup pemain". Best remaining players by rating.
-        used = {p["id"] for p in sq["positions"]}
-        bench = sorted((p for p in team["players"] if p["id"] not in used), key=lambda p: -player_ovr(p))
-        sq["positions"] += [{"spid": p["spid"], "pos": POS_SUB, "id": p["id"]} for p in bench[:7]]
+    fill_squad(sq, team["players"])
     sq["captain"] = str(sq["captain"]) if sq.get("captain") else ""
     sq["kickers"] = [str(k) for k in sq.get("kickers", [])]
     team["squad"] = sq
@@ -915,7 +956,12 @@ def coach_me(st, slot):
         "items": coach_items(st, slot), "matchstats": [], "scouters": coach_scouters(st, slot),
         "cups": [{"metaid": c["metaid"], "cupid": c["_id"]} for c in (st.get("cups") or {}).values()],
         # SquadScreenHandler: formation combobox reads /coach/me?path=formations
-        "formations": team["formations"], "teamsquadlist": [],
+        "formations": team["formations"],
+        # Formasi opens preset squad team.presetidx (STATICVALUES has `limit`): generateCaptainFrom
+        # CoachInfo copies THIS coach-level teamsquadlist into its team and SquadUtil.selectPresetSquad
+        # reads .preset[i] {formation, positions, kickers, captain}; none (was []) = "Tidak cukup
+        # pemain". The one preset is the squad itself; the client re-fills holes / bench and saves it.
+        "teamsquadlist": {"preset": [team["squad"]]},
     }
 
 
@@ -2308,7 +2354,9 @@ TRADE3_STATIC = {  # GET /trade3/staticvalues -> ScouterController.staticvalues
 LEGEND_SEASONS = (93, 30, 27, 71, 51, 61, 89, 48, 31, 33)  # WL UL EL ML TL VL CL MUL CEL
 SCOUTS = (  # (key = scoutid, string id, cooldown s, offer value x total, quest); always PC + VIP here
     # no cooldowns (user: "buat scout tidak ada reset"; were 1 day / 1 hour / 1 hour)
-    ("default_A01", "STR_SCOUTER_KR_DEFAULT_A01", 0, (0.8, 1.1), None),
+    # At most 5: the list shows 5 rows and, once it scrolls, updateQuestAchievePossibility lights
+    # getRendererAt(selected index) without the scroll offset (another scout's or none). Scout
+    # Amatir ("default_A01", no quest, 0.8-1.1) left for the two below; Profesional covers it.
     ("default_B01", "STR_SCOUTER_KR_DEFAULT_B01", 0, (0.9, 1.3), {"require_value": 100000}),
     ("igr", "STR_SCOUTER_KR_IGR_A01", 0, (0.9, 1.4), {"require_grade": 2, "require_grade_count": 2}),
     ("vip", "STR_SCOUTER_KR_VIP_A01", 0, (1.0, 1.5), {"require_season": "88", "require_season_count": 2}),

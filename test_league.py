@@ -81,6 +81,16 @@ def main():
         assert all(isinstance(c["teamid"], str) for c in active if c["teamcolorid"] >= hc.TC_SEASON)
         assert hc.match_side(st["teams"]["0"], 241, user={"id": "me"})["team"]["teamcolors"] == active
         assert hc.match_side(st["teams"]["0"], 241)["team"]["teamcolors"] == []
+        # upgrade colors (type "grade"): 7 starters at +5 or higher meet +2 (index 1) and +5 (index 1)
+        grades = [c for c in tc["teamColors"] if c["type"] == "grade"]
+        assert [(c["grade"], c["name"]) for c in grades] == [(g, n) for _, g, n, _ in hc.TC_GRADE]
+        assert not {c["teamcolorid"] for c in grades} & {c["teamcolorid"] for c in active}  # +0 club cards
+        t0 = json.loads(json.dumps(st["teams"]["0"]))
+        xi_ids = [str(s.get("id") or s["spid"]) for s in t0["squad"]["positions"] if s["pos"] < hc.POS_SUB]
+        for p in t0["players"]:
+            p["grade"] = 6 if hc.iid(p) in xi_ids[:7] else p.get("grade", 0)
+        got = {c["teamcolorid"]: c["boostindex"] for c in hc.active_teamcolors(hc.owned_team(t0)) if c["teamid"] == -1}
+        assert got == {10002: 1, 10005: 1}, got
         res = next(p for p in st["teams"]["0"]["players"] if not hc.in_squad(st["teams"]["0"], p))
         assert not body(hc.ENDPOINTS["/transfer/offer"]("", json.dumps({"playerobjectid": hc.iid(res), "price": 1000}).encode()))["result"]
         # club picker ("Tim lain"): nation -> league -> club lists agree; a club without a starter
@@ -243,6 +253,25 @@ def main():
         assert up["success"] and up["grade"] == 4 and up["attribPlus"] == 0, up
         kept = next(p for p in team()["players"] if hc.iid(p) == c4)
         assert not kept.get("team2") and hc.in_squad(team(), kept) and b0 not in {hc.iid(p) for p in team()["players"]}
+        # issue #7: upgrading two starters of one player (a bench filled by the server could
+        # hold a second card) left a hole in the XI; the shown squad fills it from the bench,
+        # tops the bench up to 7 from Tim inti, and keeps one card per player in the 18
+        st = hc._state(); t = st["teams"][str(hc._default_slot(st))]
+        xi = [s for s in t["squad"]["positions"] if s["pos"] < hc.POS_SUB]
+        keep = next(p for p in t["players"] if hc.iid(p) == str(xi[-1].get("id") or xi[-1]["spid"]))
+        twin = hc.add_player(t, keep["spid"], 1)
+        xi[-2].update(id=hc.iid(twin), spid=twin["spid"])  # both cards in the XI
+        hc._save(st)
+        assert body(hc.route(f"/player/{hc.iid(keep)}/enhance/{hc.iid(twin)}")("", b"{}"))["result"]
+        assert sum(s["pos"] < hc.POS_SUB for s in team()["squad"]["positions"]) == 10  # the hole
+        shown = hc.coach_me(hc._state(), 0)["team"]["squad"]["positions"]
+        players = [int(s["spid"]) % 1000000 for s in shown]
+        assert sum(s["pos"] < hc.POS_SUB for s in shown) == 11 and len(set(players)) == len(players) == 18, shown
+        assert {s["pos"] for s in shown if s["pos"] < hc.POS_SUB} == {s["pos"] for s in xi}
+        # Formasi opens preset team.presetidx of the COACH-level teamsquadlist (none = "Tidak cukup pemain")
+        me = hc.coach_me(hc._state(), 0); me_team = me["team"]
+        preset = me["teamsquadlist"]["preset"][me_team["presetidx"]]
+        assert preset["positions"] == me_team["squad"]["positions"] and preset["formation"] == me_team["squad"]["formation"]
         st = hc._state(); t = st["teams"][str(hc._default_slot(st))]
         hc.remove_player(t, next(p for p in t["players"] if hc.iid(p) == c10)); hc._save(st)
         # --- Upgrade 2.5: the tab, upgrade points (money.es) and boost items
@@ -383,7 +412,7 @@ def main():
         # --- trade3 (Scout): offers worth about the total value; scouts cool down after use
         st = hc._state(); hc.my_coach(st).pop("scout_used", None); hc._save(st)
         scouts = lambda: {s["key"]: s for s in hc.coach_me(hc._state(), hc._default_slot(hc._state()))["scouters"]}
-        assert set(scouts()) == {"default_A01", "default_B01", "igr", "vip", "event", "vvip"} and not any(s["lock"] for s in scouts().values())
+        assert set(scouts()) == {"default_B01", "igr", "vip", "event", "vvip"} and len(hc.SCOUTS) <= 5 and not any(s["lock"] for s in scouts().values())
         assert scouts()["vvip"]["scoutername"] == "STR_SCOUTER_KR_VVIP_A01_NAME" and scouts()["vvip"]["quest"]["require_value"] > 0
         legend = [{"spid": s, "grade": 1} for s in list(map(int, hc.trade2_special()))[:2]]
         assert hc.quest_met(scouts()["event"]["quest"], legend) and not hc.quest_met(scouts()["event"]["quest"], legend[:1])
@@ -409,7 +438,7 @@ def main():
         pr = post("/trade3/proposal", {"id": "vip", "slotnum": 3, "playerids": pids})
         assert pr["result"]
         stale = [dict(pids[0], price=pids[0]["price"] + 1)] + pids[1:]
-        assert post("/trade3/proposal", {"id": "default_A01", "slotnum": 0, "playerids": stale})["reason"] == "TRADE3_NOTICE_PLAYERPRICE03"
+        assert post("/trade3/proposal", {"id": "default_B01", "slotnum": 0, "playerids": stale})["reason"] == "TRADE3_NOTICE_PLAYERPRICE03"
         n0 = len(team()["players"])
         assert post("/trade3/contract", {"slotnum": 3, "selectnum": 0})["result"] and len(team()["players"]) == n0 - 2
         assert team()["players"][-1]["spid"] == pr["props"][0]["spid"]

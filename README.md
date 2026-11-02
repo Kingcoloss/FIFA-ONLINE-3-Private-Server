@@ -65,7 +65,13 @@ Added, passing the tests but not yet checked in the client:
   offer grade; the tab shows what another manager got "yesterday" at that level; legend-season
   cards count 1.5x; no daily or value limit. Tukar Scout keeps working beside it.
 - **Tukar Scout**: the client's two other scouts, Scout Khusus (event; legend-season quest) and
-  VVIP Scout (best offers; 1 billion EP quest).
+  VVIP Scout (best offers; 1 billion EP quest). Scout Amatir is gone so the list fits its 5 rows
+  (once it scrolled, a met quest lit another scout's card or none).
+- **Upgrade team colors** (the client's "Upgraded Team"): starters of grade +2, +5 or +8 and
+  higher; 5-6 / 7-8 / 9-11 of them give +1 / +2 / +3, +2 / +3 / +4 and +3 / +4 / +5 OVR.
+- **Formasi** no longer opens with "Tidak cukup pemain" (it loads preset squad 1, which the
+  server never sent). A hole in the XI (issue #7, an upgrade of two starters of one player) is
+  filled from the bench, and the bench never holds a second card of a player.
 - **Pack opening glow** follows the card's value: none below 10 million EP, then levels 1-3 from
   10 million, 100 million and 1 billion EP.
 
