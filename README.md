@@ -28,7 +28,8 @@ Tested in the real client (Indonesian UI):
 - Formation list (the club's own + the game's 33 common formations, read from the client's
   formations table) and manager / player levels: EXP after every match, player LV.1-23
   (+1 to every attribute per level), manager LV.1-100.
-- Game sound and the EA Trax menu music; `tools/eatrax_song.py` puts your own song first in it.
+- Game sound and the EA Trax menu music. `tools/eatrax_song.py` puts your own song first in it,
+  but the game then crashes after matches (see the known issue below).
 - Admin web page on http://127.0.0.1:8088/ (EP, players, packs, gifts, daily rewards, log).
 - Real club kits in matches (kit id = `teamid << 5 | type`; the old `<< 10` gave a checkerboard).
 - Matches play through the second half with **team color** on (season colors used to crash it at
@@ -75,11 +76,13 @@ Added, passing the tests but not yet checked in the client:
 - **Pack opening glow** follows the card's value: none below 10 million EP, then levels 1-3 from
   10 million, 100 million and 1 billion EP.
 
-Known issue: after a match the game can run out of its own asset memory while it loads the Cup
-screen or the lobby again (crash in `FifaRNA::Crowd::PlacementData::Seats[]`). The custom EA Trax
-song (stored as raw PCM, ~33 MB) is the likely cause: without it a short Cup match went back to
-the Cup screen fine (a full match is still to be confirmed).
-`python -I tools/eatrax_song.py --restore` puts the game's own music back.
+Known issue, not solved: with a custom EA Trax song installed by `tools/eatrax_song.py` the game
+runs out of its RAssets memory pool after every match, while the Cup screen or the lobby loads
+again (crash in `FifaRNA::Crowd::PlacementData::Seats[]`); with the game's own music it does not.
+It crashed the same way with the song as raw PCM (37.7 MB), as EALayer3 (6.5 MB,
+`tools/re/ealayer3.py`) added as a 10th track, and as EALayer3 replacing TrackID 1 with the music
+bank smaller than the shipped one, so the size of the music is not the cause. Keep the game's own
+music: `python -I tools/eatrax_song.py --restore` puts it back.
 
 Not done: online modes (ranked, friendly, King of the Hill), Road to World, league simulation.
 
@@ -126,7 +129,7 @@ Not done: online modes (ranked, friendly, King of the Hill), Road to World, leag
 | `responses/` | Per-endpoint JSON bodies (`/a/b/c` → `responses/a_b_c.json`, re-read on every request). Shapes come from the client's AS3 code. |
 | `extract_fifadb.py` | Client player DB (`data_0.big`, RefPack + Blowfish) → SQLite. |
 | `gen_teams.py` | Starter squads and club summaries from `gamedata/fifadb.sqlite`. |
-| `tools/eatrax_song.py` | Puts a song first in the game's EA Trax menu music (edits `data_0.big` / `data_1.big` by appending; `--restore` puts the originals back). |
+| `tools/eatrax_song.py` | Puts a song first in the game's EA Trax menu music as EALayer3, replacing TrackID 1 (edits `data_0.big` / `data_1.big` by appending; `--restore` puts the originals back). Crashes the game after matches, see the known issue. |
 | `tools/fa_sync.py` | fifaaddict.com price sync. |
 | `tools/fa_faces.py` | Adds the player mini faces missing from the client's cache (fifaaddict serves the same 128x128 PNGs); `--crests` adds the missing club crests (most clubs have none in the cache, so the game shows a default one). Resumable, `--remove` undoes it. |
 | `tools/re/` | Reverse-engineering helpers: `bigdir.py` (BIg4 archive tables), `refpack.py` (RefPack codec), `eadb.py` (EA "DB" database tables), `abc*.py` (AS3 bytecode parser / grep / schema miner), `gfxx.py` (UI SWFs), `memgrab.py`, `gamectl.ps1` (drive the client window for tests). |
