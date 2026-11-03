@@ -78,7 +78,21 @@ def main():
         # a season (special) color's teamid must be a string: native reads it with asCString at
         # half time (a number crashed every second half)
         assert all(isinstance(c["teamid"], str) for c in tc["teamColors"] if c["type"] == "special")
-        assert all(isinstance(c["teamid"], str) for c in active if c["teamcolorid"] >= hc.TC_SEASON)
+        kind = {c["teamcolorid"]: c["type"] for c in tc["teamColors"]}
+        assert len(kind) == len(tc["teamColors"])  # unique ids
+        assert all(isinstance(c["teamid"], str) == (kind[c["teamcolorid"]] == "special") for c in active), active
+        # the client's named colors (user: "pakai semua team color yang belum masuk"): a Barcelona XI
+        # also meets "Barcelona" (TEAM2: Single team's tiers + MF agility +3) and "Spanyol" for its
+        # Spaniards; every color the client names is sent except the left-out ones
+        named = {c["teamcolorid"]: c for c in tc["teamColors"]}
+        assert {"teamcolorid": 2, "boostindex": 3, "teamid": 241} in active, active
+        assert named[2]["boostgroups"][3]["boosts"] == [{"type": "ovr", "amount": 4}, {"type": "agility", "amount": 3, "target": "mf"}]
+        assert named[50091]["name"] == "TEAMCOLOR_ATTRIBUTES_TEAM18" and named[50091]["boostgroups"][2]["boosts"][0]["amount"] == 5
+        assert {1, 16, 101, 130, 20, 39, 20002, 20030, 20043, 20071, 40001, 3064} <= set(named)
+        assert named[50093]["name"] == "TEAMCOLOR_ATTRIBUTES_TEAM100"  # World Legend: a season color, the client's name
+        msn = named[20002]
+        assert [(g["count_min"], g["count_max"]) for g in msn["boostgroups"]] == [(3, 11)]
+        assert all(c["teamcolorid"] < 70000 and c["teamcolorid"] not in (20055, 20056, 20057, 20058) for c in tc["teamColors"])
         assert hc.match_side(st["teams"]["0"], 241, user={"id": "me"})["team"]["teamcolors"] == active
         assert hc.match_side(st["teams"]["0"], 241)["team"]["teamcolors"] == []
         # upgrade colors (type "grade"): 7 starters at +5 or higher meet +2 (index 1) and +5 (index 1)
@@ -91,6 +105,11 @@ def main():
             p["grade"] = 6 if hc.iid(p) in xi_ids[:7] else p.get("grade", 0)
         got = {c["teamcolorid"]: c["boostindex"] for c in hc.active_teamcolors(hc.owned_team(t0)) if c["teamid"] == -1}
         assert got == {10002: 1, 10005: 1}, got
+        # single-grade colors need all 11 starters: the whole XI at +8 meets "+3 club" … "+8 Golden passion"
+        for p in t0["players"]:
+            p["grade"] = 8 if hc.iid(p) in xi_ids else p.get("grade", 0)
+        got = {c["teamcolorid"]: c["boostindex"] for c in hc.active_teamcolors(hc.owned_team(t0)) if c["teamid"] == -1}
+        assert got == {10002: 2, 10005: 2, 10008: 2, **{10100 + g: 0 for g in range(3, 9)}}, got
         res = next(p for p in st["teams"]["0"]["players"] if not hc.in_squad(st["teams"]["0"], p))
         assert not body(hc.ENDPOINTS["/transfer/offer"]("", json.dumps({"playerobjectid": hc.iid(res), "price": 1000}).encode()))["result"]
         # club picker ("Tim lain"): nation -> league -> club lists agree; a club without a starter
@@ -268,6 +287,15 @@ def main():
         players = [int(s["spid"]) % 1000000 for s in shown]
         assert sum(s["pos"] < hc.POS_SUB for s in shown) == 11 and len(set(players)) == len(players) == 18, shown
         assert {s["pos"] for s in shown if s["pos"] < hc.POS_SUB} == {s["pos"] for s in xi}
+        # every starter carries starting [attacking, defensive, x, y]: without it the client moves
+        # him to the bench (issue #7 again: the filled hole and a Formasi save had none)
+        assert all(len(s.get("starting") or []) == 4 for s in shown if s["pos"] < hc.POS_SUB), shown
+        st = hc._state(); t = st["teams"][str(hc._default_slot(st))]
+        for s in t["squad"]["positions"][:2]:
+            s.pop("starting", None)
+        hc._save(st)
+        shown = hc.coach_me(hc._state(), 0)["team"]["squad"]["positions"]
+        assert all(len(s.get("starting") or []) == 4 for s in shown if s["pos"] < hc.POS_SUB), shown
         # Formasi opens preset team.presetidx of the COACH-level teamsquadlist (none = "Tidak cukup pemain")
         me = hc.coach_me(hc._state(), 0); me_team = me["team"]
         preset = me["teamsquadlist"]["preset"][me_team["presetidx"]]

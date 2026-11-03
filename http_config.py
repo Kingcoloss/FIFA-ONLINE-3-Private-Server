@@ -735,6 +735,13 @@ TC_GRADE = (  # (teamcolorid, grade, name key, boostgroups)
     (10005, 5, "TEAMCOLOR_ATTRIBUTES_EVOLVE10011", _tc_groups((5, 6, 2), (7, 8, 3), (9, 11, 4))),
     (10008, 8, "TEAMCOLOR_ATTRIBUTES_EVOLVE810", _tc_groups((5, 6, 3), (7, 8, 4), (9, 11, 5))),
 )
+# The client's single-grade colors (user: "Grade +3…+10 dulu", then "Bonus kecilkan dulu"):
+# "+3 club" … "+10 Golden summit", all 11 starters at that grade or higher; one bonus per name
+# tier (club / silver / Golden passion / Golden summit). A player gets only his best grade color
+# (ChooseTeamColorBoostsPerPlayer keeps one __gradeTeamColor, added to his best club / nation /
+# season color), so each tier tops the range color above it at 9-11 starters (+3 / +4 / +5).
+TC_GRADE += tuple((10100 + g, g, f"TEAMCOLOR_ATTRIBUTES_EVOLVE{g}", _tc_groups((11, 11, n)))
+                  for g, n in ((3, 4), (4, 4), (5, 5), (6, 5), (7, 5), (8, 6), (9, 6), (10, 7)))
 
 
 def tc_seasons():
@@ -747,32 +754,203 @@ def tc_season_of(code):
     return next((TC_SEASON + codes[0] for _, codes in tc_seasons() if code in codes), None)
 
 
+# The client's own named colors (user: "pakai semua team color yang belum masuk"): names are its
+# LANGUAGESTRING TEAMCOLOR_ATTRIBUTES_TEAM<id>. Their boosts and player lists were server data
+# and are gone; what the client still has is one line per color, TOOLTIP<id>, so each named
+# color gets our base tiers plus that boost and beats the generic color it overlaps (a player
+# gets his best club / nation / special color: getBoostStatPoint sums the boosts that fit his
+# position, an OVR one counting once per stat). A boost {type, amount, target} adds amount to that
+# stat (type "ovr": every stat) of players in that position group (target fw/mf/df/gk, none = all;
+# ApplyTeamColorBoostStat); the native half-time recheck (0x94EB70) reads only type, teamid,
+# season, grade and __teamid, never boosts. Boosts are (target, stat, amount); "Grade +N" and
+# "{0} +{1}" tooltips (stat not known) count as OVR. Left out: the [Test] colors 70000-70015,
+# "Upgraded team (+2~7)" (the same as +2~4), "14 WC Single Nation" (the 14 WC nations cover it)
+# and the newer copies of Atletico, Roma, Napoli and Monaco (20055-20058).
+TC_NAMED_CLUBS = (  # (TEAM<id>, club teamid; a player counts for his club now or in his history)
+    (1, 243, ("fw", "sprintspeed", 2)), (2, 241, ("mf", "agility", 3)), (3, 9, ("fw", "balance", 1)),
+    (4, 10, ("fw", "longpassing", 2)), (5, 11, ("fw", "reactions", 2)), (6, 1, ("mf", "stamina", 2)),
+    (7, 5, ("mf", "dribbling", 1)), (8, 18, ("mf", "acceleration", 2)), (9, 22, ("mf", "positioning", 2)),
+    (10, 32, ("fw", "sprintspeed", 8)), (11, 21, ("mf", "finishing", 2)), (12, 47, ("fw", "positioning", 1)),
+    (13, 45, ("df", "stamina", 2)), (14, 44, ("fw", "dribbling", 1)), (15, 73, ("fw", "ballcontrol", 2)),
+    (16, 982, ("mf", "stamina", 12)), (43, 240, ("", "ovr", 1)), (44, 52, ("", "ovr", 1)),
+    (45, 236, ("", "ballcontrol", 3)), (46, 69, ("", "stamina", 2)), (47, 110374, ("", "positioning", 3)),
+    (48, 48, ("", "dribbling", 2)), (146, 981, ("", "ovr", 1)), (885, 110955, ("", "headingaccuracy", 4)),
+    (20054, 112172, ("", "ovr", 1)), (20059, 72, ("", "ovr", 1)), (20060, 1477, ("", "ovr", 1)),
+)
+TC_NAMED_NATIONS = (  # (TEAM<id>, nationality)
+    (101, 45, ("mf", "ballcontrol", 2)), (102, 21, ("fw", "positioning", 3)), (103, 54, ("fw", "dribbling", 2)),
+    (104, 38, ("fw", "dribbling", 2)), (105, 52, ("fw", "balance", 2)), (106, 60, ("fw", "agility", 2)),
+    (107, 56, ("mf", "shotpower", 3)), (108, 27, ("mf", "shortpassing", 3)), (109, 14, ("mf", "stamina", 1)),
+    (110, 7, ("mf", "ballcontrol", 2)), (111, 95, ("fw", "jumping", 2)), (112, 34, ("fw", "reactions", 1)),
+    (113, 18, ("fw", "positioning", 2)), (114, 10, ("fw", "headingaccuracy", 2)), (115, 40, ("fw", "ballcontrol", 2)),
+    (116, 83, ("fw", "reactions", 2)), (117, 108, ("mf", "reactions", 2)), (118, 117, ("mf", "shortpassing", 2)),
+    (119, 167, ("mf", "aggression", 2)), (120, 163, ("mf", "shortpassing", 2)), (121, 195, ("fw", "positioning", 2)),
+    (122, 55, ("fw", "sprintspeed", 2)), (123, 49, ("fw", "finishing", 1)), (124, 50, ("fw", "reactions", 2)),
+    (125, 46, ("fw", "shotpower", 2)), (126, 13, ("fw", "headingaccuracy", 2)), (127, 51, ("fw", "jumping", 2)),
+    (128, 103, ("fw", "acceleration", 2)), (129, 133, ("fw", "sprintspeed", 1)), (130, 12, ("fw", "positioning", 2)),
+)
+# season colors the client names: card season code -> (TEAM<id>, boost); a season color keeps at
+# least its +3 (2002 Legends, '16 Europe/Copa and EU Legends say +1)
+TC_SEASON_NAMES = {91: (18, ("", "ovr", 5)), 93: (100, ("", "ovr", 3)), 95: (19, ("", "ovr", 3)),
+                   77: (42, ("", "reactions", 1)), 65: (140, ("", "ovr", 3)), 53: (141, ("", "ovr", 3)),
+                   47: (142, ("", "ovr", 3)), 63: (143, ("", "ovr", 3)), 69: (137, ("", "ovr", 3)),
+                   67: (138, ("", "ovr", 3)), 35: (145, ("", "ovr", 3)), 27: (20044, ("", "ovr", 3))}
+TC_LEGENDS = (93, 30, 27, 71, 51, 61, 89, 48, 55, 49)  # WL UL EL ML TL VL CL MUL MUA TCO92
+TC_YEARS = (6, 7, 8, 9, 10, 11, 14, 15, 16, 88)
+
+
+def _in(ids):
+    return ",".join(map(str, ids))
+
+
+def _S(*codes):  # card season
+    return f"p.spid / 1000000 IN ({_in(codes)})"
+
+
+def _CLUB(*ids):  # club now or in the player's history
+    return f"(p.teamid IN ({_in(ids)}) OR p.playerid IN (SELECT playerid FROM playerhistory WHERE teamid IN ({_in(ids)})))"
+
+
+def _PIDS(*ids):  # these players, any card
+    return f"p.playerid IN ({_in(ids)})"
+
+
+_SPECIAL = f"p.spid >= 1000000 AND p.spid / 1000000 NOT IN ({_in(TC_YEARS + TC_LEGENDS)})"  # special seasons
+
+
+_TC_OVR = ("", "ovr", 3)
+TC_NAMED_SPECIALS = (  # (TEAM<id>, description, SQL condition on players p, boost, best N Market cards)
+    *((tid, "Pemain 14 WC dari negara ini", f"{_S(77)} AND p.nationality = {n}", b, None) for tid, n, b in (
+        (20, 45, ("", "ovr", 2)), (21, 21, ("", "ovr", 3)), (22, 54, ("", "ballcontrol", 2)),
+        (23, 38, ("", "positioning", 2)), (24, 52, ("", "dribbling", 2)), (25, 60, ("fw", "longshots", 3)),
+        (26, 56, ("", "strength", 1)), (27, 27, ("", "agility", 2)), (28, 14, ("", "longpassing", 2)),
+        (29, 7, ("", "shortpassing", 2)), (30, 95, ("mf", "stamina", 2)), (31, 34, ("", "ballcontrol", 2)),
+        (32, 18, ("", "strength", 1)), (33, 10, ("fw", "acceleration", 2)), (34, 40, ("", "positioning", 2)),
+        (35, 83, ("", "headingaccuracy", 2)), (36, 108, ("", "marking", 3)), (37, 117, ("", "reactions", 2)),
+        (38, 167, ("", "reactions", 2)), (39, 163, ("", "shortpassing", 2)))),
+    *((tid, "50 kartu terbaik negara ini", f"p.nationality = {n}", _TC_OVR, 50) for tid, n in (
+        (20007, 21), (20008, 45), (20009, 18), (20010, 27), (20011, 14), (20012, 54), (20013, 52),
+        (20014, 7), (20015, 38), (20016, 56), (20017, 60))),
+    *((tid, "Pemain EC / Copa dari negara ini", f"{_S(35, 24)} AND p.nationality = {n}", _TC_OVR, None) for tid, n in (
+        (20018, 21), (20019, 45), (20020, 18), (20021, 27), (20022, 14), (20023, 54), (20024, 52),
+        (20025, 7), (20026, 38), (20027, 56))),
+    *((tid, "Pemain season '10 klub ini", f"{_S(10)} AND {_CLUB(club)}", b, None) for tid, club, b in (
+        (133, 241, ("fw", "positioning", 5)), (134, 47, ("fw", "sprintspeed", 5)),
+        (135, 22, ("mf", "aggression", 5)), (136, 240, ("mf", "vision", 5)))),
+    (132, "Pemain season spesial (bukan tahunan, bukan legenda)", _SPECIAL, ("", "ovr", 2), None),
+    (139, "Juara liga 2016/17 (season '17)", f"{_S(88)} AND p.teamid IN (5, 243, 21, 45, 69)", ("", "ovr", 3), None),
+    (41, "30 kartu terbaik", "1", ("", "shortpassing", 2), 30),
+    (2014, "Kartu OVR 85 ke atas", f"{POSOVR} >= 85", ("", "ovr", 4), None),
+    (886, "Pemain legenda dari China", f"p.nationality = 155 AND {_S(*TC_LEGENDS)}", ("", "ovr", 3), None),
+    (20002, "Messi, Suarez, Neymar", _PIDS(158023, 176580, 190871), _TC_OVR, None),
+    (20003, "Bale, Benzema, Cristiano Ronaldo", _PIDS(173731, 165153, 20801), _TC_OVR, None),
+    (3059, "Messi dan Cristiano Ronaldo", _PIDS(158023, 20801), _TC_OVR, None),
+    (3060, "Ramos, Pepe, Marcelo, Carvajal, Varane, Navas", _PIDS(155862, 120533, 176676, 204963, 201535, 193041), _TC_OVR, None),
+    (3058, "Leicester City juara 2015/16", _PIDS(208830, 204485, 215914, 186132, 136113, 137785, 163587, 183130,
+                                                 194365, 169600, 139313), _TC_OVR, None),
+    (3064, "Pemain AC Milan dan Inter", _CLUB(47, 44), _TC_OVR, None),
+    (34024, "Pemain AC Milan (rossoneri)", _CLUB(47), _TC_OVR, None),
+    (20030, "Arsenal 2003/04 tak terkalahkan", _PIDS(805, 388, 119152, 34079, 6975, 1419, 1605, 4000, 1625,
+                                                      140526, 111093), _TC_OVR, None),
+    (20031, "Shevchenko dan Kaka", _PIDS(13128, 138449), _TC_OVR, None),
+    (20032, "Terry, Lampard, Drogba, Cech", _PIDS(13732, 5471, 31432, 48940), _TC_OVR, None),
+    (20033, "Figo, Ronaldo, Beckham, Raul, Roberto Carlos, Casillas", _PIDS(5589, 37576, 250, 45661, 1040, 5479), _TC_OVR, None),
+    (20028, "Pemain season '17", _S(88), _TC_OVR, None),
+    (20029, "Pemain season apa saja", "1", ("", "ovr", 1), None),
+    (20043, "Pemain season legenda", _S(*TC_LEGENDS), ("", "ovr", 4), None),
+    (40001, "50 kartu terbaik", "1", _TC_OVR, 50),
+    (40002, "100 kartu terbaik", "1", _TC_OVR, 100),
+    (40003, "100 kartu terbaik season spesial", _SPECIAL, _TC_OVR, 100),
+    (40004, "100 kartu terbaik season '17", _S(88), _TC_OVR, 100),
+    (40005, "100 kartu terbaik season legenda", _S(*TC_LEGENDS), _TC_OVR, 100),
+    (20063, "Pemain Brasil skill 4 bintang ke atas", "p.nationality = 54 AND p.skillmoves >= 3", ("", "ballcontrol", 5), None),
+    (20064, "Short pass dan vision 85 ke atas", "p.shortpassing >= 85 AND p.vision >= 85", ("", "shortpassing", 5), None),
+    (20065, "Pemain Real Madrid dan Barcelona", _CLUB(243, 241), ("", "dribbling", 5), None),
+    (20066, "Tackle 85 ke atas", "p.standingtackle >= 85", ("", "aggression", 5), None),
+    (20067, "Work rate menyerang dan bertahan tinggi", "p.attackingworkrate = 2 AND p.defensiveworkrate = 2",
+     ("", "positioning", 5), None),
+    (20068, "Bek tinggi 188 cm ke atas", "p.height >= 188 AND p.preferredposition1 BETWEEN 1 AND 8", ("", "strength", 5), None),
+    (20069, "Lahir 1995 ke atas", "CAST(substr(p.birthdate, instr(p.birthdate, ' ') - 4, 4) AS INTEGER) >= 1995",
+     ("", "longshots", 5), None),
+    (20070, "Heading 85 ke atas", "p.headingaccuracy >= 85", ("", "strength", 5), None),
+    (20071, "Reputasi internasional 4 bintang ke atas", "p.internationalrep >= 4", ("", "ovr", 4), None),
+)
+TC_KEYS = {34024: "TEAMCOLOR_ATTRIBUTES_EVOLVE34024"}  # every other name is TEAMCOLOR_ATTRIBUTES_TEAM<id>
+
+
+def _tc_boost(groups, boost):
+    """groups with a TOOLTIP boost (target, stat, amount) added to every tier."""
+    target, stat, n = boost
+    extra = {"type": stat, "amount": n, **({"target": target} if target else {})}
+    return [dict(g, boosts=g["boosts"] + [extra]) for g in groups]
+
+
+def _tc_special_groups(boost, players=5):
+    """A special color's tiers: 5-6 / 7-8 / 9-11 players, OVR up to the tooltip's OVR (else +3,
+    with a stat tooltip on top). A set of fewer than 5 players has one tier: all of them."""
+    target, stat, n = boost
+    top = n if stat == "ovr" else 3
+    groups = (_tc_groups((players, 11, top)) if players < 5
+              else _tc_groups((5, 6, max(1, top - 2)), (7, 8, max(1, top - 1)), (9, 11, top)))
+    return groups if stat == "ovr" else _tc_boost(groups, boost)
+
+
+@functools.lru_cache(maxsize=None)
+def tc_special_sets():
+    """{special color id: (frozenset of its spids, number of players)}: season colors by card
+    season, the named ones by their condition ("best N": of the Market cards, by rating)."""
+    sets = {}
+    with closing(_db()) as c:
+        rows = c.execute("SELECT spid, playerid FROM players").fetchall()
+        for _, codes in tc_seasons():
+            sets[TC_SEASON + codes[0]] = [(s, p) for s, p in rows if s // 1000000 in codes]
+        for cid, _, cond, _, best in TC_NAMED_SPECIALS:
+            got = c.execute(f"SELECT p.spid, p.playerid FROM players p WHERE {cond} ORDER BY {POSOVR} DESC").fetchall()
+            sets[cid] = [r for r in got if on_market(r[0])][:best] if best else got
+    return {cid: (frozenset(s for s, _ in got), len({p for _, p in got})) for cid, got in sets.items()}
+
+
+@functools.lru_cache(maxsize=None)
 def tc_colors():
-    club = {"teamcolorid": TC_CLUB, "type": "club", "teamid": -1, "name": f"TEAMCOLOR_ATTRIBUTES_TEAM{TC_CLUB}",
+    """Every color (GET /static/info/teamcolor teamColors): the generic club / nation ones, the
+    upgrade ones, the named clubs and nations, the season colors and the named specials (one
+    with no card in fifadb is left out)."""
+    key = lambda cid: TC_KEYS.get(cid, f"TEAMCOLOR_ATTRIBUTES_TEAM{cid}")
+    club = {"teamcolorid": TC_CLUB, "type": "club", "teamid": -1, "name": key(TC_CLUB),
             "description": "Pemain dari klub yang sama", "boostgroups": TC_CLUB_GROUPS}
-    nation = {"teamcolorid": TC_NATION, "type": "nation", "teamid": -1, "name": f"TEAMCOLOR_ATTRIBUTES_TEAM{TC_NATION}",
+    nation = {"teamcolorid": TC_NATION, "type": "nation", "teamid": -1, "name": key(TC_NATION),
               "description": "Pemain dari negara yang sama", "boostgroups": TC_GROUPS}
+    grades = [{"teamcolorid": cid, "type": "grade", "grade": g, "teamid": -1, "name": name,
+               "description": f"Pemain grade +{g} ke atas", "boostgroups": groups} for cid, g, name, groups in TC_GRADE]
+    clubs = [{"teamcolorid": cid, "type": "club", "teamid": t, "name": key(cid), "description": "Pemain klub ini (sekarang atau dulu)",
+              "boostgroups": _tc_boost(TC_CLUB_GROUPS, b)} for cid, t, b in TC_NAMED_CLUBS]
+    nations = [{"teamcolorid": cid, "type": "nation", "teamid": n, "name": key(cid), "description": "Pemain dari negara ini",
+                "boostgroups": _tc_boost(TC_GROUPS, b)} for cid, n, b in TC_NAMED_NATIONS]
     # a special color's teamid is a STRING: TeamColorController copies teamid to __teamid and hands
     # the list to native (setTeamColorList); at half time native re-checks the colors (0x94EB70) and
     # reads a special one's __teamid with asCString -- a number there crashed every second half.
-    grades = [{"teamcolorid": cid, "type": "grade", "grade": g, "teamid": -1, "name": name,
-               "description": f"Pemain grade +{g} ke atas", "boostgroups": groups} for cid, g, name, groups in TC_GRADE]
-    return [club, nation] + grades + [{"teamcolorid": TC_SEASON + codes[0], "type": "special", "teamid": str(TC_SEASON + codes[0]),
-                                       "name": f"Season {label}", "description": f"Pemain season {label}", "boostgroups": TC_GROUPS}
-                                      for label, codes in tc_seasons()]
+    sets = tc_special_sets()
+    specials = []
+    for label, codes in tc_seasons():
+        cid = TC_SEASON + codes[0]
+        tid, b = TC_SEASON_NAMES.get(codes[0], (None, None))
+        specials.append({"teamcolorid": cid, "type": "special", "teamid": str(cid), "name": key(tid) if tid else f"Season {label}",
+                         "description": f"Pemain season {label}", "boostgroups": _tc_special_groups(b) if b else TC_GROUPS})
+    for cid, desc, _, b, _ in TC_NAMED_SPECIALS:
+        if sets[cid][1]:
+            specials.append({"teamcolorid": cid, "type": "special", "teamid": str(cid), "name": key(cid),
+                             "description": desc, "boostgroups": _tc_special_groups(b, min(5, sets[cid][1]))})
+    return [club, nation] + grades + clubs + nations + specials
 
 
 def ep_teamcolor(query, body):
-    """GET /static/info/teamcolor (once per login). A season color lists its cards by spid; only
-    the cards I own are listed (every card would be ~500 KB): one bought later counts on the
-    server at once and gets its boost in the client from the next login."""
+    """GET /static/info/teamcolor (once per login). A special color lists its cards by spid; only
+    the cards I own are listed (every card would be MBs): one bought later counts on the server
+    at once and gets its boost in the client from the next login."""
     st = _state()
     owned = {int(p["spid"]) for p in st["teams"].get(str(_default_slot(st)), {}).get("players", [])}
-    specials = {str(c["teamid"]): [] for c in tc_colors() if c["type"] == "special"}
-    for s in sorted(owned):
-        cid = tc_season_of(s // 1000000)
-        if cid:
-            specials[str(cid)].append(s)
+    sets = tc_special_sets()
+    specials = {c["teamid"]: sorted(owned & sets[c["teamcolorid"]][0]) for c in tc_colors() if c["type"] == "special"}
     return _json({"teamColors": tc_colors(), "teamColorSpecials": specials})
 
 
@@ -787,10 +965,16 @@ def tc_static():
     return cards, hist
 
 
+def _tc_tier(groups, n):
+    return next((i for i, g in enumerate(groups) if g["count_min"] <= n <= g["count_max"]), None)
+
+
 def active_teamcolors(team):
-    """team.teamcolors: the colors the starting XI meets, one per club / nation / season with
-    enough distinct players (as TeamColorController.updatePlayerCount counts them)."""
+    """team.teamcolors: the colors the starting XI meets, with enough distinct players (as
+    TeamColorController.updatePlayerCount counts them): one generic club / nation color per club
+    and nation, the named ones, the specials and the upgrade colors."""
     cards, hist = tc_static()
+    sets = tc_special_sets()
     counts, seen = {}, set()
     for p in team["squad"]["positions"]:
         c = cards.get(int(p["spid"])) if p.get("pos", POS_SUB) < POS_SUB else None
@@ -799,22 +983,27 @@ def active_teamcolors(team):
         seen.add(c[0])
         pid, teamid, nation = c
         keys = [(TC_CLUB, t) for t in {teamid} | hist.get(pid, set())] + [(TC_NATION, nation)]
-        sid = tc_season_of(int(p["spid"]) // 1000000)
-        keys += [(sid, sid)] if sid else []
+        keys += [("special", cid) for cid, (spids, _) in sets.items() if int(p["spid"]) in spids]
         for k in keys:
             counts[k] = counts.get(k, 0) + 1
     out = []
-    for (cid, teamid), n in sorted(counts.items()):
-        groups = TC_CLUB_GROUPS if cid == TC_CLUB else TC_GROUPS
-        i = next((i for i, g in enumerate(groups) if g["count_min"] <= n <= g["count_max"]), None)
+    for (cid, teamid), n in sorted((k, n) for k, n in counts.items() if k[0] != "special"):
+        i = _tc_tier(TC_CLUB_GROUPS if cid == TC_CLUB else TC_GROUPS, n)
         if i is not None and teamid > 0:
-            # season (special) colors carry their teamid as a string, like tc_colors()
-            out.append({"teamcolorid": cid, "boostindex": i, "teamid": str(teamid) if cid >= TC_SEASON else teamid})
+            out.append({"teamcolorid": cid, "boostindex": i, "teamid": teamid})
+    for c in tc_colors():
+        if c["type"] == "grade" or c["teamid"] == -1:
+            continue
+        n = counts.get(("special", c["teamcolorid"]) if c["type"] == "special"
+                       else (TC_CLUB if c["type"] == "club" else TC_NATION, c["teamid"]), 0)
+        i = _tc_tier(c["boostgroups"], n)
+        if i is not None:
+            # special colors carry their teamid as a string, like tc_colors()
+            out.append({"teamcolorid": c["teamcolorid"], "boostindex": i, "teamid": c["teamid"]})
     grade = {iid(p): grade_of(p) for p in team["players"]}
     xi = [grade.get(str(p.get("id") or p["spid"]), 0) for p in team["squad"]["positions"] if p.get("pos", POS_SUB) < POS_SUB]
     for cid, g, _, groups in TC_GRADE:
-        n = sum(x >= g for x in xi)
-        i = next((i for i, b in enumerate(groups) if b["count_min"] <= n <= b["count_max"]), None)
+        i = _tc_tier(groups, sum(x >= g for x in xi))
         if i is not None:
             out.append({"teamcolorid": cid, "boostindex": i, "teamid": -1})
     return out
@@ -836,15 +1025,25 @@ def fill_squad(sq, players):
             taken.add(int(p["spid"]) % 1000000)
             spare.append({"spid": p["spid"], "pos": POS_SUB, "id": p["id"]})
     forms = formation_table()
-    shape = next((f["positions"] for f in forms["common"] + list(forms["teams"].values())
-                  if f["formationid"] == sq.get("formation")), [f[0] for f in gen_teams.FORMATION])
+    form = next((f for f in forms["common"] + list(forms["teams"].values()) if f["formationid"] == sq.get("formation")),
+                {"positions": [f[0] for f in gen_teams.FORMATION], "offsets": [{"x": f[1], "y": f[2]} for f in gen_teams.FORMATION]})
+    shape = form["positions"]
     used = {s["pos"] for s in pos if s["pos"] < POS_SUB}
     holes = [x for x in shape if x not in used][:max(0, 11 - len(used))]
     for hole, s in zip(holes, best(s for s in pos if s["pos"] == POS_SUB) + spare):
         s["pos"] = hole
+        s.pop("starting", None)
         if s not in pos:
             pos.append(s)
     pos += [s for s in spare if s not in pos][:max(0, 7 - sum(s["pos"] == POS_SUB for s in pos))]
+    # a starter needs starting [attacking, defensive participation, x, y]: without it the client
+    # moves him to the bench (PlayerListUtil, issue #7 again: filled holes had none, and Formasi
+    # then saved them without it). x/y = his slot in the formation.
+    spot = dict(zip(shape, form["offsets"]))
+    for s in pos:
+        if s["pos"] < POS_SUB and len(s.get("starting") or []) < 4:
+            xy = spot.get(s["pos"], {"x": 0.5, "y": 0.5})
+            s["starting"] = [gen_teams.PARTICIPATION, gen_teams.PARTICIPATION, xy["x"], xy["y"]]
 
 
 def owned_team(raw):

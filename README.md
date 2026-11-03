@@ -69,10 +69,26 @@ Added, passing the tests but not yet checked in the client:
   VVIP Scout (best offers; 1 billion EP quest). Scout Amatir is gone so the list fits its 5 rows
   (once it scrolled, a met quest lit another scout's card or none).
 - **Upgrade team colors** (the client's "Upgraded Team"): starters of grade +2, +5 or +8 and
-  higher; 5-6 / 7-8 / 9-11 of them give +1 / +2 / +3, +2 / +3 / +4 and +3 / +4 / +5 OVR.
+  higher; 5-6 / 7-8 / 9-11 of them give +1 / +2 / +3, +2 / +3 / +4 and +3 / +4 / +5 OVR. The
+  single-grade ones ("+3 club" … "+10 Golden summit") need all 11 starters at that grade or higher:
+  +4 (club +3/+4), +5 (silver +5…+7), +6 (Golden passion +8/+9), +7 (Golden summit +10). A
+  player gets his best upgrade color on top of his best club / nation / season color.
+- **Every team color the client names** (188 now):
+  - 27 clubs (Real Madrid … Jeonbuk): Single team's tiers plus the club's own boost from the
+    game's tooltip, e.g. Barcelona MF agility +3;
+  - 30 nations: Satu Negara's tiers plus e.g. Spanyol MF ball control +2;
+  - season colors under the game's names (World Best up to +5, World Legend, 2014 WC All-Star, …);
+  - about 75 specials: '14 WC and EC per nation, nation BEST, MSN / BBC Trio, Arsenal
+    Invincibles, Galácticos, LEGENDS, the TOP 100s, Power Header, New Star, ….
+
+  The original boosts and player lists were server data and are gone. Player lists come from the
+  player database (season, club, named players, stat limits); boosts come from the one tooltip
+  line the game still has. Left out: the [Test] colors, "+2~7", "14 WC Single Nation" and four
+  duplicate club entries.
 - **Formasi** no longer opens with "Tidak cukup pemain" (it loads preset squad 1, which the
   server never sent). A hole in the XI (issue #7, an upgrade of two starters of one player) is
-  filled from the bench, and the bench never holds a second card of a player.
+  filled from the bench, and the bench never holds a second card of a player. Every starter gets
+  his `starting` data (workrate and pitch spot): without it the game shows him on the bench.
 - **Pack opening glow** follows the card's value: none below 10 million EP, then levels 1-3 from
   10 million, 100 million and 1 billion EP.
 
