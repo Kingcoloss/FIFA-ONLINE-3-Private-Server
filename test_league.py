@@ -296,6 +296,26 @@ def main():
         hc._save(st)
         shown = hc.coach_me(hc._state(), 0)["team"]["squad"]["positions"]
         assert all(len(s.get("starting") or []) == 4 for s in shown if s["pos"] < hc.POS_SUB), shown
+        # issue #8: Tim > Peran saves the captain and each set-piece taker on its own
+        # (TeamManagementPlayerRolesTabPage: PUT /game/my/team/captain, .../kickers/<KICKER_TYPES
+        # index: left corner, right corner, free kick, penalty, free kick 2>); the slots never shift
+        xi_ids = [s["id"] for s in shown if s["pos"] < hc.POS_SUB]
+        put = lambda uri, i: body(hc.ENDPOINTS[uri]("", json.dumps({"id": i, "_method": "PUT"}).encode()))
+        r = put("/game/my/team/captain", xi_ids[3])
+        assert r["result"] and r["resources"][0]["body"]["team"]["captain"] == xi_ids[3]
+        assert put("/game/my/team/kickers/3", xi_ids[1])["result"] and put("/game/my/team/kickers/0", xi_ids[2])["result"]
+        kick = hc.coach_me(hc._state(), 0)["team"]["kickers"]
+        assert len(kick) == 5 and kick[3] == xi_ids[1] and kick[0] == xi_ids[2], kick
+        assert not put("/game/my/team/kickers/2", "no-such-card")["result"]
+        # a Formasi save with an empty slot keeps the others in place; a short list (old saves
+        # dropped empty slots) comes back as 5 starters
+        sq = hc.coach_me(hc._state(), 0)["team"]["squad"]
+        hc.ENDPOINTS["/coach/me/squad"]("", json.dumps({"squad": sq, "kickers": ["", *kick[1:]], "captain": xi_ids[3]}).encode())
+        kick2 = hc.coach_me(hc._state(), 0)["team"]["kickers"]
+        assert kick2[1:] == kick[1:] and len(kick2) == 5 and kick2[0] in xi_ids, kick2
+        st = hc._state(); st["teams"][str(hc._default_slot(st))]["squad"]["kickers"] = kick[:2]; hc._save(st)
+        kick3 = hc.coach_me(hc._state(), 0)["team"]["kickers"]
+        assert kick3[:2] == kick[:2] and len(kick3) == 5 and set(kick3) <= set(xi_ids), kick3
         # Formasi opens preset team.presetidx of the COACH-level teamsquadlist (none = "Tidak cukup pemain")
         me = hc.coach_me(hc._state(), 0); me_team = me["team"]
         preset = me["teamsquadlist"]["preset"][me_team["presetidx"]]

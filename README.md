@@ -89,6 +89,9 @@ Added, passing the tests but not yet checked in the client:
   server never sent). A hole in the XI (issue #7, an upgrade of two starters of one player) is
   filled from the bench, and the bench never holds a second card of a player. Every starter gets
   his `starting` data (workrate and pitch spot): without it the game shows him on the bench.
+- **Tim > Peran** saves the captain and each set-piece taker (issue #8: `PUT /game/my/team/captain`
+  and `/game/my/team/kickers/<0-4>` were missing). The five kicker slots (left corner, right
+  corner, free kick, penalty, free kick 2) keep their place; an empty one takes a starter.
 - **Pack opening glow** follows the card's value: none below 10 million EP, then levels 1-3 from
   10 million, 100 million and 1 billion EP.
 

@@ -341,8 +341,31 @@ def ep_coach_squad(query, body):
         if str(req.get("captain")) in spid_of:
             team["squad"]["captain"] = str(req["captain"])
         if req.get("kickers") and all(str(k) in spid_of for k in req["kickers"] if k):
-            team["squad"]["kickers"] = [str(k) for k in req["kickers"] if k]
+            # a slot per KICKER_TYPES entry: dropping an empty one shifted the penalty taker (issue #8)
+            team["squad"]["kickers"] = [str(k) if k else "" for k in req["kickers"]][:KICKERS]
         _save(st)
+    return _json({"result": True, "resources": coach_me_resources(st, slot)})
+
+
+KICKERS = 5  # squad.kickers slots, Enums.KICKER_TYPES: left corner, right corner, free kick, penalty, free kick 2
+
+
+def ep_team_role(kicker, query, body):
+    """PUT /game/my/team/captain {id} and PUT /game/my/team/kickers/<KICKER_TYPES index> {id}
+    from Tim > Peran (TeamManagementPlayerRolesTabPage.onPlayerSelect; issue #8: both were
+    missing, so a new captain or penalty taker was never saved). id = a card instance of my club."""
+    req = json.loads(body or b"{}")
+    st = _state(); slot = _default_slot(st); team = st["teams"].get(str(slot))
+    pid = str(req.get("id"))
+    if team is None or pid not in {iid(p) for p in team["players"]}:
+        return _json({"result": False})
+    sq = team["squad"]
+    if kicker is None:
+        sq["captain"] = pid
+    else:
+        sq["kickers"] = ([str(k) for k in sq.get("kickers") or []] + [""] * KICKERS)[:KICKERS]
+        sq["kickers"][kicker] = pid
+    _save(st)
     return _json({"result": True, "resources": coach_me_resources(st, slot)})
 
 
@@ -1071,7 +1094,11 @@ def owned_team(raw):
     sq["positions"] = [dict(p, id=str(p.get("id") or p["spid"])) for p in sq["positions"]]
     fill_squad(sq, team["players"])
     sq["captain"] = str(sq["captain"]) if sq.get("captain") else ""
-    sq["kickers"] = [str(k) for k in sq.get("kickers", [])]
+    # all KICKER_TYPES slots, each a starter: an empty or stale one (saves before issue #8 dropped
+    # empty slots; a kicker moved to the bench) takes gen_teams' default, the last 5 starters
+    xi = [s["id"] for s in sq["positions"] if s["pos"] < POS_SUB]
+    kick = ([str(k) for k in sq.get("kickers") or []] + [""] * KICKERS)[:KICKERS]
+    sq["kickers"] = [k if k in xi or not xi else xi[-KICKERS:][i % len(xi[-KICKERS:])] for i, k in enumerate(kick)]
     team["squad"] = sq
     team.update({"staffs": [], "staffroles": [], "staffroleidx": 0, "maxstaff": 0, "staffsmc": {}})
     # PlayerListUtil.generateCaptainFromCoachInfo (Tim > Formasi) reads these at team level
@@ -2106,7 +2133,7 @@ def remove_player(team, p):
     team["players"].remove(p)
     sq, pid = team["squad"], iid(p)
     sq["positions"] = [s for s in sq["positions"] if str(s.get("id") or s["spid"]) != pid]
-    sq["kickers"] = [k for k in sq.get("kickers", []) if str(k) != pid]
+    sq["kickers"] = ["" if str(k) == pid else k for k in sq.get("kickers", [])]  # slots stay in place
     if str(sq.get("captain")) == pid:
         sq["captain"] = next((str(s.get("id") or s["spid"]) for s in sq["positions"] if s["pos"]), "")
 
@@ -3434,6 +3461,9 @@ ENDPOINTS["/account/option"] = ep_account_option
 ENDPOINTS["/coach/me/squad"] = ep_coach_squad
 ENDPOINTS["/match/campaign"] = ep_match_campaign
 ENDPOINTS["/game/my/tactic/all"] = ep_tactic_all
+ENDPOINTS["/game/my/team/captain"] = lambda q, b: ep_team_role(None, q, b)
+for _i in range(KICKERS):
+    ENDPOINTS[f"/game/my/team/kickers/{_i}"] = lambda q, b, i=_i: ep_team_role(i, q, b)
 for _i in range(TACTIC_SLOTS):
     ENDPOINTS[f"/game/my/tactic/{_i}"] = lambda q, b, i=_i: ep_tactic(i, q, b)
 ENDPOINTS.update({
