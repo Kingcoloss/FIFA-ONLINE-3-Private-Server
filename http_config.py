@@ -2624,8 +2624,9 @@ PACKS = {  # itemid (= shop icon): (name, pool)
     82214007: ("Top 300", {"top": 300}),
     8223562: ("Best 30", {"top": 30}),
     # user: "pack baru khusus all session grade 1-8", then "all session pack  top 50 ganti menjadi top 200",
-    # then "all session top 200 pack ganti ke all session top 300"
-    7675: ("All Season Top 300 +8", {"top": 300, "grade": 8, "all": True}),
+    # then "all session top 200 pack ganti ke all session top 300" and "(OVR 81– sampai tertinggi)":
+    # every Market card rated 81 and up (353 cards; a top-300 cut kept only 43 of the 96 81s)
+    7675: ("All Season Top 300 +8", {"ovr": 81 + GRADE_BOOST[1], "grade": 8, "all": True}),
 }
 # "All <season>" like All '07 for every season fifaaddict lists (user: "yang keluar cuma 07,
 # saya mau semua session"): (fifaaddict label, card season codes, closest shop icon). Codes

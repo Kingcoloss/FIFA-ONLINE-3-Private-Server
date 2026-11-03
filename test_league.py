@@ -542,10 +542,11 @@ def main():
         assert hc.pack_grades(gp) == [(1, 5), (2, 4), (3, 3), (4, 2), (5, 1)] and hc.pack_grades(28007) == [(1, 1)]
         # prices follow the rating only (user: "fix harga yang tidak sesua statsnya")
         assert all(hc.stat_price(o) < hc.stat_price(o + 1) for o in range(40, 95))
-        # All Season Top 300 +8: the 300 best Market cards of any season at +1..+8; season packs = their top 200
+        # All Season Top 300 +8: every Market card rated 81+ of any season at +1..+8; season packs = their top 200
         assert [g for g, _ in hc.pack_grades(7675)] == list(range(1, 9))
         best = max(hc.card_ovr(s) for s in hc.fa_prices())
-        assert len(hc.pack_pool(7675)) == 300 and max(hc.card_ovr(s) for s, _ in hc.pack_pool(7675)) == best
+        rated = [hc.card_ovr(s) for s, _ in hc.pack_pool(7675)]
+        assert len(rated) > 300 and min(rated) == 81 and max(rated) == best
         assert len(hc.pack_pool(92000088)) == 200 and {s // 1000000 for s, _ in hc.pack_pool(92000088)} == {88}
         st = hc._state(); hc.my_coach(st)["ep"] = 10 ** 10; hc._save(st)
         assert post("/shop/purchase", {"shopid": gp, "productid": gp, "bunch": 1})["result"]  # 10 packs
