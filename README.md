@@ -51,7 +51,7 @@ Added, passing the tests but not yet checked in the client:
   the Upgrade tab shows from the material's grade (Kosong x1, Low x1.1, Normal x1.25,
   High x1.5). A failed upgrade from +5 or higher drops one grade.
 - **Top 200 packs**: the extra packs now give their season's 200 best cards ("17 Top 200",
-  "07 Top 200", …); **All Season Top 200 +8** gives the 200 best of any season.
+  "07 Top 200", …); **All Season Top 300 +8** gives the 300 best of any season.
 - **Upgrade with a +0 card** (issue #5): a club's own +0 card keeps the target's grade at 100%
   (+4 with +0 stays +4) and a +10 may take one; the kept card leaves Tim Cadangan when it takes
   the used card's squad slot.
