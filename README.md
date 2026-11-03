@@ -92,6 +92,10 @@ Added, passing the tests but not yet checked in the client:
 - **Tim > Peran** saves the captain and each set-piece taker (issue #8: `PUT /game/my/team/captain`
   and `/game/my/team/kickers/<0-4>` were missing). The five kicker slots (left corner, right
   corner, free kick, penalty, free kick 2) keep their place; an empty one takes a starter.
+- **Tim > Klub > Informasi tim** (issue #9) shows the start date, home stadium and "year built /
+  capacity" (`coach.career`, `coach.stadium`, `GET /stadium/<id>` from the client's own stadium
+  table), and its player panel (stepper, 3D player, price, grade), which stayed empty without a
+  stadium. Names from the client's database read as UTF-8 (`tools/re/eadb.py` read latin-1).
 - **Pack opening glow** follows the card's value: none below 10 million EP, then levels 1-3 from
   10 million, 100 million and 1 billion EP.
 

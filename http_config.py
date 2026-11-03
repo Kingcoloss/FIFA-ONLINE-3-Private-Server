@@ -212,7 +212,8 @@ def ep_create_coach(slot, query, body):
     st["coaches"] = [c for c in st["coaches"] if c["slot"] != slot] + [{
         "_id": coach_id(slot), "slot": slot, "name": req.get("coachName", ""), "state": "active",
         # StartupCoachCreationScreen.initializeMyCoach reads teamvalue.val, levelinfo.level, summary
-        "teamid": req.get("id"), "teamvalue": {"val": 0}, "levelinfo": {"level": 1}, "summary": {}}]
+        "teamid": req.get("id"), "teamvalue": {"val": 0}, "levelinfo": {"level": 1}, "summary": {},
+        "appat": w3c(time.time())}]  # coach_me career.appat: the manager's start date
     _save(st)
     return _json({"result": True})
 
@@ -712,6 +713,51 @@ def formation_table():
     return _FORMATIONS
 
 
+STADIUMS_CACHE = os.path.join(HERE, "gamedata", "stadiums.json")
+
+
+@functools.lru_cache(maxsize=None)
+def stadium_table():
+    """({stadium id: {name, yearbuilt, capacity}}, {club teamid: stadium id}) from the client's
+    own fifa_ng_db, cached in gamedata/stadiums.json. stadiums.yearbuilt counts years after 1800
+    (Bernabeu 147 = 1947), a "_" name is a generic stadium (an unlicensed club's); a club's
+    stadium is the one with its hometeamid, else its teamstadiumlinks row (teamid there = real - 1)."""
+    try:
+        with open(STADIUMS_CACHE, encoding="utf-8") as f:
+            t = json.load(f)
+    except OSError:
+        try:
+            sys.path.insert(0, os.path.join(HERE, "tools", "re"))
+            import bigdir, eadb
+            big = os.path.join(GAME, "data", "data_0.big")
+            db = bigdir.read(big, "data/db/fifa_ng_db.db")
+            meta = bigdir.read(big, "data/db/fifa_ng_db-meta.xml").decode("utf-8", "replace")
+            rows, links = eadb.rows(db, meta, "stadiums"), eadb.rows(db, meta, "teamstadiumlinks")
+        except (OSError, KeyError, ImportError) as e:
+            print("stadiums unavailable:", e, flush=True)
+            return {}, {}
+        t = {"stadiums": {str(r["stadiumid"]): {"name": r["name"].lstrip("_"), "yearbuilt": 1800 + r["yearbuilt"],
+                                                "capacity": r["capacity"]} for r in rows},
+             "teams": {**{str(r["teamid"] + 1): r["stadiumid"] for r in links},
+                       **{str(r["hometeamid"]): r["stadiumid"] for r in rows if r["hometeamid"]}}}
+        os.makedirs(os.path.dirname(STADIUMS_CACHE), exist_ok=True)
+        with open(STADIUMS_CACHE, "w", encoding="utf-8") as f:
+            json.dump(t, f, ensure_ascii=False)
+    return {int(k): v for k, v in t["stadiums"].items()}, {int(k): v for k, v in t["teams"].items()}
+
+
+def club_stadium(teamid):
+    """A club's home stadium id (0: none in the client's database, e.g. a national team)."""
+    return stadium_table()[1].get(int(teamid or 0), 0)
+
+
+def ep_stadium(sid, query, body):
+    """GET /stadium/<id> (TeamStaticInfo.onStadiumChanged via StaticData.getData): the home
+    stadium's name and "yearbuilt / capacity" line in Tim > Klub > Informasi tim (issue #9)."""
+    s = stadium_table()[0].get(int(sid))
+    return _json({"id": int(sid), **(s or {"name": "-", "yearbuilt": "-", "capacity": "-"})})
+
+
 def team_formations(teamid):
     """The club's own formation first (else 4-4-2(1), the shape of the gen_teams XI), then the
     common ones."""
@@ -1177,6 +1223,11 @@ def coach_me(st, slot):
         # PLAYLIMIT.maxplay; without the key playcount stays undefined and they stay disabled
         "playlimit": {},
         "kit": team_kit(teamid), "summary": team_summary(team, teamid),
+        # Tim > Klub > Informasi tim (issue #9): TeamStaticInfo reads career.appat (start date,
+        # W3C; a manager from before this field gets the day it is first sent) and stadium {id};
+        # TeamManagementTeamInfoTabPage draws its player panel only once stadium is defined
+        "career": {"appat": coach.setdefault("appat", w3c(time.time()))},
+        "stadium": {"id": club_stadium(teamid)},
         # cups -> CupProxy.cupPlayList: {metaid, cupid} of cups not left yet (front screen resumes
         # them; an ended one shows its won/eliminated screen with the reward button -> /leave)
         "items": coach_items(st, slot), "matchstats": [], "scouters": coach_scouters(st, slot),
@@ -3395,6 +3446,7 @@ ROUTES = [
     (re.compile(r"/item/(\w+)/use"), ep_item_use),
     (re.compile(r"/bag/(\w+)/unpack"), ep_bag_unpack),
     (re.compile(r"/coach/(\w+)/postponed"), ep_coach_postponed),
+    (re.compile(r"/stadium/(\d+)"), ep_stadium),
     (re.compile(r"/static/info/authentic/team/(licensed|all)/(\d+)"), ep_authentic_team),
     # Ganti tim screen: a club's summary for its TeamInfoNew (name/crest id, ovr, teamgrade)
     (re.compile(r"/static/info/team/summary/(\d+)"), lambda t, q, b: _json({**roster(int(t))["summary"], "id": int(t)})),

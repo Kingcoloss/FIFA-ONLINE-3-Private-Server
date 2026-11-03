@@ -296,6 +296,15 @@ def main():
         hc._save(st)
         shown = hc.coach_me(hc._state(), 0)["team"]["squad"]["positions"]
         assert all(len(s.get("starting") or []) == 4 for s in shown if s["pos"] < hc.POS_SUB), shown
+        # issue #9, Tim > Klub > Informasi tim: TeamStaticInfo shows coach.career.appat (start
+        # date) and coach.stadium {id}, then GET /stadium/<id> {name, yearbuilt, capacity};
+        # TeamManagementTeamInfoTabPage draws nothing (player stepper, 3D player) while coach.stadium is undefined
+        me = hc.coach_me(hc._state(), 0)
+        assert isinstance(me["stadium"]["id"], int) and me["career"]["appat"].endswith("Z")
+        assert hc.club_stadium(243) == 2  # Real Madrid: Santiago Bernabeu
+        bern = body(hc.route("/stadium/2")("", b""))
+        assert bern == {"id": 2, "name": "Santiago Bernabéu", "yearbuilt": 1947, "capacity": 81044}, bern
+        assert body(hc.route(f"/stadium/{me['stadium']['id']}")("", b""))["name"]
         # issue #8: Tim > Peran saves the captain and each set-piece taker on its own
         # (TeamManagementPlayerRolesTabPage: PUT /game/my/team/captain, .../kickers/<KICKER_TYPES
         # index: left corner, right corner, free kick, penalty, free kick 2>); the slots never shift

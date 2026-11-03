@@ -41,8 +41,8 @@ class Table:
 
     def get(self, row, sn):
         ty, bo, dep = self.fields[sn]
-        if ty == 0:  # string
-            return row[bo // 8:(bo + dep) // 8].split(b"\0")[0].decode("latin1")
+        if ty == 0:  # string, UTF-8 ("Santiago Bernabéu"; latin-1 gave "BernabÃ©u")
+            return row[bo // 8:(bo + dep) // 8].split(b"\0")[0].decode("utf-8", "replace")
         v = int.from_bytes(row, "little") >> bo & (1 << dep) - 1
         return struct.unpack("<f", struct.pack("<I", v))[0] if ty == 4 else v
 
@@ -50,7 +50,8 @@ class Table:
         ty, bo, dep = self.fields[sn]
         if ty == 0:
             row = bytearray(row)
-            row[bo // 8:(bo + dep) // 8] = value.encode("latin1")[:dep // 8 - 1].ljust(dep // 8, b"\0")
+            text = value.encode()[:dep // 8 - 1].decode("utf-8", "ignore").encode()  # no split character
+            row[bo // 8:(bo + dep) // 8] = text.ljust(dep // 8, b"\0")
             return bytes(row)
         v = int.from_bytes(row, "little") & ~((1 << dep) - 1 << bo) | value << bo
         return v.to_bytes(self.rsize, "little")
