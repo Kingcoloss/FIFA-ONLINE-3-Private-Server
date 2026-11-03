@@ -92,6 +92,13 @@ Added, passing the tests but not yet checked in the client:
 - **Tim > Peran** saves the captain and each set-piece taker (issue #8: `PUT /game/my/team/captain`
   and `/game/my/team/kickers/<0-4>` were missing). The five kicker slots (left corner, right
   corner, free kick, penalty, free kick 2) keep their place; an empty one takes a starter.
+- **Market search** finds cards of every season: the game searches only the seasons in
+  `/static/roster`, which lacked 29 seasons with Market cards (World Legend, World Best,
+  '14 TOTS, …), so e.g. WL R. Gullit never showed up.
+- **Every tradeable card** is on the Market, in the trades and in a pack: a card counts when
+  fifaaddict lists it or the game itself marks it tradeable (`permid.transferable`). fifaaddict
+  alone left out 6,599 cards (4,313 of them '17); the Market now holds 44,703. The new
+  **Semua Pemain** pack can give any of them.
 - **Tim > Klub > Informasi tim** (issue #9) shows the start date, home stadium and "year built /
   capacity" (`coach.career`, `coach.stadium`, `GET /stadium/<id>` from the client's own stadium
   table), and its player panel (stepper, 3D player, price, grade), which stayed empty without a

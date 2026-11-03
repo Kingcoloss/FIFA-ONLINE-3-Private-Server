@@ -574,10 +574,21 @@ def price_formula(ovr):
     return sig3(max(1000, math.exp(2.53 + 0.1113 * ovr)))
 
 
+@functools.lru_cache(maxsize=None)
+def market_spids():
+    """Every tradeable card (Market, packs, trades): each one the client's own Market search can
+    show (TransferUtil: permid.transferable = 1 and a namesind row; season 0 = engine cards) plus
+    each one fifaaddict lists. fifaaddict alone left out 6,599 cards, 4,313 of them '17 (user:
+    "jangan sampai ada pemain yang tidak ada di pack, trade, dan market"); prices come from the
+    rating either way (card_price)."""
+    with closing(_db()) as c:
+        own = {s for (s,) in c.execute("""SELECT p.spid FROM players p JOIN permid m ON m.spid = p.spid
+            AND m.transferable = 1 WHERE p.spid >= 1000000 AND p.playerid IN (SELECT playerid FROM namesind)""")}
+    return frozenset(own | set(fa_prices()))
+
+
 def on_market(spid):
-    """Tradeable card: listed on fifaaddict (season-0 engine cards are not real cards)."""
-    fa = fa_prices()
-    return int(spid) in fa if fa else int(spid) >= 1000000
+    return int(spid) in market_spids()
 
 
 @functools.lru_cache(maxsize=None)
@@ -2922,6 +2933,10 @@ FA_SEASONS = (
 PACKS.update({92000000 + codes[0]: (f"{label} Top 200", {"seasons": codes, "icon": icon, "top": 200, "all": True})
               for label, codes, icon in FA_SEASONS})
 PACKS[82214356] = ("07 Top 200", {"season": 7, "top": 200, "all": True})  # the original All '07 item
+# every Market card of every season, so each one is in some pack (the season packs keep only
+# their 200 best; '17 alone has 15,000+ cards); the "ALL" icon of All Season Top 300 +8
+ALL_PLAYERS_PACK = 92000000
+PACKS[ALL_PLAYERS_PACK] = ("Semua Pemain", {"all": True, "icon": 7675})
 PACK_BUNCHES = (1, 10)  # buy 1 or 10 (5% off)
 _PACK_POOL = {}
 
@@ -2944,6 +2959,7 @@ def pack_pool(itemid):
                       key=lambda r: -r[1])[:f.get("top")]
         # a price far below the pool's (odd fifaaddict data, e.g. a 120k World Best card among 20M+
         # ones) would win almost every draw: weigh anything under a tenth of the median as that tenth
+        card_ovrs([s for s, _ in rows])  # one batch: card by card took 12 s for Semua Pemain's 44,703
         prices = [card_price(s) for s, _ in rows]
         floor = sorted(prices)[len(prices) // 2] / 10
         _PACK_POOL[itemid] = [(s, max(p, floor) ** -0.75) for (s, _), p in zip(rows, prices)]

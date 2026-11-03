@@ -597,11 +597,26 @@ def main():
         gp = 15031  # '14 Top 30 +5
         assert hc.pack_price(gp) > 5 * sum(hc.card_price(s) * w for s, w in hc.pack_pool(gp)) / sum(w for _, w in hc.pack_pool(gp))
         assert hc.pack_grades(gp) == [(1, 5), (2, 4), (3, 3), (4, 2), (5, 1)] and hc.pack_grades(28007) == [(1, 1)]
+        # the Market's name search (TransferUtil: players.spid / 1000000 IN (availableSeasons))
+        # only sees seasons listed in /static/roster: every season with Market cards is there
+        # (user: "tidak ada r. gullid di world legend" -- WL and 15 more were missing)
+        roster = {e["value"] for e in body(hc.from_file("/static/roster"))["seasons"]}
+        market = hc.market_spids()
+        assert {s // 1000000 for s in market} <= roster, sorted({s // 1000000 for s in market} - roster)
+        # every card the client itself can trade (its Market search: permid.transferable = 1 and a
+        # name) is on the Market, in the trades and in a pack (user: "jangan sampai ada pemain yang
+        # tidak ada di pack, trade, dan market"); fifaaddict alone left out 6,599, 4,313 of them '17
+        with hc.closing(hc._db()) as c:
+            tradeable ={s for (s,) in c.execute("""SELECT p.spid FROM players p JOIN permid m ON m.spid = p.spid
+                AND m.transferable = 1 WHERE p.spid >= 1000000 AND p.playerid IN (SELECT playerid FROM namesind)""")}
+        assert tradeable <= market and set(hc.fa_prices()) <= market
+        assert {s for rows in hc.trade_pool().values() for s, _ in rows} == market
+        assert {s for s, _ in hc.pack_pool(hc.ALL_PLAYERS_PACK)} == market
         # prices follow the rating only (user: "fix harga yang tidak sesua statsnya")
         assert all(hc.stat_price(o) < hc.stat_price(o + 1) for o in range(40, 95))
         # All Season Top 300 +8: every Market card rated 81+ of any season at +1..+8; season packs = their top 200
         assert [g for g, _ in hc.pack_grades(7675)] == list(range(1, 9))
-        best = max(hc.card_ovr(s) for s in hc.fa_prices())
+        best = max(hc.card_ovr(s) for s in hc.market_spids())
         rated = [hc.card_ovr(s) for s, _ in hc.pack_pool(7675)]
         assert len(rated) > 300 and min(rated) == 81 and max(rated) == best
         assert len(hc.pack_pool(92000088)) == 200 and {s // 1000000 for s, _ in hc.pack_pool(92000088)} == {88}
