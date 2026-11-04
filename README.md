@@ -102,7 +102,9 @@ Added, passing the tests but not yet checked in the client:
   `gamedata/shop.json`.
 - **Simulasi Liga** coupon (item 2001, Shop > Dapat dikonsumsi): Liga's Simulasi button gives a
   match result without playing, one coupon per match. The simulation screen plays the match's goals,
-  shots, saves and cards, matching the result (`eventlist` was empty, so it showed 0-0). The button counts the coupons in Item saya
+  shots, saves and cards, matching the result (`eventlist` was empty, so it showed 0-0), and the
+  result screen after it shows the score, player ratings and stats, possession and MOTM (it was blank),
+  then the EP reward and back to the Liga menu. The button counts the coupons in Item saya
   and stayed off because the item did not exist. New coupons can be made on the admin page (type
   "Kupon Simulasi Liga").
 - **Random boxes open** (Kotak Platinum and the rest, issue #12): the box screen lists its prizes

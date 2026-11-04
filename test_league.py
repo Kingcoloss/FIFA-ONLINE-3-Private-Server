@@ -155,6 +155,21 @@ def main():
                 sim = r["resources"][0]["body"]["side"]
                 xi = [{int(p["spid"]) for p in sim[s]["team"]["squad"]["positions"] if p["pos"] < hc.POS_SUB} for s in ("left", "right")]
                 assert all(e["player"] in xi[e["team"]] for e in ev), ev
+                # the result screen after it (PostMatchResultDefaultScene.onResultReceived) reads
+                # match.result like the report a played match posts at /end; it was blank
+                res = r["resources"][0]["body"]["result"]
+                side = "home" if home == me else "away"
+                assert res["myTeam"] == side and res["opponentTeam"] == ("away" if side == "home" else "home")
+                assert (res["home"]["score"], res["away"]["score"]) == (g["home"], g["away"]) and res["home"]["id"] == home
+                for s, t in ((res["myTeam"], 0), (res["opponentTeam"], 1)):
+                    assert len(res[s]["players"]) == 11 and sum(p["goals"] for p in res[s]["players"]) == res[s]["score"]
+                    assert {p["spid"] for p in res[s]["players"]} == {x % 1000000 for x in xi[t]}
+                assert res["motm"]["team"] in ("home", "away") and res["home"]["possession"]["total"] + res["away"]["possession"]["total"] == 100
+                # then the reward screen (PostMatchRewardDefaultScene) reads match.reward like after a
+                # played match: player EXP, manager EXP, EP (it was empty and the flow stopped there)
+                rw = r["resources"][0]["body"]["reward"]
+                assert rw["coach"]["reward"]["total"] > 0 and rw["money"]["reward"]["total"] > 0 and len(rw["players"]) == 11
+                assert "pending" not in hc._state()["league2"]  # the round is played: no /end can play it again
             else:  # play: create, ready, end 2-1 for the home side
                 m = body(hc.ep_l2_match("", req))["resources"][0]["body"]
                 assert m["type"] == "League_2_league" and m["stage"] == "created"

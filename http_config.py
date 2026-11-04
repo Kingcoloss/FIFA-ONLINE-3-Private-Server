@@ -1654,6 +1654,60 @@ def sim_events(match, mine, opp, rng=random):
     return sorted(ev, key=lambda e: e["time"])  # stable: an assist stays before its goal, a save after its shot
 
 
+def sim_result(match, events, my_home, rng=random):
+    """match.result for a simulated Liga match, shaped like the report a played match posts at
+    /match/<id>/end, which PostMatchResultDefaultScene.onResultReceived reads (scores, the
+    formation's player stats, possession, attack direction, MOTM). Built from the simulation's
+    events; it was missing, so the result screen after a simulation stayed blank. Ids are player
+    ids (spid % 1e6) as in the client's own report; y counts from the far goal (keeper at 0.98)."""
+    pair = lambda lo, hi, rate: (lambda n: [round(n * rate), n])(rng.randint(lo, hi))
+    teams = []
+    for t, s in ((0, "left"), (1, "right")):
+        pos = match["side"][s]["team"]["squad"]["positions"]
+        players = []
+        for p in (p for p in pos if p["pos"] < POS_SUB):
+            mine = [e["event"] for e in events if e["team"] == t and e["player"] == int(p["spid"])]
+            goals, assists, shots = mine.count("GOAL_EVENT"), mine.count("ASSIST_EVENT"), mine.count("SHOT_ON_GOAL_EVENT")
+            saves, yellow = mine.count("SAVE_EVENT"), mine.count("YELLOW_CARD_EVENT")
+            pid, start = int(p["spid"]) % 1000000, p.get("starting") or [1, 1, 0.5, 0.5]
+            players.append({
+                "id": str(pid), "spid": pid, "dbid": pid, "role": 0, "x": start[2], "y": round(1 - start[3], 4),
+                "rating": round(min(10.0, max(4.0, 6.0 + goals + 0.5 * assists + 0.3 * saves - 0.4 * yellow
+                                                   + rng.uniform(-0.4, 0.9))), 1),
+                "goals": goals, "assists": assists, "saves": saves, "shotsOnGoal": goals + shots,
+                "shotAttempt": goals + shots + rng.randint(0, 1) * bool(p["pos"]),
+                "passes": pair(20, 50, rng.uniform(0.7, 0.92)) if p["pos"] else pair(5, 15, 0.8),
+                "dribbles": pair(0, 6, 0.6), "tackles": pair(0, 5, 0.6) if p["pos"] else [0, 0],
+                "cards": [min(yellow, 1), int(yellow >= 2)], "injure": [0, 0],
+                "runDistanceMeter": round(rng.uniform(8000, 12000) if p["pos"] else rng.uniform(3000, 5000), 1),
+                "longTermStamina": 1})
+        total = lambda k: sum(p[k] for p in players)
+        sums = lambda k: [sum(p[k][0] for p in players), sum(p[k][1] for p in players)]
+        teams.append({
+            "id": match["side"][s]["team"]["teamid"], "score": total("goals"), "goals": total("goals"),
+            "assists": total("assists"), "saves": total("saves"), "shotsOnGoal": total("shotsOnGoal"),
+            "shotAttempt": total("shotAttempt"), "passes": sums("passes"), "dribbles": sums("dribbles"),
+            "tackles": sums("tackles"), "cards": sums("cards"), "crossPasses": pair(5, 20, 0.35),
+            "throughPasses": pair(2, 10, 0.4), "blocks": pair(0, 5, 0.5), "fouls": sums("cards")[0] + rng.randint(2, 8),
+            "offsides": rng.randint(0, 3), "clearances": rng.randint(5, 20), "intercepts": rng.randint(5, 20),
+            "tackles_inbox": 0, "passes_inbox": 0, "intercepts_inbox": 0, "dribble_inbox": 0,
+            "rating": round(sum(p["rating"] for p in players) / len(players), 2), "runDistanceKm": round(total("runDistanceMeter") / 1000, 1),
+            "players": players, "substitutes": [], "users": [], "shootout": 0, "injuredPlayers": 0,
+            "reserved": [{"id": str(int(p["spid"]) % 1000000), "rating": 0, "dbid": int(p["spid"]) % 1000000}
+                         for p in pos if p["pos"] == POS_SUB]})
+    mine_poss = rng.randint(40, 60)  # possession totals add up to 100; left / center / right likewise
+    for team, share in zip(teams, (mine_poss, 100 - mine_poss)):
+        left = rng.randint(15, 45); center = rng.randint(20, 100 - left - 10)
+        team["possession"] = {"total": share, "left": left, "center": center, "right": 100 - left - center,
+                              "df": rng.randint(10, 30), "mf": rng.randint(40, 60), "fw": rng.randint(10, 30)}
+    me, opp = ("home", "away") if my_home else ("away", "home")
+    side = {me: teams[0], opp: teams[1]}
+    team_of, best = max(((name, p) for name, team in side.items() for p in team["players"]), key=lambda x: x[1]["rating"])
+    return {"myTeam": me, "opponentTeam": opp, "home": side["home"], "away": side["away"], "matchFinishedTime": 5400,
+            "forfeits": 0, "motm": {"team": team_of, "id": best["id"], "spid": best["spid"], "dbid": best["dbid"],
+                                    "rating": best["rating"], "name": "XXDISPLAYNAMEXX"}}
+
+
 def ep_l2_match(query, body, sim=False):
     """POST /league2/match {matchtype, playtype, round, home, away, date} -> a /match/<id>
     resource (MatchProxy.registerByResource). /match/sim plays the round right away."""
@@ -1680,7 +1734,14 @@ def ep_l2_match(query, body, sim=False):
         match["gamesettings"]["simulated"] = True
         g = mine["goals"] if mine else {"home": 0, "away": 0}
         mine_g, opp_g = (g["home"], g["away"]) if mine and mine["home"] == my_teamid(st) else (g["away"], g["home"])
-        out.update(leagueparam=param, eventlist=sim_events(match, mine_g, opp_g), score=mine and mine["goals"])
+        events = sim_events(match, mine_g, opp_g)
+        match["result"] = sim_result(match, events, match["gamesettings"]["home"])  # the result screen after it
+        # then the reward screen: EXP and EP as after a played match (without it the screen stayed
+        # empty and the way back to the Liga menu stopped there)
+        match["reward"] = match_reward(st, match["result"])
+        add_ep(st, match["reward"]["money"]["reward"]["total"])
+        lg.pop("pending", None)  # the round is played already
+        out.update(leagueparam=param, eventlist=events, score=mine and mine["goals"])
     _save(st)
     out["resources"] = ([{"uri": f"/match/{match['id']}", "body": match}]
                         + (l2_resources(st) + coach_me_resources(st, _default_slot(st)) if sim else []))  # coupon count
