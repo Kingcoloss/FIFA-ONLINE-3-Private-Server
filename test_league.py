@@ -352,6 +352,31 @@ def main():
         kick = hc.coach_me(hc._state(), 0)["team"]["kickers"]
         assert len(kick) == 5 and kick[3] == xi_ids[1] and kick[0] == xi_ids[2], kick
         assert not put("/game/my/team/kickers/2", "no-such-card")["result"]
+        # issue #13, Tim > Locker room: every stepper has items (TOP / PANTS / SHOES, visible), boots
+        # by brand; a look is saved on the card as lr and the shirt number swaps with its wearer;
+        # Item saya holds the ticket (itemid 801, expireat in ms) that makes the look count in matches
+        lri = body(hc.ENDPOINTS["/static/db/LOCKERROOMITEM"]("", b""))
+        assert all(i["visible"] and i["type"] in ("TOP", "PANTS", "SHOES") for i in lri.values())
+        cats = {(i["type"], i["category"], i.get("option") if i["category"] == "GLOVE" else None) for i in lri.values()}
+        assert cats == {("TOP", c, None) for c in ("TATTOO", "UNIFORMKIND", "UNIFORMARM", "WRIST")} | {
+            ("TOP", "GLOVE", "PLAYERGLOVE"), ("TOP", "GLOVE", "GKGLOVE"), ("PANTS", "SOCKS", None),
+            ("PANTS", "KNEE", None), ("SHOES", "SHOES", None)}, cats
+        shoes = [i for i in lri.values() if i["type"] == "SHOES"]
+        assert len(shoes) == 614 and {i["option"] for i in shoes} == set(hc.LR_SHOES)
+        assert lri["100012"]["asset"] == 12 and lri["100012"]["option"] == "ADIDAS" and lri["1001"]["color"] == "1"
+        tix = [i for i in hc.coach_me(hc._state(), 0)["items"] if i["itemid"] == 801]
+        assert len(tix) == 1 and tix[0]["createat"] and tix[0]["expireat"] > time.time() * 1000
+        assert not body(hc.ENDPOINTS["/items/itemtodepot"]("", json.dumps({"moveitems": [tix[0]["_id"]]}).encode()))["result"]
+        look = {"100012": {"id": "100012"}, "10": {"id": "10", "pos": "L", "clr": 3}, "nope": {"id": "nope"}}
+        r = body(hc.route(f"/lockerroom/{xi_ids[0]}/itemset")("", json.dumps({"itemset": look, "_method": "PUT"}).encode()))
+        card = lambda i: next(p for p in r["resources"][0]["body"]["team"]["players"] if p["_id"] == i)
+        assert r["result"] and card(xi_ids[0])["lr"] == {k: look[k] for k in ("100012", "10")}
+        r = body(hc.route(f"/lockerroom/{xi_ids[0]}/itemset")("", b'{"itemset":{},"_method":"PUT"}'))  # Reset
+        assert r["result"] and "lr" not in card(xi_ids[0])
+        n0, n1 = card(xi_ids[0])["jersey"], card(xi_ids[1])["jersey"]
+        r = body(hc.route(f"/lockerroom/{xi_ids[0]}/jersey")("", json.dumps({"desired": n1, "giverplayerid": xi_ids[1]}).encode()))
+        assert r["result"] and (card(xi_ids[0])["jersey"], card(xi_ids[1])["jersey"]) == (n1, n0)
+        assert not body(hc.route(f"/lockerroom/{xi_ids[0]}/jersey")("", b'{"desired": 100}'))["result"]
         # a Formasi save with an empty slot keeps the others in place; a short list (old saves
         # dropped empty slots) comes back as 5 starters
         sq = hc.coach_me(hc._state(), 0)["team"]["squad"]
@@ -570,7 +595,7 @@ def main():
         ep1 = ep()
         assert post("/shop/purchase", {"shopid": pid, "productid": pid, "bunch": 0})["result"] and ep() == ep1 - bunches[0]["price"]
         assert post("/shop/purchase", {"shopid": pid, "productid": pid, "bunch": 1})["result"] and ep() == ep1 - bunches[0]["price"] - bunches[1]["price"]
-        items = lambda: hc.coach_me(hc._state(), hc._default_slot(hc._state()))["items"]
+        items = lambda: [i for i in hc.coach_me(hc._state(), hc._default_slot(hc._state()))["items"] if i["itemid"] != hc.LR_TICKET]
         assert [(i["itemid"], i["remains"], i["staticdata"]["category"]) for i in items()] == [(pid, 11, "PLAYERPACK")]
         n0 = len(team()["players"])
         got = body(hc.route(f"/item/{items()[0]['_id']}/use")("", b"{}"))

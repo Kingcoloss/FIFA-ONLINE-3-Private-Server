@@ -94,6 +94,12 @@ Added, passing the tests but not yet checked in the client:
 - **Tim > Peran** saves the captain and each set-piece taker (issue #8: `PUT /game/my/team/captain`
   and `/game/my/team/kickers/<0-4>` were missing). The five kicker slots (left corner, right
   corner, free kick, penalty, free kick 2) keep their place; an empty one takes a starter.
+- **Tim > Locker room** works (issue #13): shirt style and sleeves, tattoo, wristband, gloves
+  (keepers: 39 glove designs), socks, knee pads, 614 boots by brand, and shirt numbers (taking
+  a number swaps it with its wearer). The item table `/static/db/LOCKERROOMITEM` was missing, so
+  every list was empty and the boots panel broke. A player's look is saved on the card, and
+  Item saya holds a permanent locker room ticket, which the game needs to show the look in matches.
+  Only the client's own wristband, glove and knee pad models are offered (one of each).
 - **Shop control on the admin page** (issue #10): every Shop tab (player packs, consumables,
   packages, monthly packages, Featured, MP Shop, Special bonus, chained packages). New packs (by
   season, top N, OVR, max grade, position, league), random boxes, EP cards, packages and monthly

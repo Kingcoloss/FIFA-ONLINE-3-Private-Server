@@ -2954,6 +2954,138 @@ def ep_trade3_info(query, body):
 
 
 # --------------------------------------------------------------------------- #
+# Locker room (Tim > Locker room, issue #13) dresses a Tim inti player and changes shirt numbers.
+# ItemController fills its panels from GET /static/db/LOCKERROOMITEM {lockerroomid: item}: Atas
+# takes type TOP, Bawah PANTS, Boots SHOES, each only with visible true; LockerRoomController
+# localizes itemname and splits color at ","; each stepper is sorted by order. With no table every
+# stepper was empty and the boots panel threw (ItemPanelShoes.onStepperBrandChanged). Steppers:
+#   TOP: TATTOO (tattocode), UNIFORMKIND (jerseystylecode; option FIT sets jerseyfit),
+#        UNIFORMARM (jerseysleevlengthcode; option WINTERGEAR), WRIST, GLOVE
+#   PANTS: SOCKS (socklengthcode), KNEE
+#   SHOES: shoecode; option = brand, the brand stepper's LOCKERROOM_SHOES_BRAND_<option>
+# WRIST, KNEE and GLOVE option PLAYERGLOVE are accessory meshes (0 = none): id [asset],
+# [asset + 1] or both for left, right or both, colour = the LOCKERROOM_COLOR_<c> picked from
+# `color`, minus 1. GLOVE option GKGLOVE (keepers only): mesh [asset, asset + 1], texture color[0].
+# Only the client's own meshes are used (its default look: wrist 67, glove 6, knee 1, keeper
+# glove 18 with the LOCKERROOM_GLOVEGK_<gkglovetypecode> textures); the ids of the other wrist,
+# glove and knee kinds are not in the client.
+# A look is saved as the card's lr {lockerroomid: {id, pos?, clr?}} (PUT /lockerroom/<_id>/itemset
+# on player or panel change and on exit), which getPlayerAssetsFromLockerRoomItems turns into the
+# 3D player in matches, only while the coach holds a running ticket: the first item with itemid
+# 801 (LockerRoomController._lockerRoomItemID), createat set and expireat (ms) in the future. The
+# shirt number needs the ticket too (LOCKERROOM_TICKET_BACKNUMBER_OVER).
+# --------------------------------------------------------------------------- #
+LR_TICKET = 801  # the client's own icon externalAssets/shop/801.png (a shirt and boots)
+LR_TICKET_ITEM = {"_id": "lockerroomticket", "id": "lockerroomticket", "itemid": LR_TICKET, "remains": 1, "count": 1,
+                  "expireable": True, "expired": False, "createat": 1483228800000, "expireat": VIP_UNTIL,
+                  "staticdata": {"itemid": LR_TICKET, "productid": LR_TICKET, "name": "Tiket locker room",
+                                 "category": "LOCKERROOM", "type": "LOCKERROOM", "unit": "COUNT",
+                                 "itemicon": LR_TICKET}}
+LR_COLORS = ",".join(map(str, range(1, 11)))  # LOCKERROOM_COLOR_1..10
+LR_GK_GLOVES = (*range(1, 12), *range(91, 119))  # LOCKERROOM_GLOVEGK_<gkglovetypecode>
+LR_SHOES = {  # LOCKERROOM_SHOES_<shoecode> by brand (LOCKERROOM_SHOES_BRAND_<brand>; the rest ETC)
+    "ADIDAS": ('12 21-36 71-72 74-78 80-81 83-84 87 89 91-93 126-150 198-205 207-211 14085-14086 '
+               '14088 14090 14126-14129 14131-14158 14216 14500-14503 15021-15023 15026 15029 '
+               '15031-15032 15034-15035 15129-15160 15205-15213 15215-15227 16131 16147-16148 '
+               '17130-17142 17144-17158 18019-18025 18027-18034 18038-18044 18099 18108-18109 '
+               '18115 18123 18143 18209-18227'),
+    "NIKE": ('38-45 117 161 224 226 228-232 14101 14168-14181 15045-15047 15049-15062 15168-15181 '
+             '15230-15237 17173-17174 17176 17178-17180 17183 17185 18045-18048 18050-18058 18063 '
+             '18080 18181 18235-18243 18253 18343'),
+    "PUMA": ('47-51 109 170-178 14107 14185-14187 15063 15065 15184-15187 15238-15244 17189-17195 '
+             '18065 18067-18069 18232-18234'),
+    "MIZUNO": ('60-63 95-96 154-160 220 14162 14164 14167 15039-15042 15162 15164 15167 '
+               '15203-15204 15255 17167-17170 18093-18094 18096-18097 18244-18245'),
+    "UMBRO": ('52-57 70 182-183 185-186 188 212-217 14188-14193 15067-15070 15072-15073 '
+              '15188-15193 15245-15251 17196-17204 18071-18073 18077-18079 18250-18252'),
+    "UNDER ARMOUR": ('58-59 189-194 14194-14196 15075-15076 15078-15079 15081 15194-15196 '
+                     '15252-15254 17205-17208 18083-18086'),
+    "NEW BALANCE": ('15043-15044 17171-17172 18087-18090 18246-18249'),
+    "ASICS": ('17159-17161 18105-18106'),
+    "HUMMEL": ('15228-15229 18037'),
+    "JOMA": ('17163-17166 18036 18111-18112 18128'),
+    "LOTTO": ('37 73 152 14161 15161 17162 18018'),
+    "PIRMA": ('17186-17188 18016-18017'),
+    "ETC": ('0 15-20 46 64-69 153 196-197 218-219 14182-14183 14197-14202 15015-15020 15182-15183 '
+            '15197-15202'),
+}
+
+
+def _spans(text):
+    """'1-3 7' -> 1, 2, 3, 7."""
+    for s in text.split():
+        a, _, b = s.partition("-")
+        yield from range(int(a), int(b or a) + 1)
+
+
+def _lr_item(kind, category, name, asset, order, **extra):
+    return {"type": kind, "visible": True, "category": category, "itemname": "LOCKERROOM_" + name,
+            "asset": asset, "order": order, **extra}
+
+
+@functools.lru_cache(maxsize=None)
+def lockerroom_items():
+    """GET /static/db/LOCKERROOMITEM. Ids stay fixed (saved looks refer to them): the rows below
+    1-17, keeper gloves 1000 + texture, boots 100000 + shoecode."""
+    rows = (("TOP", "TATTOO", "TOP_TATTOOSHOW", 0, {}), ("TOP", "TATTOO", "TOP_TATTOOHIDDEN", -1, {}),
+            ("TOP", "UNIFORMKIND", "TOP_OUTSTYLE", 0, {}), ("TOP", "UNIFORMKIND", "TOP_INSTYLE", 1, {}),
+            ("TOP", "UNIFORMKIND", "TOP_TECHSTYLE", 1, {"option": "FIT"}),
+            ("TOP", "UNIFORMARM", "TOP_UNISHORT", 0, {}), ("TOP", "UNIFORMARM", "TOP_UNILONG", 1, {}),
+            ("TOP", "UNIFORMARM", "TOP_UNIWINTERGEAR", 1, {"option": "WINTERGEAR"}),
+            ("TOP", "WRIST", "TOP_WRISTHIDDEN", 0, {}), ("TOP", "WRIST", "TOP_WRISTSHORT", 67, {"color": LR_COLORS}),
+            ("TOP", "GLOVE", "TOP_GLOVEHIDDEN", 0, {"option": "PLAYERGLOVE"}),
+            ("TOP", "GLOVE", "TOP_GLOVEFIELD", 6, {"option": "PLAYERGLOVE", "color": LR_COLORS}),
+            ("PANTS", "SOCKS", "PANTS_SOCKSNORMAL", 0, {}), ("PANTS", "SOCKS", "PANTS_SOCKSSHORT", 1, {}),
+            ("PANTS", "SOCKS", "PANTS_SOCKSLONG", 2, {}),
+            ("PANTS", "KNEE", "PANTS_KNEEHIDDEN", 0, {}), ("PANTS", "KNEE", "PANTS_KNEEPAD", 1, {"color": LR_COLORS}))
+    items = {str(i): _lr_item(*row[:4], i, **row[4]) for i, row in enumerate(rows, 1)}
+    for i, n in enumerate(LR_GK_GLOVES):
+        items[str(1000 + n)] = _lr_item("TOP", "GLOVE", f"GLOVEGK_{n}", 18, i, option="GKGLOVE", color=str(n))
+    for b, (brand, codes) in enumerate(LR_SHOES.items()):
+        for k, code in enumerate(_spans(codes)):
+            items[str(100_000 + code)] = _lr_item("SHOES", "SHOES", f"SHOES_{code}", code, b * 1000 + k, option=brand)
+    return items
+
+
+def _my_card(pid):
+    st = _state(); slot = _default_slot(st)
+    return st, slot, next((p for p in st["teams"][str(slot)]["players"] if iid(p) == pid), None)
+
+
+def ep_lockerroom_itemset(pid, query, body):
+    """PUT /lockerroom/<_id>/itemset {itemset: {lockerroomid: {id, pos?, clr?}}} ({} = Reset): the
+    card's look. The reply's /coach/me gives the client the new lr, which it reads back when the
+    player is picked again."""
+    st, slot, p = _my_card(pid)
+    if p is None:
+        return _json({"result": False})
+    items = lockerroom_items()
+    itemset = json.loads(body or b"{}").get("itemset") or {}
+    lr = {k: v for k, v in itemset.items() if k in items and isinstance(v, dict)}
+    if lr:
+        p["lr"] = lr
+    else:
+        p.pop("lr", None)
+    _save(st)
+    return _json({"result": True, "resources": coach_me_resources(st, slot)})
+
+
+def ep_lockerroom_jersey(pid, query, body):
+    """PUT /lockerroom/<_id>/jersey {desired, giverplayerid}: shirt number 1-99; the player who
+    wears it gets this player's old number."""
+    st, slot, p = _my_card(pid)
+    n = int(json.loads(body or b"{}").get("desired") or 0)
+    if p is None or not 1 <= n <= 99:
+        return _json({"result": False})
+    giver = next((x for x in st["teams"][str(slot)]["players"] if x is not p and x.get("jersey") == n), None)
+    if giver is not None:
+        giver["jersey"] = p.get("jersey", 0)
+    p["jersey"] = n
+    _save(st)
+    return _json({"result": True, "resources": coach_me_resources(st, slot)})
+
+
+# --------------------------------------------------------------------------- #
 # Shop > Pemain sells player packs for EP; Item saya > Pemain opens them one card at a time
 # (TeamManagementPlayerCardScreen: POST /item/<_id>/use -> {player}). Icons are the real FO3 ID
 # shop images in the client's CDN cache (externalAssets/shop/<itemid>.png). A pack draws a
@@ -3493,11 +3625,11 @@ def my_coach(st):
 def coach_items(st, slot, where="items"):
     """/coach/me items (where="depot": the Gudang list): one stack per pack ({_id, itemid,
     remains}); expireable marks an owned item (GeneralInventoryTileItemRenderer: Gunakan button
-    instead of Beli)."""
+    instead of Beli). Item saya also holds the locker room ticket for good."""
     coach = next(c for c in st["coaches"] if c["slot"] == slot)
     return [{"_id": i["_id"], "id": i["_id"], "itemid": i["itemid"], "remains": i["remains"], "count": i["remains"],
              "expireable": True, "expired": False, "staticdata": item_def(i["itemid"])}
-            for i in coach.get(where, []) if i["itemid"] in PACKS or i["itemid"] in ITEMS]
+            for i in coach.get(where, []) if i["itemid"] in PACKS or i["itemid"] in ITEMS] + [LR_TICKET_ITEM] * (where == "items")
 
 
 def ep_shop_purchase(query, body):
@@ -3636,9 +3768,10 @@ def depot_reply(st, ok):
 
 
 def ep_item_to_depot(query, body):
-    """POST /items/itemtodepot {moveitems: [_id...]}: Item saya -> Gudang."""
+    """POST /items/itemtodepot {moveitems: [_id...]}: Item saya -> Gudang (the locker room ticket stays)."""
     st = _state(); coach = my_coach(st)
-    moved = [stack_move(coach, str(i), "items", "depot") for i in json.loads(body or b"{}").get("moveitems") or []]
+    moved = [stack_move(coach, str(i), "items", "depot") for i in json.loads(body or b"{}").get("moveitems") or []
+             if str(i) != LR_TICKET_ITEM["_id"]]
     return depot_reply(st, moved and all(moved))
 
 
@@ -3767,6 +3900,8 @@ ROUTES = [
     (re.compile(r"/bag/(\w+)/unpack"), ep_bag_unpack),
     (re.compile(r"/coach/(\w+)/postponed"), ep_coach_postponed),
     (re.compile(r"/stadium/(\d+)"), ep_stadium),
+    (re.compile(r"/lockerroom/(\w+)/itemset"), ep_lockerroom_itemset),
+    (re.compile(r"/lockerroom/(\w+)/jersey"), ep_lockerroom_jersey),
     (re.compile(r"/static/info/authentic/team/(licensed|all)/(\d+)"), ep_authentic_team),
     # Ganti tim screen: a club's summary for its TeamInfoNew (name/crest id, ovr, teamgrade)
     (re.compile(r"/static/info/team/summary/(\d+)"), lambda t, q, b: _json({**roster(int(t))["summary"], "id": int(t)})),
@@ -3859,6 +3994,7 @@ ENDPOINTS.update({
     "/static/db/PLAYERTRADE": lambda q, b: _json({"playergrade": {str(s): trade_grades(s) for s in range(2, 101)}}),
     "/static/db/EXPPLAYER": lambda q, b: _json(EXPPLAYER), "/static/db/EXPCOACH": lambda q, b: _json(EXPCOACH),
     "/static/db/PE2STATICVALUES": lambda q, b: _json(PE2STATICVALUES),
+    "/static/db/LOCKERROOMITEM": lambda q, b: _json(lockerroom_items()),
     "/player/enhance2.5/restore": ep_enhance25_restore,
     "/events": lambda q, b: _json({"events": [ENHANCE_EVENT]}),
     "/static/db/STATICVALUES/max_coachlevel": lambda q, b: _json(COACH_MAX_LEVEL),
