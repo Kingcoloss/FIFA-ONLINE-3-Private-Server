@@ -122,9 +122,10 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   Danh sách sơ đồ đã có dữ liệu, và thanh thể lực hiện đầy (không giữ độ mệt giữa các trận).
 - **Mở được hộp ngẫu nhiên** (Kotak Platinum và các hộp khác, issue #12): màn hình hộp liệt kê phần thưởng
   từ `staticdata.availables`, trước đây bị thiếu, nên mọi hộp đều lỗi khi bấm "Gunakan" (dùng).
-- **Thẻ mới vào Tim inti**: Tim inti giờ chứa cả CLB (200). Trước đây chỉ 36, và mọi thẻ tiếp theo từ gói,
-  giao dịch hay Market đều vào thẳng Tim Cadangan. Trang quản trị có thể chuyển mọi thẻ Tim Cadangan về
-  cùng lúc.
+- **Thẻ mới vào Tim Cadangan**: thẻ từ gói, giao dịch, Market, Bag hoặc trang quản trị hiện "-" ở cột Tim
+  trong Skuad, sẵn sàng cho Tukar Scout. Nút của thẻ chuyển nó sang Tim inti (RES màu xanh: Tim inti nằm
+  ngoài 18 cầu thủ của đội hình), nơi chứa được cả CLB (200). Trang quản trị có thể chuyển mọi thẻ Tim
+  Cadangan sang Tim inti cùng lúc.
 - **Tìm kiếm trên Market** thấy thẻ của mọi mùa: game chỉ tìm các mùa trong `/static/roster`, vốn thiếu 29
   mùa có thẻ trên Market (World Legend, World Best, '14 TOTS, …), nên vd. WL R. Gullit không bao giờ hiện
   ra. Danh sách mùa trong bộ lọc Market đã dùng được (issue #14: chọn mùa báo lỗi "cannot convert 39 to

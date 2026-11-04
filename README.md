@@ -122,9 +122,10 @@ Added, passing the tests but not yet checked in the client:
   is kept between matches).
 - **Random boxes open** (Kotak Platinum and the rest, issue #12): the box screen lists its prizes
   from `staticdata.availables`, which was missing, so every box failed at "Gunakan".
-- **New cards join Tim inti**: Tim inti now holds the whole club (200). It held 36, and every
-  further card from a pack, trade or the Market went straight to Tim Cadangan. The admin page can
-  move every Tim Cadangan card back at once.
+- **New cards join Tim Cadangan**: a card from a pack, a trade, the Market, the Bag or the admin
+  page shows "-" in Skuad's Tim column, ready for Tukar Scout. Its button moves it to Tim inti
+  (green RES: Tim inti outside the 18 of the squad), which can hold the whole club (200). The admin
+  page can move every Tim Cadangan card to Tim inti at once.
 - **Market search** finds cards of every season: the game searches only the seasons in
   `/static/roster`, which lacked 29 seasons with Market cards (World Legend, World Best,
   '14 TOTS, …), so e.g. WL R. Gullit never showed up. The Market filter's season list works

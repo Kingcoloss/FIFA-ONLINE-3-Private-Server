@@ -131,9 +131,10 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   tampil penuh (kelelahan tidak disimpan antar pertandingan).
 - **Kotak acak bisa dibuka** (Kotak Platinum dan lainnya, issue #12): layar kotak menampilkan
   hadiahnya dari `staticdata.availables`, yang belum ada, jadi tiap kotak gagal saat "Gunakan".
-- **Kartu baru masuk Tim inti**: Tim inti sekarang menampung seluruh klub (200). Dulu hanya 36,
-  dan tiap kartu berikutnya dari pak, trade, atau Market langsung masuk Tim Cadangan. Halaman admin
-  bisa memindahkan semua kartu Tim Cadangan kembali sekaligus.
+- **Kartu baru masuk Tim Cadangan**: kartu dari pak, trade, Market, Bag, atau halaman admin tampil
+  "-" di kolom Tim pada Skuad, siap untuk Tukar Scout. Tombolnya memindahkan kartu ke Tim inti (RES
+  hijau: Tim inti di luar 18 pemain skuad), yang bisa menampung seluruh klub (200). Halaman admin bisa
+  memindahkan semua kartu Tim Cadangan ke Tim inti sekaligus.
 - **Pencarian Market** menemukan kartu dari semua musim: game hanya mencari musim di
   `/static/roster`, yang tidak punya 29 musim dengan kartu Market (World Legend, World Best,
   '14 TOTS, …), jadi mis. WL R. Gullit tidak pernah muncul. Daftar musim di filter Market jalan

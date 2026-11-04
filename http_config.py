@@ -2265,10 +2265,9 @@ def ep_cup_record(query, body):
 # --------------------------------------------------------------------------- #
 LINES = {"GK": range(0, 1), "DF": range(1, 9), "MF": range(9, 20), "FW": range(20, 28)}  # Enums.PLAYERPOSITION
 MAX_PLAYERS = 200  # coach.limits.players (squad size; user: "max skuad naikan", was 60)
-# Tim inti (player state "first": Formasi lists only these) holds the whole club ("Tim inti x/200"
-# in Skuad). It held 36 and every further card from a pack, trade or the Market went straight to
-# Tim Cadangan (user: "player dari pack/ trade/market jangan masuk langsung ke reversed"); now
-# Tim Cadangan only holds the cards moved there by hand, which Tukar Scout trades from.
+# Tim inti (player state "first": Formasi lists only these) can hold the whole club ("Tim inti
+# x/200" in Skuad). Skuad's Tim column shows MAIN/SUB for the 18 of the squad, a green RES button
+# for the rest of Tim inti and "-" for Tim Cadangan; the button moves a card between the two.
 FIRST_TEAM_MAX = MAX_PLAYERS
 
 
@@ -2308,15 +2307,15 @@ def ep_transfer_search(spid, query, body):
 
 
 def add_player(team, spid, grade=1):
-    """A new card instance in my club (reserves); returns it."""
+    """A new card instance in my club, in Tim Cadangan ("-" in Skuad, ready for Tukar Scout; user:
+    "neymar baru di pack harusnya jangan masuk res"): packs, trades, the Market, Bag gifts and the
+    admin page all add through here. Returns it."""
     with closing(_db()) as c:
         r = c.execute("SELECT playerid FROM players WHERE spid = ?", (int(spid),)).fetchone()
         name = gen_teams.jersey_name(c, r[0]) if r else ""
     used = {p.get("jersey") for p in team["players"]}
     p = {"_id": new_iid(), "spid": int(spid), "expandme": "player", "grade": int(grade),
-         "jersey": next((n for n in range(12, 100) if n not in used), 99), "jerseyname": name}
-    if first_team_count(team) >= FIRST_TEAM_MAX:
-        p["team2"] = True  # Tim inti full
+         "jersey": next((n for n in range(12, 100) if n not in used), 99), "jerseyname": name, "team2": True}
     team["players"].append(p)
     return p
 

@@ -108,8 +108,9 @@
   体力条显示为满（比赛之间不保留疲劳）。
 - **随机箱可以打开**（Kotak Platinum 等，issue #12）：箱子界面从 `staticdata.availables` 列出奖品，
   之前缺少这个字段，所以每个箱子在 "Gunakan"（使用）时都会失败。
-- **新球员卡进入 Tim inti**：Tim inti 现在可以容纳整个俱乐部（200 人）。以前上限是 36 人，之后从卡包、
-  交易或 Market 得到的每张卡都会直接进入 Tim Cadangan。管理后台可以一次把 Tim Cadangan 的球员全部移回。
+- **新球员卡进入 Tim Cadangan**：从卡包、交易、Market、Bag 或管理后台得到的卡，在 Skuad 的 Tim 一栏显示
+  "-"，可以直接用于 Tukar Scout。点卡上的按钮可把它移到 Tim inti（绿色 RES：18 人大名单之外的 Tim inti），
+  Tim inti 可以容纳整个俱乐部（200 人）。管理后台可以一次把 Tim Cadangan 的球员全部移到 Tim inti。
 - **Market 搜索**可以找到所有赛季的球员卡：游戏只搜索 `/static/roster` 中的赛季，而其中缺少 29 个有
   Market 球员卡的赛季（World Legend、World Best、'14 TOTS 等），所以例如 WL R. Gullit 从来搜不到。
   Market 筛选的赛季列表可以用了（issue #14：选择赛季时报错 "cannot convert 39 to Array"，因为每个赛季的

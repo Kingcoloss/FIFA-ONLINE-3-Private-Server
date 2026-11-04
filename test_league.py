@@ -557,14 +557,14 @@ def main():
         pids = [{"id": hc.iid(p), "spid": p["spid"], "grade": hc.grade_of(p), "price": hc.card_price(p["spid"], hc.grade_of(p))}
                 for p in give3]
         total = sum(x["price"] for x in pids)
-        assert not post("/trade3/proposal", {"id": "vip", "slotnum": 3, "playerids": pids})["result"]  # still Tim inti
+        # Market cards arrive in Tim Cadangan, which Tukar Scout trades from; a Tim inti card is refused
+        players = lambda: {p["_id"]: p for p in hc.coach_me(hc._state(), hc._default_slot(hc._state()))["team"]["players"]}
+        assert all("state" not in players()[x["id"]] for x in pids)
         move = lambda pid, where: body(hc.route(f"/player/{pid}/move/{where}")("", b"{}"))
         assert not move(starter, "secondteam")["result"]  # the 18 stay in Tim inti
-        for x in pids:
-            assert move(x["id"], "secondteam")["result"]
-        players = {p["_id"]: p for p in hc.coach_me(hc._state(), hc._default_slot(hc._state()))["team"]["players"]}
-        assert all("state" not in players[x["id"]] for x in pids) and players[starter]["state"] == "first"
-        assert move(pids[0]["id"], "firstteam")["result"] and move(pids[0]["id"], "secondteam")["result"]
+        assert move(pids[0]["id"], "firstteam")["result"] and players()[pids[0]["id"]]["state"] == "first"
+        assert not post("/trade3/proposal", {"id": "vip", "slotnum": 3, "playerids": pids})["result"]
+        assert move(pids[0]["id"], "secondteam")["result"] and players()[starter]["state"] == "first"
         pr = post("/trade3/proposal", {"id": "vip", "slotnum": 3, "playerids": pids})
         assert pr["result"] and len(pr["props"]) == hc.TRADE3_STATIC["playertrade3_normal"]["3"] + 2, pr
         assert all(total * 0.5 <= o["price"] <= total * 3 for o in pr["props"]), (total, pr["props"])
@@ -846,10 +846,9 @@ def main():
                 "error": "pemain tidak ditemukan"}
         finally:
             srv.shutdown(); srv.server_close()
-        # --- Tim inti holds the whole club (user: "player dari pack/ trade/market jangan masuk
-        # langsung ke reversed"; it held 36 and every further card went to Tim Cadangan): a new
-        # card joins Tim inti, a login keeps the cards where they are, Tim Cadangan only holds the
-        # cards moved there by hand (Tukar Scout's list), and they can always move back
+        # --- Tim inti can hold the whole club; a new card joins Tim Cadangan ("-" in Skuad, user:
+        # "neymar baru di pack harusnya jangan masuk res"), a login keeps the cards where they are,
+        # and a Tim Cadangan card can always move to Tim inti
         assert hc.FIRST_TEAM_MAX == hc.MAX_PLAYERS
         st = hc._state(); t = st["teams"][str(hc._default_slot(st))]
         for p in t["players"]:
@@ -865,7 +864,7 @@ def main():
         # the Skuad tab's move to Tim inti reads limits.firstTeam (missing = it never asks)
         assert hc.coach_me(hc._state(), hc._default_slot(hc._state()))["limits"]["firstTeam"] == hc.FIRST_TEAM_MAX
         new = hc.add_player(t, 88158023)
-        assert not new.get("team2")
+        assert new["team2"] and not next(p for p in hc.owned_team(t)["players"] if p["id"] == new["_id"]).get("state")
         hc._save(hc._state() | {"teams": {**hc._state()["teams"], str(hc._default_slot(st)): t}})
         res = next(p for p in t["players"] if p.get("team2"))
         assert body(hc.route(f"/player/{hc.iid(res)}/move/firstteam")("", b"{}"))["result"]

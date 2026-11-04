@@ -114,9 +114,10 @@ Gudang 등은 게임에 표시되는 화면 이름이라, 게임에서 찾기 �
   채워지고, 체력 바가 가득 찬 상태로 표시됨(경기 사이 피로는 유지하지 않음).
 - **랜덤 박스 열림**(Kotak Platinum 등, issue #12): 박스 화면은 `staticdata.availables`에서 보상 목록을
   가져오는데, 이게 없어서 모든 박스가 "Gunakan"(사용)에서 실패했음.
-- **새 카드는 Tim inti로**: Tim inti가 이제 구단 전체(200명)를 담음. 예전에는 36명까지였고, 그 뒤로 팩,
-  트레이드, Market에서 얻은 카드는 모두 바로 Tim Cadangan으로 갔음. 관리자 페이지에서 Tim Cadangan 카드를
-  한 번에 모두 되돌릴 수 있음.
+- **새 카드는 Tim Cadangan으로**: 팩, 트레이드, Market, Bag, 관리자 페이지에서 얻은 카드는 Skuad의 Tim
+  열에 "-"로 표시되며 바로 Tukar Scout에 쓸 수 있음. 카드의 버튼을 누르면 Tim inti로 옮겨짐(초록색 RES:
+  스쿼드 18명 밖의 Tim inti). Tim inti는 구단 전체(200명)를 담을 수 있음. 관리자 페이지에서 Tim Cadangan
+  카드를 한 번에 모두 Tim inti로 옮길 수 있음.
 - **Market 검색**이 모든 시즌의 카드를 찾음: 게임은 `/static/roster`에 있는 시즌만 검색하는데, 여기에
   Market 카드가 있는 시즌 29개(World Legend, World Best, '14 TOTS, …)가 빠져 있어서 예를 들어 WL R. Gullit이
   나오지 않았음. Market 필터의 시즌 목록이 작동하고(issue #14: 시즌을 고르면 "cannot convert 39 to Array"
