@@ -579,6 +579,26 @@ def main():
         assert post("/shop/purchase", {"shopid": 50881, "productid": 50881, "bunch": 0})["result"]  # Kotak World Best
         n1 = {i["itemid"]: i["remains"] for i in items()}
         assert all(n1[i] - n0.get(i, 0) == n for i, n in hc.PACKAGES[50881][2]) and 50881 not in n1
+        # Gudang (issue #12): whole stacks Item saya -> Gudang and back; a moved stack joins one of the same item
+        depot = lambda: body(hc.ENDPOINTS["/item/depot"]("", b""))
+        assert depot() == []
+        wb = next(i for i in items() if i["itemid"] == 8334)
+        got = post("/items/itemtodepot", {"moveitems": [wb["id"]]})
+        assert got["result"] and [r["uri"] for r in got["resources"]] == ["/coach/me", "/item/depot"]
+        assert [(i["_id"], i["remains"], i["staticdata"]["category"]) for i in depot()] == [(wb["_id"], wb["remains"], "PLAYERPACK")]
+        assert 8334 not in {i["itemid"] for i in items()}
+        assert not body(hc.route(f"/item/{wb['_id']}/use")("", b"{}"))["result"]  # not opened from the Gudang
+        assert not post("/items/itemtodepot", {"moveitems": [wb["id"]]})["result"]  # already there
+        some = items()[0]
+        assert not post("/items/itemtodepot", {"moveitems": [some["id"], "nope"]})["result"] and items()[0] == some  # all or nothing
+        assert not post("/items/itemtodepot", {})["result"]
+        st = hc._state(); hc.inventory_add(hc.my_coach(st), 8334, 1); hc._save(st)
+        again = next(i for i in items() if i["itemid"] == 8334)
+        assert post("/items/itemtodepot", {"moveitems": [again["id"]]})["result"]
+        assert [(i["_id"], i["remains"]) for i in depot()] == [(wb["_id"], wb["remains"] + 1)]
+        assert body(hc.route(f"/item/depottoitem/{wb['_id']}")("", b"{}"))["result"]
+        assert depot() == [] and {i["itemid"]: i["remains"] for i in items()} == {**n1, 8334: n1[8334] + 1}
+        assert not body(hc.route(f"/item/depottoitem/{wb['_id']}")("", b"{}"))["result"]  # unknown id refused
         # Paket Bulanan: items now + one daily Bag entry per day; Serial product steps; Special Bonus
         ep1 = ep(); assert post("/shop/purchase", {"shopid": 81000001, "productid": 81000001, "bunch": 0})["result"]
         assert [m["productid"] for m in body(hc.ENDPOINTS["/monthlypack"]("", b""))] == [81000001]

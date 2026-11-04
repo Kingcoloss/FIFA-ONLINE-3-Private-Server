@@ -3381,13 +3381,14 @@ def my_coach(st):
     return next(c for c in st["coaches"] if c["slot"] == _default_slot(st))
 
 
-def coach_items(st, slot):
-    """/coach/me items: one stack per pack ({_id, itemid, remains}); expireable marks an owned
-    item (GeneralInventoryTileItemRenderer: Gunakan button instead of Beli)."""
+def coach_items(st, slot, where="items"):
+    """/coach/me items (where="depot": the Gudang list): one stack per pack ({_id, itemid,
+    remains}); expireable marks an owned item (GeneralInventoryTileItemRenderer: Gunakan button
+    instead of Beli)."""
     coach = next(c for c in st["coaches"] if c["slot"] == slot)
     return [{"_id": i["_id"], "id": i["_id"], "itemid": i["itemid"], "remains": i["remains"], "count": i["remains"],
              "expireable": True, "expired": False, "staticdata": item_def(i["itemid"])}
-            for i in coach.get("items", []) if i["itemid"] in PACKS or i["itemid"] in ITEMS]
+            for i in coach.get(where, []) if i["itemid"] in PACKS or i["itemid"] in ITEMS]
 
 
 def ep_shop_purchase(query, body):
@@ -3492,6 +3493,56 @@ def ep_static_item(query, body):
         except (TypeError, ValueError):
             pass
     return _json({str(i): item_def(i) for i in ids if i in (EP_ITEM, ES_ITEM) or i in PACKS or i in ITEMS or i in PACKAGES})
+
+
+# --------------------------------------------------------------------------- #
+# Gudang (Item saya > Gudang, ItemDepotTabPage; issue #12): coach["depot"] holds stacks like
+# coach["items"]. An Item saya tile (packs, USE items: GeneralInventoryTileItemRenderer
+# .isMovableItem) posts /items/itemtodepot {moveitems: [id]}; a Gudang tile posts
+# /item/depottoitem/<_id> {} (ItemUtil.checkMovableItemsToInventory checks for room first).
+# Whole stacks move. On {result: true} the client GETs /item/depot (an array of coach_items
+# entries) and shows DepotItemMoveCompletePopup; otherwise a dialog with `reason`.
+# --------------------------------------------------------------------------- #
+def stack_move(coach, item_id, src, dst):
+    """Move stack item_id from coach[src] to coach[dst], joining a stack of the same item there."""
+    it = next((i for i in coach.get(src, []) if i["_id"] == item_id and i["remains"] > 0), None)
+    if it is None:
+        return False
+    coach[src].remove(it)
+    same = next((i for i in coach.setdefault(dst, []) if i["itemid"] == it["itemid"]), None)
+    if same is None:
+        coach[dst].append(it)
+    else:
+        same["remains"] += it["remains"]
+    return True
+
+
+def depot_reply(st, ok):
+    if not ok:  # nothing saved: a refused move changes nothing
+        return _json({"result": False, "reason": "Item tidak ditemukan."})
+    _save(st)
+    slot = _default_slot(st)
+    return _json({"result": True, "resources": coach_me_resources(st, slot)
+                  + [{"uri": "/item/depot", "body": coach_items(st, slot, "depot")}]})
+
+
+def ep_item_to_depot(query, body):
+    """POST /items/itemtodepot {moveitems: [_id...]}: Item saya -> Gudang."""
+    st = _state(); coach = my_coach(st)
+    moved = [stack_move(coach, str(i), "items", "depot") for i in json.loads(body or b"{}").get("moveitems") or []]
+    return depot_reply(st, moved and all(moved))
+
+
+def ep_depot_to_item(item_id, query, body):
+    """POST /item/depottoitem/<_id> {}: Gudang -> Item saya."""
+    st = _state()
+    return depot_reply(st, stack_move(my_coach(st), item_id, "depot", "items"))
+
+
+def ep_item_depot(query, body):
+    """GET /item/depot: the Gudang list."""
+    st = _state()
+    return _json(coach_items(st, _default_slot(st), "depot"))
 
 
 # --------------------------------------------------------------------------- #
@@ -3603,6 +3654,7 @@ def ep_bag_unpackall(query, body):
 # Path-pattern routes (ids in the path); checked after the exact ENDPOINTS.
 ROUTES = [
     (re.compile(r"/item/(\w+)/use"), ep_item_use),
+    (re.compile(r"/item/depottoitem/(\w+)"), ep_depot_to_item),
     (re.compile(r"/bag/(\w+)/unpack"), ep_bag_unpack),
     (re.compile(r"/coach/(\w+)/postponed"), ep_coach_postponed),
     (re.compile(r"/stadium/(\d+)"), ep_stadium),
@@ -3706,6 +3758,7 @@ ENDPOINTS.update({
     "/specifictarget": ep_specifictarget, "/monthlypack": ep_monthlypack,
     "/shop/purchase": ep_shop_purchase, "/static/cache/item": ep_static_item,
     "/bag": lambda q, b: _json(bag_list(_state())), "/bag/unpackall": ep_bag_unpackall,
+    "/items/itemtodepot": ep_item_to_depot, "/item/depot": ep_item_depot,
     "/players/trade/proposal/resend": lambda q, b: _json({"result": False, "reason": "NOT_SUPPORTED_REQUEST"}),
 })
 

@@ -22,6 +22,7 @@ Tested in the real client (Indonesian UI):
   Tim inti / Tim Cadangan, squad and tactics saving.
 - **Shop** with every tab (player packs, consumables, packages, MP Shop, monthly and chained
   packages, special bonus), pack opening with random grades, Item saya, Bag, daily login reward.
+  **Gudang** (Item saya > Gudang): move packs and consumables there and back.
   Extra packs: **All Season +8** (any season, +1…+8) and one pack for '07 and every season
   fifaaddict lists.
 - Always VIP + official PC warnet (IGR) perks, manager delete / restore, season '17 cards.
