@@ -1623,6 +1623,37 @@ def league_match_body(st, req, playtype):
     return match
 
 
+def sim_events(match, mine, opp, rng=random):
+    """eventlist for Liga's simulation screen (LeagueCupFrontScreenSimulation.rebuildSimulationEvent):
+    [{time 1..90, team 0 = mine / 1, player = a starter's spid, event}] in time order. GOAL_EVENT
+    adds to the score it shows, so there is one per goal of the result (an ASSIST_EVENT before
+    some); SHOT_ON_GOAL_EVENT is a miss unless the keeper's SAVE_EVENT follows; a second
+    YELLOW_CARD_EVENT for a player shows red. The screen adds kick-off, half time and full time.
+    It was sent empty, so a simulated match showed 0-0 and no play whatever the result."""
+    xi = [[(int(p["spid"]), p["pos"]) for p in match["side"][s]["team"]["squad"]["positions"] if p["pos"] < POS_SUB]
+          for s in ("left", "right")]
+    keeper = [next((s for s, pos in x if pos == 0), x[0][0]) for x in xi]
+    def outfield(t, w=(1, 3, 6)):  # DF / MF / FW: forwards score and shoot most
+        field = [(s, w[0] if pos <= 8 else w[1] if pos <= 19 else w[2]) for s, pos in xi[t] if pos]
+        return rng.choices([s for s, _ in field], [n for _, n in field])[0]
+    ev = []
+    for t, goals in ((0, mine), (1, opp)):
+        for _ in range(goals):
+            minute, scorer = rng.randint(1, 90), outfield(t)
+            if rng.random() < 0.6:
+                ev.append({"time": minute, "team": t, "player": outfield(t, (2, 4, 2)), "event": "ASSIST_EVENT"})
+            ev.append({"time": minute, "team": t, "player": scorer, "event": "GOAL_EVENT"})
+    for _ in range(rng.randint(3, 7)):
+        t, minute = rng.randint(0, 1), rng.randint(1, 90)
+        ev.append({"time": minute, "team": t, "player": outfield(t), "event": "SHOT_ON_GOAL_EVENT"})
+        if rng.random() < 0.6:
+            ev.append({"time": minute, "team": 1 - t, "player": keeper[1 - t], "event": "SAVE_EVENT"})
+    for _ in range(rng.randint(0, 3)):
+        t = rng.randint(0, 1)
+        ev.append({"time": rng.randint(1, 90), "team": t, "player": outfield(t, (4, 3, 1)), "event": "YELLOW_CARD_EVENT"})
+    return sorted(ev, key=lambda e: e["time"])  # stable: an assist stays before its goal, a save after its shot
+
+
 def ep_l2_match(query, body, sim=False):
     """POST /league2/match {matchtype, playtype, round, home, away, date} -> a /match/<id>
     resource (MatchProxy.registerByResource). /match/sim plays the round right away."""
@@ -1647,7 +1678,9 @@ def ep_l2_match(query, body, sim=False):
         mine = next((m for m in param["leaguematches"] if my_teamid(st) in (m["home"], m["away"])), None)
         match.update(stage="closed", simulated=True)
         match["gamesettings"]["simulated"] = True
-        out.update(leagueparam=param, eventlist=[], score=mine and mine["goals"])
+        g = mine["goals"] if mine else {"home": 0, "away": 0}
+        mine_g, opp_g = (g["home"], g["away"]) if mine and mine["home"] == my_teamid(st) else (g["away"], g["home"])
+        out.update(leagueparam=param, eventlist=sim_events(match, mine_g, opp_g), score=mine and mine["goals"])
     _save(st)
     out["resources"] = ([{"uri": f"/match/{match['id']}", "body": match}]
                         + (l2_resources(st) + coach_me_resources(st, _default_slot(st)) if sim else []))  # coupon count

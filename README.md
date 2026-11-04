@@ -101,7 +101,8 @@ Added, passing the tests but not yet checked in the client:
   given a fixed price, and the whole Shop can be made free or not. Changes go to
   `gamedata/shop.json`.
 - **Simulasi Liga** coupon (item 2001, Shop > Dapat dikonsumsi): Liga's Simulasi button gives a
-  match result without playing, one coupon per match. The button counts the coupons in Item saya
+  match result without playing, one coupon per match. The simulation screen plays the match's goals,
+  shots, saves and cards, matching the result (`eventlist` was empty, so it showed 0-0). The button counts the coupons in Item saya
   and stayed off because the item did not exist. New coupons can be made on the admin page (type
   "Kupon Simulasi Liga").
 - **Random boxes open** (Kotak Platinum and the rest, issue #12): the box screen lists its prizes

@@ -146,6 +146,15 @@ def main():
                 n0 = coupons()
                 r = body(hc.ep_l2_match("", req, sim=True))
                 assert r["result"] and coupons() == n0 - 1 and any(x["uri"] == "/coach/me" for x in r["resources"])
+                # the simulation screen plays eventlist (LeagueCupController: ON_SIMULATED with
+                # body.eventlist); its GOAL_EVENTs make the score it shows, so they match the result
+                ev, g = r["eventlist"], r["score"]
+                mine_g, opp_g = (g["home"], g["away"]) if home == me else (g["away"], g["home"])
+                assert [sum(e["event"] == "GOAL_EVENT" and e["team"] == t for e in ev) for t in (0, 1)] == [mine_g, opp_g], (ev, g)
+                assert [e["time"] for e in ev] == sorted(e["time"] for e in ev) and all(1 <= e["time"] <= 90 for e in ev)
+                sim = r["resources"][0]["body"]["side"]
+                xi = [{int(p["spid"]) for p in sim[s]["team"]["squad"]["positions"] if p["pos"] < hc.POS_SUB} for s in ("left", "right")]
+                assert all(e["player"] in xi[e["team"]] for e in ev), ev
             else:  # play: create, ready, end 2-1 for the home side
                 m = body(hc.ep_l2_match("", req))["resources"][0]["body"]
                 assert m["type"] == "League_2_league" and m["stage"] == "created"
