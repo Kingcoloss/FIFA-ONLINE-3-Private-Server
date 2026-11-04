@@ -1,5 +1,7 @@
 # FO3ID Private Server
 
+**English** | [Bahasa Indonesia](README.id.md) | [简体中文](README.zh-CN.md) | [ไทย](README.th.md) | [Tiếng Việt](README.vi.md) | [한국어](README.ko.md)
+
 A local private server for **FIFA Online 3 Indonesia** (Garena, client build 654420), written in
 Python. Garena shut the official servers down on 2020-06-30; this project re-implements the
 backend the client talks to, so the game can be played offline on one PC.
@@ -31,8 +33,9 @@ Tested in the real client (Indonesian UI):
   (+1 to every attribute per level), manager LV.1-100.
 - Game sound and the EA Trax menu music. `tools/eatrax_song.py` puts your own song first in it,
   but the game then crashes after matches (see the known issue below).
-- Admin web page on http://127.0.0.1:8088/ (EP, players, packs, gifts, daily rewards, log), in
-  Indonesian or English.
+- Admin web page on http://127.0.0.1:8088/ (EP, players, packs, gifts, daily rewards, Shop, log)
+  with a language switch (issue #15): Bahasa Indonesia, English, 简体中文, ไทย, Tiếng Việt, 한국어;
+  the browser remembers the choice.
 - Real club kits in matches (kit id = `teamid << 5 | type`; the old `<< 10` gave a checkerboard).
 - Matches play through the second half with **team color** on (season colors used to crash it at
   half time), then show the EXP and reward screens.
@@ -187,7 +190,7 @@ Not done: online modes (ranked, friendly, King of the Hill), Road to World, leag
 |---|---|
 | `http_config.py` | The REST backend the client calls (`https://APSEODESK172`): login, account, coaches, club creation, squad, league, cup, market, upgrade, trades, shop, items, Bag, daily reward, static tables, and `/cdn/` (serves crests and cards from the client's own `_cache`). State lives in `gamedata/state.json`. Env: `FO3_LANGUAGE` (default `ind`), `FO3_GAME` (client folder), `FO3_ASSETS`, `FO3_HALF_LENGTH`, `FO3_ADMIN_PORT`. |
 | `messenger.py` | Notification server on `:28002`. Frames `<u16 LE len><u16 type=2><Blowfish-CBC(key "kueec", IV 0) of JSON+"\n">`; answers `auth`, `ping`, `signon`. `python messenger.py --selftest`. |
-| `admin.py` + `admin/index.html` | Admin page (started by `http_config.py`, localhost only, no password; Indonesian / English). Its Shop tab saves to `gamedata/shop.json`. |
+| `admin.py` + `admin/index.html` | Admin page (started by `http_config.py`, localhost only, no password). Its Shop tab saves to `gamedata/shop.json`. Every word on it, error messages included, is in the `I18N` tables at the end of `admin.py`, one per language; a new language is one more table, and `python admin.py` checks that every table has the same keys. |
 | `responses/` | Per-endpoint JSON bodies (`/a/b/c` → `responses/a_b_c.json`, re-read on every request). Shapes come from the client's AS3 code. |
 | `extract_fifadb.py` | Client player DB (`data_0.big`, RefPack + Blowfish) → SQLite. |
 | `gen_teams.py` | Starter squads and club summaries from `gamedata/fifadb.sqlite`. |
