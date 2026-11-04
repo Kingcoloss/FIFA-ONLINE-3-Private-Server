@@ -130,11 +130,22 @@ def main():
         league = created["resources"][0]["body"]["league"]
         assert league["teams"][0] == me and len(league["teams"]) == hc.LEAGUE_SIZE
 
+        # Simulasi needs a League Simulation coupon (item 2001, type LEAGUE_SIMULATION: the calendar
+        # tab's Simulasi button counts them; user: "item untuk League Simulation, jadi tanpa main
+        # league langsung hasil"), one per simulated match
+        coupons = lambda: sum(i["remains"] for i in hc.coach_me(hc._state(), hc._default_slot(hc._state()))["items"]
+                              if i["staticdata"]["type"] == "LEAGUE_SIMULATION")
+        h1, a1 = next(p for p in hc.league_round(league["teams"], 1) if me in p)
+        req1 = json.dumps({"matchtype": "league", "playtype": "nrm", "round": 1, "home": h1, "away": a1}).encode()
+        assert coupons() == 0 and not body(hc.ep_l2_match("", req1, sim=True))["result"]  # none: refused
+        st = hc._state(); hc.inventory_add(hc.my_coach(st), hc.SIM_COUPON, (league["maxround"] + 1) // 2); hc._save(st)
         for rnd in range(league["maxround"] + 1):
             home, away = next(p for p in hc.league_round(league["teams"], rnd) if me in p)
             req = json.dumps({"matchtype": "league", "playtype": "nrm", "round": rnd, "home": home, "away": away}).encode()
             if rnd % 2:  # simulate
+                n0 = coupons()
                 r = body(hc.ep_l2_match("", req, sim=True))
+                assert r["result"] and coupons() == n0 - 1 and any(x["uri"] == "/coach/me" for x in r["resources"])
             else:  # play: create, ready, end 2-1 for the home side
                 m = body(hc.ep_l2_match("", req))["resources"][0]["body"]
                 assert m["type"] == "League_2_league" and m["stage"] == "created"

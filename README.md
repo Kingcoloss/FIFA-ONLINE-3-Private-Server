@@ -100,6 +100,10 @@ Added, passing the tests but not yet checked in the client:
   packages, with any of the client's 147 shop icons. Built-in products can be changed, hidden or
   given a fixed price, and the whole Shop can be made free or not. Changes go to
   `gamedata/shop.json`.
+- **Simulasi Liga** coupon (item 2001, Shop > Dapat dikonsumsi): Liga's Simulasi button gives a
+  match result without playing, one coupon per match. The button counts the coupons in Item saya
+  and stayed off because the item did not exist. New coupons can be made on the admin page (type
+  "Kupon Simulasi Liga").
 - **Random boxes open** (Kotak Platinum and the rest, issue #12): the box screen lists its prizes
   from `staticdata.availables`, which was missing, so every box failed at "Gunakan".
 - **New cards join Tim inti**: Tim inti now holds the whole club (200). It held 36, and every

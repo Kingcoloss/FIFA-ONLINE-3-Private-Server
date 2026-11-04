@@ -1630,6 +1630,14 @@ def ep_l2_match(query, body, sim=False):
     st = _state(); lg = st.get("league2")
     if not lg or not lg.get("league"):
         return _json({"result": False, "reason": "LEAGUE_FAIL"})
+    coupon = None
+    if sim:  # one League Simulation coupon (any item of that type, as the client counts them)
+        coupon = next((i for i in my_coach(st).get("items", []) if i["remains"] > 0 and i["itemid"] in ITEMS
+                       and ITEMS[i["itemid"]][2] == "LEAGUE_SIMULATION"), None)
+        if coupon is None:
+            return _json({"result": False, "reason": "NOT_ENOUGH_ITEM"})
+        coupon["remains"] -= 1
+        my_coach(st)["items"] = [i for i in my_coach(st)["items"] if i["remains"] > 0]
     match = league_match_body(st, req, req.get("playtype"))
     st["match"] = match
     lg["pending"] = {"id": match["id"], "round": req.get("round", 0), "home": req["home"], "away": req["away"]}
@@ -1641,7 +1649,8 @@ def ep_l2_match(query, body, sim=False):
         match["gamesettings"]["simulated"] = True
         out.update(leagueparam=param, eventlist=[], score=mine and mine["goals"])
     _save(st)
-    out["resources"] = [{"uri": f"/match/{match['id']}", "body": match}] + (l2_resources(st) if sim else [])
+    out["resources"] = ([{"uri": f"/match/{match['id']}", "body": match}]
+                        + (l2_resources(st) + coach_me_resources(st, _default_slot(st)) if sim else []))  # coupon count
     return _json(out)
 
 
@@ -3077,7 +3086,13 @@ ITEMS = {  # itemid: (name, icon, type, effect, description)
     1000052: ("Enhancement Boost Gold", 1000002, "ENHANCEMENT_BOOST", {"boost": 0.15}, "Upgrade: peluang sukses +15%."),
     1000053: ("Enhancement Boost Silver", 1000002, "ENHANCEMENT_BOOST", {"boost": 0.10}, "Upgrade: peluang sukses +10%."),
     1000054: ("Enhancement Boost Bronze", 1000002, "ENHANCEMENT_BOOST", {"boost": 0.05}, "Upgrade: peluang sukses +5%."),
+    # League Simulation coupon (user: "item untuk League Simulation, jadi tanpa main league langsung
+    # hasil"): Liga's Simulasi button (LeagueCupFrontScreenCalendarTabPage) counts the Item saya
+    # items of type LEAGUE_SIMULATION and stays off at 0 (a click then opens the Shop on its
+    # SIMULATION_ITEM_ID "2001"); each simulated match uses one up (ep_l2_match)
+    2001: ("Simulasi Liga", 2001, "LEAGUE_SIMULATION", {}, "Liga: hasil satu pertandingan langsung, tanpa main."),
 }
+SIM_COUPON = 2001
 PACKAGES = {  # itemid: (name, icon, [(itemid, count)], description); bought = contents to Item saya
     801: ("Paket Starter", 801, [(28006, 1), (28007, 1), (28008, 1), (28009, 1), (50020, 2)],
           "Pak FW/MF/DF/GK 60+ dan 2x EP +500.000."),
@@ -3214,7 +3229,7 @@ def product_category(itemid):
 # rebuilds the tables in place (every lookup above keeps working) and drops the pack pools.
 # --------------------------------------------------------------------------- #
 SHOP_FILE = os.path.join(HERE, "gamedata", "shop.json")
-SHOP_ITEM_TYPES = ("EP_LOTTERY", "ITEM_LOTTERY", "COACHNAME_CHANGE", "TEAM_CHANGE", "ENHANCEMENT_BOOST")
+SHOP_ITEM_TYPES = ("EP_LOTTERY", "ITEM_LOTTERY", "COACHNAME_CHANGE", "TEAM_CHANGE", "ENHANCEMENT_BOOST", "LEAGUE_SIMULATION")
 SHOP_ID_BASE = {"packs": 93_000_000, "items": 94_000_000, "packages": 95_000_000, "monthly": 96_000_000}
 SHOP_HIDDEN = frozenset()
 _SHOP_BASE = None
@@ -3427,7 +3442,7 @@ def ep_shop_purchase(query, body):
 def use_item(st, slot, coach, it, req):
     """/item/<_id>/use for a USE item (see ITEMS): its effect, one used up."""
     _, _, typ, eff, _ = ITEMS[it["itemid"]]
-    if typ == "ENHANCEMENT_BOOST":  # spent by the Upgrade tab, not by "Gunakan"
+    if typ in ("ENHANCEMENT_BOOST", "LEAGUE_SIMULATION"):  # spent by the Upgrade tab / Liga's Simulasi, not by "Gunakan"
         return {"result": False, "reason": "ITEM_USE_ERROR"}
     out = {"result": True}
     if typ == "EP_LOTTERY":  # lower amounts more likely
