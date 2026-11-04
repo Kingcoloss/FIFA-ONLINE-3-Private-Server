@@ -413,9 +413,9 @@ def match_side(raw, teamid, user=None, tactics=None):
     fetchMatchSide* read squad, tactics, ready. tactics is the preset ARRAY (as
     /game/my/tactic/all): native 0x949170 iterates it ({id, bus, cc, def, teammentality})."""
     team = owned_team(raw)
-    team.update(teamid=teamid, summary=team_summary(team, teamid), kit=team_kit(teamid))
     # team color for the user's side only: an AI side is a whole club (+4 for free)
     team["teamcolors"] = active_teamcolors(team) if user else []
+    team.update(teamid=teamid, summary=team_summary(team, teamid), kit=team_kit(teamid))
     if user:  # the pre-match squad screen's formation list (side.<mine>.team.formations; was empty, issue #16)
         team["formations"] = team_formations(teamid)
     # ready: a user side starts unready -- MatchController.sendReady skips the PUT .../ready
@@ -564,6 +564,23 @@ def card_ratings(spids):
                     f"SELECT p.spid, {POSOVR}, p.overallrating FROM players p WHERE p.spid IN ({','.join('?' * len(chunk))})", chunk)}
                 _OVR.update({s: rows.get(s, (0, 0)) for s in chunk})
     return {s: _OVR[s] for s in spids}
+
+
+STAT_COLS = sorted(set().union(*ROLE_WEIGHTS.values()))
+_STATS = {}
+
+
+def card_stats(spids):
+    """{spid: {stat: fifadb value}} of the stats any position rating uses (cached)."""
+    need = [s for s in {int(s) for s in spids} if s not in _STATS]
+    if need:
+        with closing(_db()) as c:
+            for i in range(0, len(need), 500):
+                chunk = need[i:i + 500]
+                rows = {r[0]: dict(zip(STAT_COLS, r[1:])) for r in c.execute(
+                    f"SELECT spid, {', '.join(STAT_COLS)} FROM players WHERE spid IN ({','.join('?' * len(chunk))})", chunk)}
+                _STATS.update({s: rows.get(s, dict.fromkeys(STAT_COLS, 0)) for s in chunk})
+    return {int(s): _STATS[int(s)] for s in spids}
 
 
 def card_ovrs(spids):
@@ -1190,12 +1207,54 @@ def owned_team(raw):
     return team
 
 
+def xi_ratings(team):
+    """{player id: rating} of an owned_team's XI as the squad lists show it (PlayerListUtil __ovr):
+    Enums.calcPosOvr at his slot, on stats + grade boost + level - 1 (fillPlayerStaticData) +
+    his team color boosts (TeamColorController over team.teamcolors: the best club / nation /
+    special color by getBoostStatPoint plus the best grade color; "ovr" = every stat, a boost
+    with a target only in that position group)."""
+    card = {iid(p): p for p in team["players"]}
+    xi = [(str(s.get("id") or s["spid"]), s["pos"]) for s in team["squad"]["positions"]
+          if s.get("pos", POS_SUB) < POS_SUB and str(s.get("id") or s["spid"]) in card]
+    stats = card_stats([card[i]["spid"] for i, _ in xi])
+    colors = {c["teamcolorid"]: c for c in tc_colors()}
+    cards, hist = tc_static()
+    sets = tc_special_sets()
+    out = {}
+    for i, pos in xi:
+        p = card[i]
+        spid, grp = int(p["spid"]), "gk" if pos == 0 else "df" if pos <= 8 else "mf" if pos <= 19 else "fw"
+        pid, club, nation = cards.get(spid, (None, None, None))
+        def fits(e, c):
+            return {"grade": lambda: grade_of(p) >= c["grade"], "nation": lambda: e["teamid"] == nation,
+                    "club": lambda: e["teamid"] in {club} | hist.get(pid, set()),
+                    "special": lambda: spid in sets[c["teamcolorid"]][0]}[c["type"]]()
+        best = {}  # "base" / "grade": (point, boosts)
+        for e in team.get("teamcolors") or []:
+            c = colors[e["teamcolorid"]]
+            if fits(e, c):
+                bs = [b for b in c["boostgroups"][e["boostindex"]]["boosts"] if b.get("target", grp) == grp]
+                point = sum(b["amount"] * (len(STAT_COLS) if b["type"] == "ovr" else 1) for b in bs)
+                kind = "grade" if c["type"] == "grade" else "base"
+                if point > best.get(kind, (0,))[0]:
+                    best[kind] = (point, bs)
+        add = dict.fromkeys(STAT_COLS, GRADE_BOOST[grade_of(p)] + player_levelinfo(p)["level"] - 1)
+        for b in (b for _, bs in best.values() for b in bs):
+            for k in (STAT_COLS if b["type"] == "ovr" else [b["type"]] if b["type"] in add else []):
+                add[k] += b["amount"]
+        w = ROLE_WEIGHTS[POS_ROLE[pos]]
+        out[i] = sum(n * (stats[spid][k] + add[k]) for k, n in w.items()) // 100
+    return out
+
+
 def team_summary(team, teamid):
     # MenuScreen TeamInfoNew.setData: TEAMNAME(summary.id) + loadTeamCrest(summary.id), setOVR(ovr);
     # TeamStaticInfo (Tim > Klub) also reads name, league.id, nation{id,name}, rival.name.
-    # TeamInfoNew.setOVR reads ovr.FW/MF/DF (rating bars); Enums.PLAYERPOSITION index ranges.
-    ovr = {iid(p): player_ovr(p) for p in team["players"]}
-    lines = {"DF": range(1, 9), "MF": range(9, 20), "FW": range(20, 28)}
+    # TeamInfoNew.setOVR reads ovr.FW/MF/DF (rating bars) as sent: the average of the ratings the
+    # squad list shows (issue #18: card ratings alone, without level, slot and team color, ran
+    # ~12 under them). Enums.PLAYERPOSITION index ranges.
+    ovr = xi_ratings(team)
+    lines = {k: r for k, r in LINES.items() if k != "GK"}
     def line_ovr(r):
         v = [ovr.get(str(p.get("id") or p["spid"]), 0) for p in team["squad"]["positions"] if p.get("pos") in r]
         return round(sum(v) / len(v)) if v else 0
@@ -1792,13 +1851,66 @@ def ep_l2_finish(query, body):
     return _json({"result": True, "resources": l2_resources(st)})
 
 
+LINES = {"GK": range(0, 1), "DF": range(1, 9), "MF": range(9, 20), "FW": range(20, 28)}  # Enums.PLAYERPOSITION
+STAT_LEADERS = 3  # players per stat on the Rekor gabungan tab
+
+
+def league_record(st, stats):
+    """Add a played league match to my players' season record (st.league2.playerrecords, reset by
+    a new season): what Rekor liga > Rekorku shows. Unused subs have no rating; passes and tackles
+    are [done, tried] in matchStats; role = the position he played (Enums.PLAYERPOSITION)."""
+    recs = st["league2"].setdefault("playerrecords", {})
+    for p, s in match_cards(st, stats):
+        if not s.get("rating"):
+            continue
+        r = recs.setdefault(iid(p), dict.fromkeys(("matches", "ratings", "goals", "assists", "passes",
+                                                     "passtries", "tackles", "saves"), 0))
+        pair = lambda k: (list(s.get(k) or []) + [0, 0])[:2]
+        r.update(id=iid(p), spid=p["spid"], role=int(s.get("role") or 0))
+        r["matches"] += 1
+        r["ratings"] = round(r["ratings"] + float(s["rating"]), 2)
+        for k in ("goals", "assists", "saves"):
+            r[k] += int(s.get(k) or 0)
+        r["passes"] += int(pair("passes")[0]); r["passtries"] += int(pair("passes")[1])
+        r["tackles"] += int(pair("tackles")[0])
+
+
+def ep_l2_history_players(query, body):
+    """GET /league2/history/players/league: [{id: card _id, matches, ratings (sum), goals, assists,
+    passes, tackles, saves}] (LeagueCupRecordTabPage.joinPlayerData; a card with none shows 0)."""
+    return _json(list(((_state().get("league2") or {}).get("playerrecords") or {}).values()))
+
+
+def ep_l2_leaders(query, body):
+    """PUT /league2/leader/league -> Rekor gabungan (LeagueCupTotalRecordTabPage): best XI by line
+    (my formation's slots, best average rating of the players who played there) and the top
+    players per stat, each {spid, teamid, value}, from my players' season records. The page
+    joins every key of the reply into one player list, so it holds nothing else. ponytail: my
+    players only (AI players' stats are not kept)."""
+    st = _state(); me = my_teamid(st)
+    recs = [r for r in ((st.get("league2") or {}).get("playerrecords") or {}).values() if r["matches"]]
+    avg = lambda r: round(r["ratings"] / r["matches"], 1)
+    entry = lambda r, v: {"spid": r["spid"], "teamid": me, "value": v}
+    squad = (st["teams"].get(str(_default_slot(st))) or {"squad": {"positions": []}})["squad"]["positions"]
+    out = {}
+    for line, rng in LINES.items():
+        slots = sum(s["pos"] in rng for s in squad)
+        out[line] = [entry(r, avg(r)) for r in sorted((r for r in recs if r["role"] in rng), key=avg, reverse=True)[:slots]]
+    stat = {"ratings": avg, "goals": lambda r: r["goals"], "assists": lambda r: r["assists"],
+            "tackles": lambda r: r["tackles"], "saves": lambda r: r["saves"],
+            "passes": lambda r: round(r["passes"] / r["passtries"], 2) if r["passtries"] else 0}  # success rate
+    for k, f in stat.items():
+        out[k] = [entry(r, f(r)) for r in sorted(recs, key=f, reverse=True) if f(r)][:STAT_LEADERS]
+    return _json(out)
+
+
 def season_leaders(st, me, rank, goals):
     """leaderRewards for LeagueCupLeagueRewardScreen: best XI by line (FW/MF/DF/GK, 11 in
     all) + one leader per stat. ponytail: no per-player season stats are kept, so these
     come from my own squad (rating = card rating, stat values derived from team goals)."""
     team = owned_team(st["teams"][str(_default_slot(st))])
     rating = {p["spid"]: player_ovr(p) for p in team["players"]}
-    lines = {"GK": range(0, 1), "DF": range(1, 9), "MF": range(9, 20), "FW": range(20, 28)}
+    lines = LINES
     starters = [p for p in team["squad"]["positions"] if p["pos"] < POS_SUB]
     entry = lambda spid, value, ep=0: {"spid": spid, "teamid": me, "value": value, "reward": {"count": ep}}
     out = {line: [entry(p["spid"], round(min(9.9, 6 + (rating.get(p["spid"], 80) - 80) / 25), 1))
@@ -1813,6 +1925,18 @@ def season_leaders(st, me, rank, goals):
     return out
 
 
+def league_promote(difficulty):
+    """{promote_rank, demote_rank} of a league level: how many clubs go up / down at season end.
+    /static/db/LEAGUE2DIFFICULTY: league2difficulty {level: {groupId}} + league2promote {groupId:
+    ...}; the standings tab (LeagueCupRankTabPage) colours its rows by it and threw on a missing
+    league2difficulty, leaving the table empty (issue #19). Normal 10-19 only go up (19 is the
+    top), ultimate 20-24 also go down."""
+    with open(os.path.join(RESPONSES, "static_db_LEAGUE2DIFFICULTY.json")) as f:
+        t = json.load(f)
+    group = t["league2difficulty"].get(str(difficulty), {}).get("groupId")
+    return t["league2promote"].get(str(group), {"promote_rank": 0, "demote_rank": 0})
+
+
 def ep_l2_end(query, body):
     """PUT /league2/end (closing day): season result for LeagueCupLeagueRewardScreen
     {promotion{current,next}, rewards{coach,money.reward{total,detail}}, sponsorRewards,
@@ -1824,10 +1948,8 @@ def ep_l2_end(query, body):
         return _json({"result": False, "reason": "LEAGUE_FAIL"})
     me = my_teamid(st); stats = league["statistics"][str(me)]; rank = stats["rank"]
     cur = lg.get("difficultyselect", 10)
-    if cur >= 20:  # ultimate: promote top 3, demote bottom 3
-        nxt = min(24, cur + 1) if rank <= 3 else max(20, cur - 1) if rank > LEAGUE_SIZE - 3 else cur
-    else:
-        nxt = min(19, cur + 1) if rank <= 3 else cur
+    rule = league_promote(cur)
+    nxt = cur + 1 if rank <= rule["promote_rank"] else cur - 1 if rank > len(league["teams"]) - rule["demote_rank"] else cur
     mid = SPONSORS.get(str(lg.get("sponsor")), "2")
     progress, done = mission_progress(st, mid)
     with open(os.path.join(RESPONSES, "static_db_LEAGUE2REWARD.json")) as f:
@@ -1896,6 +2018,20 @@ def ep_match_player_ready(mid, query, body):
     return match_step(mid, body, _player_ready)
 
 
+def match_cards(st, stats):
+    """[(my card, its matchStats player)] for my side's players. In-match spid = the card's
+    player id (spid % 1e6); a card in the squad wins over another card of the same player."""
+    team, done, out = st["teams"].get(str(_default_slot(st))) or {"players": []}, set(), []
+    for s in (stats.get(stats.get("myTeam", "home")) or {}).get("players") or []:
+        pid = int(s.get("spid") or 0) % 1000000
+        mine = [p for p in team["players"] if int(p["spid"]) % 1000000 == pid and iid(p) not in done]
+        p = next((p for p in mine if in_squad(team, p)), mine[0] if mine else None)
+        if p is not None:
+            done.add(iid(p))
+            out.append((p, s))
+    return out
+
+
 def match_reward(st, stats):
     """match.reward for PostMatchRewardDefaultScene.onRewardReceived (paths it reads) and its
     player list (PlayerRewardListItemRenderer: id, spid, prev, current, reward.detail.extra).
@@ -1908,16 +2044,10 @@ def match_reward(st, stats):
     cexp, pexp = EXP_WIN if won else EXP_DRAW if drew else EXP_LOSS
     reward = lambda n: {"total": n, "detail": {"base": n, "extra": 0}}
     prev, cur = gain_exp(my_coach(st), cexp, coach_need, COACH_MAX_LEVEL)
-    team, done, players = st["teams"].get(str(_default_slot(st))) or {"players": []}, set(), []
-    for s in (stats.get(me) or {}).get("players") or []:
-        pid = int(s.get("spid") or 0) % 1000000
-        mine = [p for p in team["players"] if int(p["spid"]) % 1000000 == pid and iid(p) not in done]
-        p = next((p for p in mine if in_squad(team, p)), mine[0] if mine else None)
-        if p is None:
-            continue
+    players = []
+    for p, s in match_cards(st, stats):
         n = pexp + 20 * int(s.get("goals") or 0) + 10 * int(s.get("assists") or 0)
         pprev, pcur = gain_exp(p, n, player_need, PLAYER_MAX_LEVEL)
-        done.add(iid(p))
         players.append({"id": iid(p), "spid": p["spid"], "prev": pprev, "current": pcur, "reward": reward(n)})
     return {"matchRewardBackType": 0, "extra": {"selected": {}, "availables": []}, "selected": [],
             "coach": {"reward": reward(cexp), "prev": prev, "current": cur},
@@ -1973,6 +2103,7 @@ def ep_match_end(mid, query, body):
         if str(h.get("id")) == str(p["away"]):  # matchStats home/away are match sides
             gh, ga = ga, gh
         out["leagueparam"] = league_play_round(st, p["round"], (gh, ga))
+        league_record(st, req)
         lg.pop("pending", None)
         out["resources"] = l2_resources(st)
     if match is not None:
@@ -4006,6 +4137,11 @@ ENDPOINTS.update({
     "/league2/back": ep_telemetry, "/static/db/SORTTEAM": ep_sortteam,
     "/static/db/SORTNATION": ep_sortnation, "/static/db/SORTLEAGUE": ep_sortleague,
     "/league2/sponsor/achievement": ep_l2_achievement,
+    # Rekor liga tabs: Rekorku (player records) and Rekor gabungan (best XI, stat leaders); the
+    # league's own cup (cupinfo) is never entered, so its records stay empty
+    "/league2/history/players/league": ep_l2_history_players, "/league2/leader/league": ep_l2_leaders,
+    "/league2/history/players/cup": lambda q, b: _json([]),
+    "/league2/leader/cup": lambda q, b: _json({k: [] for k in (*LINES, "ratings", "goals", "assists", "tackles", "passes", "saves")}),
     "/cup/list": ep_cup_list, "/cup/record": ep_cup_record, "/cup/new": ep_cup_new,
     "/transfer/offer": ep_transfer_offer, "/transfer/my/offer/list": lambda q, b: _json(offer_list(_state())),
     "/transfer/my/boostfactor": lambda q, b: _json(NO_BOOST),

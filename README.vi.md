@@ -120,6 +120,13 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
 - **Màn hình đội hình trước trận** (Liga và Cup, issue #16): đổi chỗ, thay người và đổi sơ đồ giờ được
   giữ và lưu vào CLB (`PUT /match/<id>/side/<side>/squad` chưa có xử lý, nên mỗi thay đổi tự hoàn tác).
   Danh sách sơ đồ đã có dữ liệu, và thanh thể lực hiện đầy (không giữ độ mệt giữa các trận).
+- **Chỉ số FW / MF / DF của đội khớp với cầu thủ** (issue #18): ở màn hình đội hình và sảnh, đó là trung bình
+  chỉ số mà danh sách cầu thủ hiển thị (chỉ số ở vị trí của cầu thủ cộng cấp nâng cấp, level và team color).
+  Trước đây tính từ chỉ số thẻ gốc, thấp hơn khoảng 12.
+- **Các tab Rekor liga** (issue #19): bảng xếp hạng đã hiện (tab bị lỗi vì thiếu bảng `league2difficulty`, bảng này
+  giờ cũng quyết định đội lên hạng hay xuống hạng cuối mùa). Rekorku liệt kê số trận, điểm, bàn thắng, kiến tạo,
+  đường chuyền, tắc bóng và cứu thua của từng cầu thủ trong các trận đã đá của mùa, còn Rekor gabungan hiện đội hình
+  tiêu biểu và những người dẫn đầu thống kê của mùa. Chỉ tính cầu thủ của mình, và trận mô phỏng không cộng thống kê cầu thủ.
 - **Mở được hộp ngẫu nhiên** (Kotak Platinum và các hộp khác, issue #12): màn hình hộp liệt kê phần thưởng
   từ `staticdata.availables`, trước đây bị thiếu, nên mọi hộp đều lỗi khi bấm "Gunakan" (dùng).
 - **Thẻ mới vào Tim Cadangan**: thẻ từ gói, giao dịch, Market, Bag hoặc trang quản trị hiện "-" ở cột Tim

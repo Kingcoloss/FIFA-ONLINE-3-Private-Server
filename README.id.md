@@ -129,6 +129,14 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   dan perubahan formasi sekarang bertahan dan tersimpan ke klub (`PUT /match/<id>/side/<side>/squad`
   belum punya handler, jadi tiap perubahan batal sendiri). Daftar formasi terisi, dan bar stamina
   tampil penuh (kelelahan tidak disimpan antar pertandingan).
+- **Rating FW / MF / DF tim sesuai pemainnya** (issue #18): di layar skuad dan lobi, nilainya rata-rata
+  rating yang tampil di daftar pemain (rating di posisi pemain ditambah grade upgrade, level, dan team
+  color). Dulu dihitung dari rating kartu saja, sekitar 12 lebih rendah.
+- **Tab Rekor liga** (issue #19): tabel klasemen tampil (tab-nya error karena tabel `league2difficulty`
+  tidak ada; tabel itu sekarang juga menentukan siapa naik atau turun di akhir musim). Rekorku
+  menampilkan pertandingan, rating, gol, assist, umpan, tekel, dan penyelamatan tiap pemain dari
+  pertandingan musim ini yang dimainkan, dan Rekor gabungan menampilkan best XI dan pemimpin statistik
+  musim ini. Hanya pemain sendiri yang dihitung, dan pertandingan simulasi tidak menambah statistik pemain.
 - **Kotak acak bisa dibuka** (Kotak Platinum dan lainnya, issue #12): layar kotak menampilkan
   hadiahnya dari `staticdata.availables`, yang belum ada, jadi tiap kotak gagal saat "Gunakan".
 - **Kartu baru masuk Tim Cadangan**: kartu dari pak, trade, Market, Bag, atau halaman admin tampil

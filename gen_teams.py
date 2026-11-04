@@ -113,8 +113,8 @@ def team(c, teamid):
     nation = max(set(r["nationality"] for r in rows), key=[r["nationality"] for r in rows].count)
     name, rival = TEAM_INFO.get(teamid, ("", ""))
     # TeamInfoNew (club confirmation popup): TEAMNAME + crest by id, ovr.FW/MF/DF bars and
-    # teamgrade stars; the same numbers as the lobby HUD (http_config.team_summary: ratings
-    # at each player's own position)
+    # teamgrade stars: card ratings at each player's own position (the lobby HUD's
+    # http_config.team_summary adds slot, grade, level and team color, as the squad list does)
     ovr = {p["spid"]: hc.card_ovr(p["spid"]) for p in positions}
     line = {k: round(sum(ovr[p["spid"]] for p in positions if p["pos"] in r) / sum(p["pos"] in r for p in positions))
             for k, r in LINES.items()}

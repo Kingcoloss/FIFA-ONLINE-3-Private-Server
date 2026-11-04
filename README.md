@@ -120,6 +120,14 @@ Added, passing the tests but not yet checked in the client:
   stick and are saved to the club (`PUT /match/<id>/side/<side>/squad` had no handler, so each
   change undid itself). The formation list is filled, and the stamina bars show full (no fatigue
   is kept between matches).
+- **Team FW / MF / DF ratings match the players** (issue #18): on the squad screens and in the lobby
+  they are the average of the ratings the player list shows (rating at the player's slot plus
+  upgrade grade, level and team color). They were built from the bare card ratings, about 12 lower.
+- **Rekor liga tabs** (issue #19): the standings table shows (its tab broke on the missing
+  `league2difficulty` table, which now also decides who goes up or down at season end). Rekorku
+  lists each player's matches, rating, goals, assists, passes, tackles and saves from the season's
+  played matches, and Rekor gabungan shows the season's best XI and stat leaders. Only my own
+  players are counted, and simulated matches add no player stats.
 - **Random boxes open** (Kotak Platinum and the rest, issue #12): the box screen lists its prizes
   from `staticdata.availables`, which was missing, so every box failed at "Gunakan".
 - **New cards join Tim Cadangan**: a card from a pack, a trade, the Market, the Bag or the admin

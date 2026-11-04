@@ -1,8 +1,15 @@
 {
+ "league2difficulty": {
+  "10": {"groupId": 0}, "11": {"groupId": 0}, "12": {"groupId": 0}, "13": {"groupId": 0}, "14": {"groupId": 0},
+  "15": {"groupId": 0}, "16": {"groupId": 0}, "17": {"groupId": 0}, "18": {"groupId": 0}, "19": {"groupId": 1},
+  "20": {"groupId": 2}, "21": {"groupId": 3}, "22": {"groupId": 3}, "23": {"groupId": 3}, "24": {"groupId": 4}
+ },
  "league2promote": {
-  "0": {"promote_rank": 3, "demote_rank": 8},
-  "1": {"promote_rank": 3, "demote_rank": 8},
-  "2": {"promote_rank": 3, "demote_rank": 8}
+  "0": {"promote_rank": 3, "demote_rank": 0},
+  "1": {"promote_rank": 0, "demote_rank": 0},
+  "2": {"promote_rank": 3, "demote_rank": 0},
+  "3": {"promote_rank": 3, "demote_rank": 3},
+  "4": {"promote_rank": 0, "demote_rank": 3}
  },
  "league2dynamic": {
   "1": {"ai_hiddenstat_min": 1, "ai_hiddenstat_max": 3},

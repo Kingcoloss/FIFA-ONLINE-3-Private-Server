@@ -111,6 +111,19 @@ def main():
             p["grade"] = 8 if hc.iid(p) in xi_ids else p.get("grade", 0)
         got = {c["teamcolorid"]: c["boostindex"] for c in hc.active_teamcolors(hc.owned_team(t0)) if c["teamid"] == -1}
         assert got == {10002: 2, 10005: 2, 10008: 2, **{10100 + g: 0 for g in range(3, 9)}}, got
+        # issue #18: summary.ovr FW/MF/DF = the average of the ratings the squad list shows (rating
+        # at the slot on stats + grade boost + level - 1, plus the team color boosts)
+        tm = hc.owned_team(t0); tm["teamcolors"] = hc.active_teamcolors(tm)
+        shown, bare = hc.xi_ratings(tm), hc.xi_ratings(dict(tm, teamcolors=[]))
+        pos = {s["id"]: s["pos"] for s in tm["squad"]["positions"] if s["pos"] < hc.POS_SUB}
+        summ = hc.team_summary(tm, 241)["ovr"]
+        for k, r in hc.LINES.items():
+            v = [shown[i] for i, p in pos.items() if p in r]
+            assert k == "GK" or summ[k] == round(sum(v) / len(v)), (k, summ, v)
+        card = {p["id"]: p for p in tm["players"]}
+        gk = next(i for i, p in pos.items() if p == 0)
+        assert bare[gk] == hc.card_ovr(card[gk]["spid"]) + hc.GRADE_BOOST[8] + card[gk]["levelinfo"]["level"] - 1
+        assert all(shown[i] > bare[i] for i in pos), (shown, bare)  # club + grade colors
         res = next(p for p in st["teams"]["0"]["players"] if not hc.in_squad(st["teams"]["0"], p))
         assert not body(hc.ENDPOINTS["/transfer/offer"]("", json.dumps({"playerobjectid": hc.iid(res), "price": 1000}).encode()))["result"]
         # club picker ("Tim lain"): nation -> league -> club lists agree; a club without a starter
@@ -202,7 +215,9 @@ def main():
                 ep0, lv0 = cm["money"]["ep"], cm["levelinfo"]
                 xi = [p for p in cm["team"]["squad"]["positions"] if p["pos"] < hc.POS_SUB]
                 # in-match player ids are the card's player id (spid % 1e6)
-                stats[stats["myTeam"]]["players"] = [{"spid": int(p["spid"]) % 1000000, "goals": int(i == 0)} for i, p in enumerate(xi)]
+                stats[stats["myTeam"]]["players"] = [{"spid": int(p["spid"]) % 1000000, "goals": int(i == 0), "rating": 7,
+                                                      "passes": [3, 4], "tackles": [1, 2], "role": p["pos"]} for i, p in enumerate(xi)]
+                stats[stats["myTeam"]]["reserved"] = [{"id": "1", "rating": 0}]
                 r = body(hc.route(f"/match/{m['id']}/end")("", json.dumps(stats).encode()))
                 body(hc.route(f"/match/{m['id']}/end")("", json.dumps(stats).encode()))  # a resend credits nothing
                 assert hc.coach_me(hc._state(), hc._default_slot(hc._state()))["money"]["ep"] == ep0 + (2000 if home == me else 500)
@@ -227,6 +242,28 @@ def main():
         assert sorted(v["rank"] for v in s.values()) == list(range(1, hc.LEAGUE_SIZE + 1))
         assert all(v["wins"] + v["draws"] + v["losses"] == 2 * (hc.LEAGUE_SIZE - 1) for v in s.values())
         assert sum(v["goals"] for v in s.values()) == sum(v["goalsconceded"] for v in s.values())
+
+        # Rekor liga (issue #19): Rekorku = my players' records of the played rounds; Rekor gabungan
+        # = best XI by line + stat leaders from them, and nothing else (the page joins every key)
+        played = (league["maxround"] + 2) // 2
+        recs = body(hc.ENDPOINTS["/league2/history/players/league"]("", b""))
+        assert sum(r["matches"] for r in recs) == 11 * played and sum(r["goals"] for r in recs) == played
+        assert all(r["ratings"] == 7 * r["matches"] and r["passes"] * 4 == r["passtries"] * 3 for r in recs)
+        mine_ids = {p["id"] for p in hc.coach_me(hc._state(), 0)["team"]["players"]}
+        assert {r["id"] for r in recs} <= mine_ids
+        lead = body(hc.ENDPOINTS["/league2/leader/league"]("", b""))
+        assert set(lead) == {"GK", "DF", "MF", "FW", "ratings", "goals", "assists", "tackles", "passes", "saves"}
+        assert sum(len(lead[k]) for k in hc.LINES) == 11 and len(lead["GK"]) == 1
+        assert all(e["value"] == 7 and e["teamid"] == me for k in hc.LINES for e in lead[k])
+        assert lead["passes"][0]["value"] == 0.75 and not lead["assists"] and not lead["saves"]
+        assert len(lead["goals"]) <= hc.STAT_LEADERS and lead["goals"][0]["value"] >= 1
+        assert body(hc.ENDPOINTS["/league2/history/players/cup"]("", b"")) == []
+        # the standings tab reads league2difficulty[level].groupId -> league2promote (it threw
+        # without them: empty table); season end promotes / demotes by the same table
+        diff = json.load(open(os.path.join(hc.RESPONSES, "static_db_LEAGUE2DIFFICULTY.json")))
+        assert all(str(diff["league2difficulty"][str(d)]["groupId"]) in diff["league2promote"] for d in range(10, 25))
+        assert hc.league_promote(12) == {"promote_rank": 3, "demote_rank": 0}
+        assert hc.league_promote(19)["promote_rank"] == 0 and hc.league_promote(24) == {"promote_rank": 0, "demote_rank": 3}
 
         ach = body(hc.ep_l2_achievement("", b"{}"))["missions"][0]
         assert ach["mid"] == hc.SPONSORS["1"] and ach["progress"][0] == s[str(me)]["rank"], ach
