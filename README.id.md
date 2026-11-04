@@ -125,6 +125,10 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   dan MOTM (dulu kosong), lalu hadiah EP dan kembali ke menu Liga. Tombol itu menghitung kupon di
   Item saya dan tetap mati karena itemnya belum ada. Kupon baru bisa dibuat di halaman admin
   (jenis "Kupon Simulasi Liga").
+- **Layar skuad sebelum pertandingan** (Liga dan Cup, issue #16): tukar posisi, pergantian pemain,
+  dan perubahan formasi sekarang bertahan dan tersimpan ke klub (`PUT /match/<id>/side/<side>/squad`
+  belum punya handler, jadi tiap perubahan batal sendiri). Daftar formasi terisi, dan bar stamina
+  tampil penuh (kelelahan tidak disimpan antar pertandingan).
 - **Kotak acak bisa dibuka** (Kotak Platinum dan lainnya, issue #12): layar kotak menampilkan
   hadiahnya dari `staticdata.availables`, yang belum ada, jadi tiap kotak gagal saat "Gunakan".
 - **Kartu baru masuk Tim inti**: Tim inti sekarang menampung seluruh klub (200). Dulu hanya 36,

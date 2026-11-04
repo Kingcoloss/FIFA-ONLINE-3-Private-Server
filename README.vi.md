@@ -117,6 +117,9 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   sau đó hiện tỉ số, điểm và thống kê cầu thủ, tỉ lệ kiểm soát bóng và MOTM (trước đây trống), rồi phần
   thưởng EP và quay lại menu Liga. Nút này đếm số phiếu trong Item saya và từng bị tắt vì chưa có vật phẩm.
   Có thể tạo phiếu mới trên trang quản trị (loại "Phiếu Mô phỏng giải đấu").
+- **Màn hình đội hình trước trận** (Liga và Cup, issue #16): đổi chỗ, thay người và đổi sơ đồ giờ được
+  giữ và lưu vào CLB (`PUT /match/<id>/side/<side>/squad` chưa có xử lý, nên mỗi thay đổi tự hoàn tác).
+  Danh sách sơ đồ đã có dữ liệu, và thanh thể lực hiện đầy (không giữ độ mệt giữa các trận).
 - **Mở được hộp ngẫu nhiên** (Kotak Platinum và các hộp khác, issue #12): màn hình hộp liệt kê phần thưởng
   từ `staticdata.availables`, trước đây bị thiếu, nên mọi hộp đều lỗi khi bấm "Gunakan" (dùng).
 - **Thẻ mới vào Tim inti**: Tim inti giờ chứa cả CLB (200). Trước đây chỉ 36, và mọi thẻ tiếp theo từ gói,
