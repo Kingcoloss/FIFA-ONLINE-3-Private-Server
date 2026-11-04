@@ -120,7 +120,9 @@ Added, passing the tests but not yet checked in the client:
   move every Tim Cadangan card back at once.
 - **Market search** finds cards of every season: the game searches only the seasons in
   `/static/roster`, which lacked 29 seasons with Market cards (World Legend, World Best,
-  '14 TOTS, …), so e.g. WL R. Gullit never showed up.
+  '14 TOTS, …), so e.g. WL R. Gullit never showed up. The Market filter's season list works
+  (issue #14: picking a season threw "cannot convert 39 to Array", as each season's `value` must
+  be a list) and shows the client's season names (World Legend, 02 Chinese Legend, …).
 - **Every tradeable card** is on the Market, in the trades and in a pack: a card counts when
   fifaaddict lists it or the game itself marks it tradeable (`permid.transferable`). fifaaddict
   alone left out 6,599 cards (4,313 of them '17); the Market now holds 44,703. The new

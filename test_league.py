@@ -686,7 +686,11 @@ def main():
         # the Market's name search (TransferUtil: players.spid / 1000000 IN (availableSeasons))
         # only sees seasons listed in /static/roster: every season with Market cards is there
         # (user: "tidak ada r. gullid di world legend" -- WL and 15 more were missing)
-        roster = {e["value"] for e in body(hc.from_file("/static/roster"))["seasons"]}
+        # issue #14: the Market filter's season combo hands value to TransferUtil.seasonQuery(Array)
+        # ("cannot convert 39 to Array"); labels starting with $ are the client's season names
+        seasons = body(hc.from_file("/static/roster"))["seasons"]
+        assert all(isinstance(e["value"], list) for e in seasons) and seasons[23]["season"] == "$TRANSFERMARKET_SEASON_39"
+        roster = {c for e in seasons for c in e["value"]}
         market = hc.market_spids()
         assert {s // 1000000 for s in market} <= roster, sorted({s // 1000000 for s in market} - roster)
         # every card the client itself can trade (its Market search: permid.transferable = 1 and a
