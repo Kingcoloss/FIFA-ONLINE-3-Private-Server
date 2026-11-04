@@ -30,9 +30,7 @@
   .coin { width: 14px; height: 14px; border-radius: 50%; background: var(--ep); box-shadow: inset 0 0 0 2px #2f6a06; align-self: center; }
   .wallet strong { font-size: 30px; font-weight: 600; font-stretch: condensed; color: #8fd14f; }
   .wallet small { color: var(--mute); }
-  .lang { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
-  .lang button { border: 0; background: none; padding: 4px 10px; cursor: pointer; color: var(--mute); font-size: 13px; font-weight: 600; }
-  .lang button[aria-pressed="true"] { background: var(--gold); color: var(--gold-ink); }
+  #lang { padding: 4px 8px; font-size: 13px; }
 
   .shell { display: grid; grid-template-columns: 210px 1fr; min-height: calc(100vh - 62px); }
   nav { background: #1e2c38; border-right: 1px solid var(--line); padding: 12px 0; }
@@ -134,9 +132,7 @@
   <span class="who"><span id="coachName">…</span><span class="badge pc">PC</span><span class="badge vip">VIP</span></span>
   <span class="muted" id="serverTime"></span>
   <div class="wallet" data-i18n-aria="ep_balance"><span class="coin" aria-hidden="true"></span><strong id="epTop">…</strong><small>EP</small></div>
-  <div class="lang" role="group" data-i18n-aria="language">
-    <button type="button" data-lang="id" aria-pressed="true">ID</button><button type="button" data-lang="en" aria-pressed="false">EN</button>
-  </div>
+  <select id="lang" data-i18n-aria="language"></select>
 </header>
 
 <div class="shell">
@@ -175,7 +171,7 @@
         <button class="b" id="team2Clear" data-i18n="pl_team2_clear"></button>
       </div>
       <div class="table-wrap"><table>
-        <thead><tr><th data-i18n="th_role"></th><th data-i18n="th_name"></th><th class="num" data-i18n="th_season"></th><th class="num">OVR</th><th>Grade</th><th class="num" data-i18n="th_value"></th><th data-i18n="th_team"></th><th></th></tr></thead>
+        <thead><tr><th data-i18n="th_role"></th><th data-i18n="th_name"></th><th class="num" data-i18n="th_season"></th><th class="num">OVR</th><th data-i18n="grade"></th><th class="num" data-i18n="th_value"></th><th data-i18n="th_team"></th><th></th></tr></thead>
         <tbody id="playerRows"></tbody>
       </table></div>
     </section>
@@ -185,11 +181,11 @@
       <p class="lead" data-i18n="add_lead"></p>
       <form class="row" id="searchForm">
         <label class="f"><span data-i18n="add_name"></span><input class="wide" id="searchQ" minlength="2" data-i18n-ph="ph_messi" required></label>
-        <label class="f">Grade<select id="searchGrade"></select></label>
+        <label class="f"><span data-i18n="grade"></span><select id="searchGrade"></select></label>
         <button class="b primary" data-i18n="search"></button>
       </form>
       <div class="table-wrap"><table>
-        <thead><tr><th data-i18n="th_name"></th><th class="num" data-i18n="th_season"></th><th data-i18n="th_pos"></th><th class="num">OVR</th><th class="num" data-i18n="th_value"></th><th>Market</th><th></th></tr></thead>
+        <thead><tr><th data-i18n="th_name"></th><th class="num" data-i18n="th_season"></th><th data-i18n="th_pos"></th><th class="num">OVR</th><th class="num" data-i18n="th_value"></th><th data-i18n="th_market"></th><th></th></tr></thead>
         <tbody id="searchRows"><tr><td colspan="7" class="muted" data-i18n="add_hint"></td></tr></tbody>
       </table></div>
     </section>
@@ -210,13 +206,13 @@
         <label class="f"><span data-i18n="pack"></span><select id="bagPack"></select></label>
         <label class="f"><span data-i18n="pack_count"></span><input type="number" id="bagCount" min="1" max="999" value="1"></label>
         <label class="f"><span data-i18n="bag_spid"></span><input type="number" id="bagSpid" data-i18n-ph="ph_optional"></label>
-        <label class="f">Grade<select id="bagGrade"></select></label>
+        <label class="f"><span data-i18n="grade"></span><select id="bagGrade"></select></label>
         <button class="b primary" data-i18n="bag_send"></button>
       </form>
     </section>
 
     <section id="shop" hidden>
-      <h2>Shop</h2>
+      <h2 data-i18n="nav_shop"></h2>
       <p class="lead" id="shopLead"></p>
       <div class="row">
         <label class="check"><input type="checkbox" id="shopFree"> <span data-i18n="shop_free"></span></label>
@@ -276,7 +272,7 @@
       <h2 data-i18n="scout_title"></h2>
       <p class="lead" data-i18n="scout_lead"></p>
       <div class="table-wrap"><table>
-        <thead><tr><th>Scout</th><th>Status</th><th data-i18n="th_available"></th><th>Quest</th></tr></thead>
+        <thead><tr><th data-i18n="th_scout"></th><th data-i18n="th_status"></th><th data-i18n="th_available"></th><th data-i18n="th_quest"></th></tr></thead>
         <tbody id="scoutRows"></tbody>
       </table></div>
       <div class="row"><button class="b primary" id="scoutReset" data-i18n="scout_reset"></button></div>
@@ -312,136 +308,13 @@
 </dialog>
 
 <script>
-const I18N = {
-  id: {
-    ep_balance: "Saldo EP", language: "Bahasa", menu: "Menu admin",
-    nav_ringkasan: "Ringkasan", nav_pemain: "Pemain klub", nav_tambah: "Tambah pemain", nav_item: "Pak & Bag", nav_shop: "Shop",
-    nav_harian: "Hadiah harian", nav_scout: "Scout", nav_log: "Log server",
-    status_default: "Perubahan langsung tersimpan di server; game menampilkannya setelah dibuka ulang atau setelah layar klub dimuat ulang.",
-    sum_title: "Ringkasan klub", sum_lead: "Keadaan akun di server sekarang.", ep_title: "Saldo EP", amount: "Jumlah",
-    ep_add: "Tambah EP", ep_sub: "Kurangi EP", ep_set: "Jadikan saldo ini", coach_line: "{0}, tim {1}",
-    f_players: "Pemain di klub", f_team2: "Di Tim Cadangan", f_packs: "Pak di Item saya", f_bag: "Hadiah di Bag belum diambil",
-    f_streak: "Login berturut-turut", days: "{0} hari", f_today: "Hadiah hari ini", given: "sudah diberikan", waiting: "menunggu login",
-    f_vip: "VIP + PC warnet aktif sampai", ep_empty: "Isi jumlah EP dulu.", ep_now: "Saldo EP sekarang {0}.",
-    pl_lead: "Ubah grade, pindahkan ke Tim Cadangan (dipakai Tukar Scout), atau keluarkan pemain di luar 18 skuad. Kartu baru dari pak, trade dan Market masuk Tim inti.",
-    pl_filter: "Cari di daftar", ph_player: "nama pemain", pl_team2_clear: "Semua Tim Cadangan ke Tim inti",
-    th_role: "Peran", th_name: "Nama", th_season: "Musim", th_value: "Harga EP", th_team: "Tim", th_pos: "Posisi",
-    reserve: "Cadangan", to_first: "Ke Tim inti", to_second: "Ke Tim Cadangan", first_team: "Tim inti", release: "Keluarkan",
-    no_player: "Tidak ada pemain yang cocok.", confirm_release: "Keluarkan {0} dari klub? Tidak bisa dibatalkan.",
-    grade_saved: "Grade disimpan.", moved_second: "Pemain pindah ke Tim Cadangan.", moved_first: "Pemain kembali ke Tim inti.",
-    released: "{0} dikeluarkan dari klub.", team2_moved: "{0} pemain kembali ke Tim inti.",
-    add_lead: "Cari kartu di database (rating sama seperti di game dan fifaaddict), lalu masukkan langsung ke klub atau kirim lewat Bag.",
-    add_name: "Nama pemain", ph_messi: "mis. Messi", search: "Cari", add_hint: "Ketik minimal 2 huruf nama pemain.",
-    on_sale: "dijual", not_on_sale: "tidak dijual", add_club: "Masukkan ke klub", add_bag: "Kirim lewat Bag",
-    no_card: "Tidak ada kartu dengan nama itu.", found: "{0} kartu ditemukan.", search_failed: "Gagal mencari: ",
-    added: "{0} +{1} masuk ke klub (Tim inti).", gifted: "{0} +{1} dikirim ke Bag.", gift_player: "Pemain: {0}",
-    item_title: "Pak pemain & Bag", item_lead: "Pak dan item masuk ke Item saya. Hadiah Bag masuk ke Item saya → Items dan diambil dengan tombol Terima.",
-    item_give: "Beri pak ke Item saya", pack: "Pak", count: "Jumlah", item_give_btn: "Beri", bag_title: "Kirim hadiah ke Bag",
-    title: "Judul", pack_count: "Jumlah pak", bag_spid: "spid pemain", ph_optional: "opsional", bag_send: "Kirim ke Bag", no_pack: "tanpa pak",
-    given_packs: "{0}× {1} masuk ke Item saya.", gift_sent: "Hadiah \"{0}\" dikirim ke Bag.",
-    shop_lead: "Atur semua tab Shop: buat pak, item, paket dan paket bulanan baru dengan ikon dari client, ubah atau sembunyikan produk bawaan, dan pasang harga. Tersimpan di {0}; game memakainya saat Shop dibuka lagi.",
-    shop_free: "Semua produk gratis (0 EP)", shop_free_note: "Harga tetap di tabel tetap berlaku.",
-    kind_packs_tab: "Pak pemain", kind_items_tab: "Dapat dikonsumsi", kind_packages_tab: "Paket", kind_monthly_tab: "Paket bulanan", kind_lists_tab: "Daftar tab",
-    kind_packs: "pak", kind_items: "item", kind_packages: "paket", kind_monthly: "paket bulanan",
-    new_kind: "Buat {0} baru", edit_kind: "Ubah {0}", shop_filter: "Cari", ph_shop_filter: "nama atau itemid",
-    th_icon: "Ikon", th_source: "Asal", th_shop_price: "Harga di Shop", th_fixed_price: "Harga tetap", th_shown: "Tampil",
-    src_builtin: "Bawaan", src_changed: "Diubah", src_new: "Baru", chained: "Berantai", edit: "Ubah", del: "Hapus", restore: "Kembalikan asli",
-    ph_default: "bawaan", price_saved: "Harga {0} disimpan.", price_reset: "Harga {0} kembali ke bawaan.",
-    hidden_msg: "{0} disembunyikan dari Shop.", shown_msg: "{0} tampil lagi di Shop.", free_on: "Shop gratis.", free_off: "Shop memakai harga.",
-    saved_product: "{0} disimpan (itemid {1}).", deleted: "{0} dihapus.", restored: "{0} kembali ke aslinya.",
-    confirm_delete: "Hapus {0}? Salinan yang sudah ada di Item saya tidak bisa dipakai lagi.", confirm_restore: "Kembalikan {0} ke aslinya?",
-    no_product: "Tidak ada produk yang cocok.",
-    f_name: "Nama", f_icon: "Ikon", icon_pick: "Pilih ikon", f_desc: "Deskripsi", f_seasons: "Musim", seasons_hint: "kosong = semua musim",
-    f_top: "Top N kartu terbaik", f_ovr: "OVR minimal (kartu +1)", f_grade: "Grade maks. (+1 … +N)", f_pos: "Posisi", any: "semua",
-    f_league: "ID liga", f_all: "Semua kartu Market (bukan hanya lisensi ID)", f_type: "Jenis",
-    t_EP_LOTTERY: "Kartu EP (acak)", t_ITEM_LOTTERY: "Kotak acak", t_COACHNAME_CHANGE: "Ganti nama manager", t_TEAM_CHANGE: "Ganti tim",
-    t_ENHANCEMENT_BOOST: "Boost upgrade", t_LEAGUE_SIMULATION: "Kupon Simulasi Liga", f_ep_min: "EP minimal", f_ep_max: "EP maksimal", f_prizes: "Hadiah (maks. 10)",
-    f_weight: "Bobot", f_prize: "Hadiah", f_ep_amount: "Jumlah EP", add_prize: "Tambah hadiah", f_boost: "Boost peluang upgrade (%)",
-    f_contents: "Isi", add_row: "Tambah baris", f_days: "Lama (hari)", f_now: "Isi langsung saat dibeli", f_daily: "Isi tiap hari",
-    remove: "Hapus", save: "Simpan", cancel: "Batal", none_type: "Tidak perlu isian lain.", icons_count: "{0} ikon dari client", ph_icon: "cari nama ikon",
-    lists_lead: "Urutan produk di tab Rekomendasi, MP Shop, Bonus spesial dan Paket berantai.",
-    list_new: "Rekomendasi: baru", list_best: "Rekomendasi: terlaris", list_mp: "MP Shop", list_special: "Bonus spesial",
-    list_chained: "Paket berantai", list_chained_hint: "Dibeli berurutan; tiap baris satu rangkaian paket.", list_chain_add: "Tambah rangkaian",
-    list_add: "Tambah", lists_save: "Simpan daftar", lists_saved: "Daftar tab disimpan.", empty: "kosong",
-    daily_title: "Hadiah login harian", daily_lead: "Login pertama tiap hari (WIB) memberi hadiah hari itu ke Bag. Login berturut-turut menaikkan hari; bolos sehari mengulang dari hari 1. Setelah hari terakhir, siklus kembali ke awal.",
-    daily_grant: "Beri hadiah hari berikutnya sekarang", daily_reset: "Reset streak", daily_table: "Tabel hadiah", th_day: "Hari", day_n: "Hari {0}",
-    drop_day: "Hapus hari", daily_add: "Tambah hari", daily_save: "Simpan tabel", f_total: "Total hari login", f_last: "Terakhir dapat hadiah",
-    never: "belum pernah", f_today_wib: "Hari ini (WIB)", daily_saved: "Tabel hadiah harian disimpan.", sent_bag: "\"{0}\" dikirim ke Bag.",
-    confirm_reset_streak: "Reset streak login ke 0?", streak_reset: "Streak direset.",
-    scout_title: "Scout (Tukar Scout)", scout_lead: "Scout yang baru dipakai terkunci sampai cooldown habis.", th_available: "Tersedia lagi",
-    locked: "terkunci", ready: "siap dipakai", now: "sekarang", no_quest: "tanpa quest", scout_reset: "Reset cooldown semua scout",
-    scouts_ready: "Semua scout siap dipakai lagi.", q_value: "nilai pemain ≥", q_grade: "grade ≥", q_count: "jumlah", q_season: "musim",
-    log_lead: "Baris terakhir dari captures/http_config.log.", log_reload: "Muat ulang log", log_auto: "Muat otomatis tiap 3 detik",
-    failed: "Gagal: ", load_failed: "Gagal memuat: ",
-  },
-  en: {
-    ep_balance: "EP balance", language: "Language", menu: "Admin menu",
-    nav_ringkasan: "Overview", nav_pemain: "Club players", nav_tambah: "Add players", nav_item: "Packs & Bag", nav_shop: "Shop",
-    nav_harian: "Daily rewards", nav_scout: "Scouts", nav_log: "Server log",
-    status_default: "Changes are saved on the server at once; the game shows them after a restart or when the club screen reloads.",
-    sum_title: "Club overview", sum_lead: "The account on the server right now.", ep_title: "EP balance", amount: "Amount",
-    ep_add: "Add EP", ep_sub: "Take EP", ep_set: "Set the balance to this", coach_line: "{0}, club {1}",
-    f_players: "Players in the club", f_team2: "In Tim Cadangan", f_packs: "Packs in Item saya", f_bag: "Bag gifts not collected",
-    f_streak: "Login streak", days: "{0} days", f_today: "Today's reward", given: "given", waiting: "waiting for a login",
-    f_vip: "VIP + PC café perks until", ep_empty: "Enter an EP amount first.", ep_now: "EP balance is now {0}.",
-    pl_lead: "Change a card's grade, move it to Tim Cadangan (Tukar Scout trades from there), or release a card outside the squad's 18. New cards from packs, trades and the Market join Tim inti.",
-    pl_filter: "Filter the list", ph_player: "player name", pl_team2_clear: "Move every Tim Cadangan card to Tim inti",
-    th_role: "Role", th_name: "Name", th_season: "Season", th_value: "EP value", th_team: "Team", th_pos: "Position",
-    reserve: "Reserve", to_first: "To Tim inti", to_second: "To Tim Cadangan", first_team: "Tim inti", release: "Release",
-    no_player: "No matching player.", confirm_release: "Release {0} from the club? This cannot be undone.",
-    grade_saved: "Grade saved.", moved_second: "Moved to Tim Cadangan.", moved_first: "Back in Tim inti.",
-    released: "{0} released from the club.", team2_moved: "{0} cards moved back to Tim inti.",
-    add_lead: "Search the card database (ratings as in the game and on fifaaddict), then put a card straight into the club or send it through the Bag.",
-    add_name: "Player name", ph_messi: "e.g. Messi", search: "Search", add_hint: "Type at least 2 letters of a name.",
-    on_sale: "on sale", not_on_sale: "not on sale", add_club: "Add to club", add_bag: "Send via Bag",
-    no_card: "No card with that name.", found: "{0} cards found.", search_failed: "Search failed: ",
-    added: "{0} +{1} joined the club (Tim inti).", gifted: "{0} +{1} sent to the Bag.", gift_player: "Player: {0}",
-    item_title: "Player packs & Bag", item_lead: "Packs and items go to Item saya. Bag gifts go to Item saya → Items and are collected with Terima.",
-    item_give: "Give a pack to Item saya", pack: "Pack", count: "Count", item_give_btn: "Give", bag_title: "Send a gift to the Bag",
-    title: "Title", pack_count: "Pack count", bag_spid: "Player spid", ph_optional: "optional", bag_send: "Send to the Bag", no_pack: "no pack",
-    given_packs: "{0}× {1} added to Item saya.", gift_sent: "Gift \"{0}\" sent to the Bag.",
-    shop_lead: "Run every Shop tab: create packs, items, packages and monthly packages with the client's own icons, change or hide the built-in ones, and set prices. Saved in {0}; the game uses it the next time the Shop opens.",
-    shop_free: "Every product is free (0 EP)", shop_free_note: "Fixed prices in the table still apply.",
-    kind_packs_tab: "Player packs", kind_items_tab: "Consumables", kind_packages_tab: "Packages", kind_monthly_tab: "Monthly packages", kind_lists_tab: "Tab lists",
-    kind_packs: "pack", kind_items: "item", kind_packages: "package", kind_monthly: "monthly package",
-    new_kind: "New {0}", edit_kind: "Edit {0}", shop_filter: "Filter", ph_shop_filter: "name or itemid",
-    th_icon: "Icon", th_source: "Source", th_shop_price: "Shop price", th_fixed_price: "Fixed price", th_shown: "Shown",
-    src_builtin: "Built-in", src_changed: "Changed", src_new: "New", chained: "Chained", edit: "Edit", del: "Delete", restore: "Restore original",
-    ph_default: "default", price_saved: "Price of {0} saved.", price_reset: "{0} uses its default price again.",
-    hidden_msg: "{0} is hidden from the Shop.", shown_msg: "{0} shows in the Shop again.", free_on: "The Shop is free.", free_off: "The Shop charges prices.",
-    saved_product: "{0} saved (itemid {1}).", deleted: "{0} deleted.", restored: "{0} is back to the original.",
-    confirm_delete: "Delete {0}? Copies already in Item saya stop working.", confirm_restore: "Restore {0} to the original?",
-    no_product: "No matching product.",
-    f_name: "Name", f_icon: "Icon", icon_pick: "Pick an icon", f_desc: "Description", f_seasons: "Seasons", seasons_hint: "none = every season",
-    f_top: "Top N best cards", f_ovr: "Min OVR (card at +1)", f_grade: "Max grade (+1 … +N)", f_pos: "Position", any: "any",
-    f_league: "League id", f_all: "Every Market card (not only ID-licensed)", f_type: "Type",
-    t_EP_LOTTERY: "EP card (random)", t_ITEM_LOTTERY: "Random box", t_COACHNAME_CHANGE: "Manager name change", t_TEAM_CHANGE: "Club change",
-    t_ENHANCEMENT_BOOST: "Upgrade boost", t_LEAGUE_SIMULATION: "League Simulation coupon", f_ep_min: "Min EP", f_ep_max: "Max EP", f_prizes: "Prizes (up to 10)",
-    f_weight: "Weight", f_prize: "Prize", f_ep_amount: "EP amount", add_prize: "Add a prize", f_boost: "Upgrade chance boost (%)",
-    f_contents: "Contents", add_row: "Add a row", f_days: "Length (days)", f_now: "Items at purchase", f_daily: "Items every day",
-    remove: "Remove", save: "Save", cancel: "Cancel", none_type: "Nothing else to fill in.", icons_count: "{0} icons from the client", ph_icon: "icon name",
-    lists_lead: "The order of products in the Featured, MP Shop, Special bonus and Chained package tabs.",
-    list_new: "Featured: new", list_best: "Featured: best sellers", list_mp: "MP Shop", list_special: "Special bonus",
-    list_chained: "Chained packages", list_chained_hint: "Bought in order; one chain of packages per row.", list_chain_add: "Add a chain",
-    list_add: "Add", lists_save: "Save lists", lists_saved: "Tab lists saved.", empty: "empty",
-    daily_title: "Daily login rewards", daily_lead: "The first login each day (WIB) puts that day's reward in the Bag. Logging in on consecutive days moves to the next day; missing a day starts again at day 1. After the last day the cycle starts over.",
-    daily_grant: "Give the next day's reward now", daily_reset: "Reset the streak", daily_table: "Reward table", th_day: "Day", day_n: "Day {0}",
-    drop_day: "Remove day", daily_add: "Add a day", daily_save: "Save table", f_total: "Days logged in", f_last: "Last reward",
-    never: "never", f_today_wib: "Today (WIB)", daily_saved: "Daily reward table saved.", sent_bag: "\"{0}\" sent to the Bag.",
-    confirm_reset_streak: "Reset the login streak to 0?", streak_reset: "Streak reset.",
-    scout_title: "Scouts (Tukar Scout)", scout_lead: "A scout just used stays locked until its cooldown ends.", th_available: "Available again",
-    locked: "locked", ready: "ready", now: "now", no_quest: "no quest", scout_reset: "Reset every scout's cooldown",
-    scouts_ready: "Every scout is ready again.", q_value: "player value ≥", q_grade: "grade ≥", q_count: "count", q_season: "season",
-    log_lead: "The last lines of captures/http_config.log.", log_reload: "Reload log", log_auto: "Reload every 3 seconds",
-    failed: "Failed: ", load_failed: "Could not load: ",
-  },
-};
+const I18N = /*I18N*/{};  // the string tables (one per language) from admin.py, put in when the page is served
 let LANG = "id";
-try { LANG = localStorage.getItem("fo3admin.lang") === "en" ? "en" : "id"; } catch (e) {}
-const t = (k, ...a) => String(I18N[LANG][k] ?? I18N.id[k] ?? k).replace(/\{(\d+)\}/g, (_, i) => a[i]);
+try { const s = localStorage.getItem("fo3admin.lang"); if (Object.hasOwn(I18N, s)) LANG = s; } catch (e) {}
+const t = (k, ...a) => String(I18N[LANG]?.[k] ?? I18N.id?.[k] ?? k).replace(/\{(\d+)\}/g, (_, i) => a[i]);
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
-const fmt = n => Number(n || 0).toLocaleString(LANG === "en" ? "en-US" : "id-ID");
+const fmt = n => Number(n || 0).toLocaleString(t("locale"));
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const SCOUT_NAMES = {default_A01: "Scout Amatir", default_B01: "Scout Profesional", igr: "Scout Cyberindo (PC)", vip: "Scout Spesial VIP",
                      event: "Scout Khusus (event)", vvip: "VVIP Scout"};
@@ -449,17 +322,18 @@ const QUEST_KEY = {require_value: "q_value", require_grade: "q_grade", require_g
 let packs = [], packsReady, current = "ringkasan";
 
 function applyLang() {
-  document.documentElement.lang = LANG;
+  document.documentElement.lang = t("locale");
   $$("[data-i18n]").forEach(el => el.textContent = t(el.dataset.i18n));
   $$("[data-i18n-ph]").forEach(el => el.placeholder = t(el.dataset.i18nPh));
   $$("[data-i18n-aria]").forEach(el => el.setAttribute("aria-label", t(el.dataset.i18nAria)));
-  $$(".lang button").forEach(b => b.setAttribute("aria-pressed", b.dataset.lang === LANG));
+  $("#lang").value = LANG;
 }
-$$(".lang button").forEach(b => b.addEventListener("click", () => {
-  LANG = b.dataset.lang;
-  try { localStorage.setItem("fo3admin.lang", LANG); } catch (e) {}
+$("#lang").innerHTML = Object.entries(I18N).map(([k, v]) => `<option value="${k}">${esc(v.lang_name)}</option>`).join("");
+$("#lang").addEventListener("change", e => {
+  LANG = e.target.value;
+  try { localStorage.setItem("fo3admin.lang", LANG); } catch (err) {}
   applyLang(); fillPackSelects(); show(current);
-}));
+});
 
 async function api(name, body) {
   const headers = {"X-FO3-Lang": LANG};
@@ -510,13 +384,13 @@ const loaders = {
       <td><span class="chip ${p.role}">${p.role}</span>${p.team2 ? ` <span class="chip t2">${esc(t("reserve"))}</span>` : ""}</td>
       <td>${esc(p.name)} <span class="muted">${p.spid}</span></td>
       <td class="num">${p.season}</td><td class="num">${p.ovr}</td>
-      <td><select data-grade="${p.id}" aria-label="Grade ${esc(p.name)}">${gradeOpts(p.grade, 0)}</select></td>
+      <td><select data-grade="${p.id}" aria-label="${esc(t("grade"))} ${esc(p.name)}">${gradeOpts(p.grade, 0)}</select></td>
       <td class="num">${fmt(p.price)}</td>
       <td>${p.role === "RES" ? `<button class="b small" data-team="${p.id}" data-to="${p.team2 ? "first" : "second"}">${esc(t(p.team2 ? "to_first" : "to_second"))}</button>` : `<span class="muted">${esc(t("first_team"))}</span>`}</td>
       <td>${p.role === "RES" ? `<button class="b small danger" data-remove="${p.id}" data-name="${esc(p.name)}">${esc(t("release"))}</button>` : ""}</td>
     </tr>`).join("") || `<tr><td colspan="8" class="muted">${esc(t("no_player"))}</td></tr>`;
   },
-  async tambah() {},
+  async tambah() { if (found) renderSearch(); },
   async item() { await packsReady; },
   async shop() { await loadShop(); },
   async harian() {
@@ -533,7 +407,7 @@ const loaders = {
     $("#scoutRows").innerHTML = s.scouts.map(sc => {
       const q = sc.quest ? Object.entries(sc.quest).map(([k, v]) => `${QUEST_KEY[k] ? t(QUEST_KEY[k]) : k} ${typeof v === "number" ? fmt(v) : v}`).join(", ") : t("no_quest");
       return `<tr><td>${esc(SCOUT_NAMES[sc.key] || sc.key)}</td><td>${esc(t(sc.lock ? "locked" : "ready"))}</td>
-        <td>${sc.cooltime ? new Date(sc.cooltime).toLocaleString(LANG === "en" ? "en-GB" : "id-ID") : esc(t("now"))}</td><td class="muted">${esc(q)}</td></tr>`;
+        <td>${sc.cooltime ? new Date(sc.cooltime).toLocaleString(t("locale")) : esc(t("now"))}</td><td class="muted">${esc(q)}</td></tr>`;
     }).join("");
   },
   async log() {
@@ -563,7 +437,7 @@ let SHOP = null, shopKind = "packs";
 const KIND_TAB = {packs: "kind_packs", items: "kind_items", packages: "kind_packages", monthly: "kind_monthly"};
 const iconImg = (icon, cls = "ico") => `<img class="${cls}" src="/icon/${encodeURIComponent(icon)}.png" alt="" loading="lazy" onerror="this.style.visibility='hidden'">`;
 const product = id => SHOP.products.find(p => p.itemid === Number(id));
-const pname = id => id === SHOP.ep_item ? "EP" : id === SHOP.es_item ? "Upgrade point" : (product(id)?.name ?? String(id));
+const pname = id => id === SHOP.ep_item ? "EP" : id === SHOP.es_item ? t("upgrade_point") : (product(id)?.name ?? String(id));
 const optList = (kinds, val, extra = []) => extra.map(([v, n]) => `<option value="${v}"${v == val ? " selected" : ""}>${esc(n)}</option>`).join("")
   + SHOP.products.filter(p => kinds.includes(p.kind)).map(p => `<option value="${p.itemid}"${p.itemid == val ? " selected" : ""}>${esc(p.name)} · ${p.itemid}</option>`).join("");
 
@@ -594,7 +468,7 @@ function renderProducts() {
       <td><input class="price" type="number" min="0" step="1000" value="${p.fixed ?? ""}" placeholder="${esc(t("ph_default"))}" data-price="${p.itemid}" aria-label="${esc(t("th_fixed_price"))} ${esc(p.name)}"></td>
       <td><input type="checkbox" ${p.hidden ? "" : "checked"} data-shown="${p.itemid}" aria-label="${esc(t("th_shown"))} ${esc(p.name)}"></td>
       <td><button class="b small" data-edit="${p.itemid}">${esc(t("edit"))}</button>
-        ${p.custom ? `<button class="b small danger" data-del="${p.itemid}">${esc(t(p.builtin ? "restore" : "del"))}</button>` : ""}</td>
+        ${p.custom ? `<button class="b small danger" data-del="${p.itemid}">${esc(t(p.builtin ? "restore" : "delete"))}</button>` : ""}</td>
     </tr>`;
   }).join("") || `<tr><td colspan="8" class="muted">${esc(t("no_product"))}</td></tr>`;
 }
@@ -618,7 +492,7 @@ function rowHtml(kind, r) {  // kind: "contents" (itemid, count) or "prizes" (we
       <button type="button" class="b small danger" data-rowdel>${esc(t("remove"))}</button></div>`;
   }
   const [id, n] = r;
-  return `<div class="r">${field("Item", `<select data-r="id">${optList(["packs", "items"], id, [[SHOP.ep_item, "EP"], [SHOP.es_item, "Upgrade point"]])}</select>`)}
+  return `<div class="r">${field(t("f_item"), `<select data-r="id">${optList(["packs", "items"], id, [[SHOP.ep_item, "EP"], [SHOP.es_item, t("upgrade_point")]])}</select>`)}
     ${field(t("count"), `<input type="number" data-r="n" value="${n}" min="1" step="1">`)}
     <button type="button" class="b small danger" data-rowdel>${esc(t("remove"))}</button></div>`;
 }
@@ -821,17 +695,20 @@ $("#playerRows").addEventListener("click", e => {
     act(async () => { await api("player_remove", {id: tg.dataset.remove}); await loaders.pemain(); }, t("released", tg.dataset.name));
 });
 
-$("#searchForm").addEventListener("submit", async e => {
-  e.preventDefault();
-  try {
-    const {rows} = await api("search?q=" + encodeURIComponent($("#searchQ").value.trim()));
-    $("#searchRows").innerHTML = rows.map(r => `<tr>
+let found = null;  // the last search's rows, drawn again after a language switch
+function renderSearch() {
+  $("#searchRows").innerHTML = found.map(r => `<tr>
       <td>${esc(r.name)} <span class="muted">${r.spid}</span></td><td class="num">${r.season}</td><td>${r.pos}</td>
       <td class="num">${r.ovr}</td><td class="num">${fmt(r.price)}</td><td>${r.market ? esc(t("on_sale")) : `<span class="muted">${esc(t("not_on_sale"))}</span>`}</td>
       <td><button class="b small primary" data-add="${r.spid}" data-name="${esc(r.name)}">${esc(t("add_club"))}</button>
           <button class="b small" data-gift="${r.spid}" data-name="${esc(r.name)}">${esc(t("add_bag"))}</button></td>
     </tr>`).join("") || `<tr><td colspan="7" class="muted">${esc(t("no_card"))}</td></tr>`;
-    say(t("found", rows.length), "");
+}
+$("#searchForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  try {
+    found = (await api("search?q=" + encodeURIComponent($("#searchQ").value.trim()))).rows;
+    renderSearch(); say(t("found", found.length), "");
   } catch (err) { say(t("search_failed") + err.message, "err"); }
 });
 $("#searchRows").addEventListener("click", e => {

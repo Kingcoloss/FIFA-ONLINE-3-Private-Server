@@ -790,7 +790,13 @@ def main():
         assert refused("shop_lists", lists={"mp": [pkg]}) and refused("shop_lists", lists={"chained": [[newpack]]})
         A("shop_free", free=False); assert hc.item_def(8336)["bunches"][0]["price"] > 0; A("shop_free", free=True)
         hc.apply_shop(); assert newpack in hc.PACKS and hc.SHOP_NEW == (newpack, 501)  # all of it read back from the file
-        assert admin.AdminError("a", "b").text("en") == "b" and admin.AdminError("a", "b").text(None) == "a"
+        # issue #15 + user: "tambahkan juga thai ,vietnam, korea": one string table per language
+        err = admin.AdminError("e_day", ("day_n", 2), ("e_range", ("pack_count",), 1, 99))
+        assert (err.text("en"), err.text(None), err.text("zh")) == (
+            "Day 2: Pack count must be 1..99", "Hari 2: Jumlah pak harus 1..99", "第 2 天：卡包数量 必须在 1..99 之间")
+        admin.check_i18n()
+        assert set(admin.I18N) == {"id", "en", "zh", "th", "vi", "ko"}
+        assert all("t_" + x in admin.I18N["id"] for x in hc.SHOP_ITEM_TYPES)  # a label for every item type
         hc.apply_shop({}); os.remove(hc.SHOP_FILE)  # the built-in Shop again
         # every Tim Cadangan card back to Tim inti at once (they went there by themselves while it held 36)
         st = hc._state(); next(p for p in team()["players"] if not hc.in_squad(team(), p))
@@ -804,7 +810,8 @@ def main():
         srv = admin.start(hc, 0)
         url, web = f"http://127.0.0.1:{srv.server_address[1]}", urllib.request.build_opener(urllib.request.ProxyHandler({}))
         try:
-            assert b"FO3ID admin" in web.open(url + "/").read()
+            page = web.open(url + "/").read()
+            assert b"FO3ID admin" in page and b"/*I18N*/" not in page and b'"lang_name": "\\u7b80\\u4f53\\u4e2d\\u6587"' in page
             assert web.open(url + "/icon/8194.png").read()[:4] == b"\x89PNG"  # the client's shop icon
             err = urllib.request.Request(url + "/api/player_grade", b'{"id": "nope", "grade": 2}',
                                          {"X-FO3-Admin": "1", "X-FO3-Lang": "en"}, method="POST")
