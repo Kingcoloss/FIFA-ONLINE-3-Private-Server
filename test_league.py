@@ -30,6 +30,7 @@ def main():
     tmp = tempfile.mkdtemp()
     try:
         hc.STATE = os.path.join(tmp, "state.json")
+        hc.SHOP_FILE = os.path.join(tmp, "shop.json"); hc.apply_shop({})  # the built-in Shop, not the live edits
         # a fresh account through the client's club creation (the live state may hold no manager)
         hc._save({"coaches": [], "defaultcoachid": "", "teams": {}})
         with open(os.path.join(hc.RESPONSES, "static_info_authentic_team_all_241.json")) as f:
@@ -558,6 +559,11 @@ def main():
         assert post("/shop/purchase", {"shopid": 501, "productid": 501, "bunch": 1})["result"]  # 10 Lucky EP
         assert all(10_000 <= use(501)["ep"] <= 1_000_000 for _ in range(10))
         assert not any(i["itemid"] == 501 for i in items())  # used up
+        # issue #12: the random box screen (TeamManagementRandomCardScreen.SetItemBackground) shows
+        # staticdata.availables, the prizes, as item tiles; without it every box crashed at "Gunakan"
+        av = hc.item_def(50121)["availables"]
+        assert [a["itemid"] for a in av] == [8334, 8194, 82214007, 45011, hc.EP_ITEM]
+        assert av[-1]["count"] == 10_000_000 and av[-1]["staticdata"]["type"] == "EP" and av[0]["staticdata"]["name"]
         assert post("/shop/purchase", {"shopid": 50122, "productid": 50122, "bunch": 1})["result"]  # 10 Kotak Emas
         for _ in range(10):
             got = use(50122)
@@ -665,6 +671,47 @@ def main():
         A("daily_reset")
         assert A("daily_grant")["title"].endswith("hari ke-1") and A("daily_grant")["title"].endswith("hari ke-2")
         assert [b["items"] for b in body(hc.ENDPOINTS["/bag"]("", b""))] == [hc.reward_items(r) for r in tbl]
+        # --- Shop control (issue #10; user: "kontrol shop semua tab, bisa buat pack baru, paket baru
+        # dll"): new pack / item / package / monthly with the client's icons, prices, hidden, tab lists
+        sh = A("shop")
+        assert sh["free"] and "8194" in sh["icons"] and {p["kind"] for p in sh["products"]} == set(hc.SHOP_KINDS)
+        save = lambda kind, d, **k: A("shop_save", kind=kind, **k, **{"def": d})["itemid"]
+        newpack = save("packs", {"name": "Tes WL", "icon": "8194", "seasons": [93], "top": 5, "grade": 3, "all": True})
+        assert newpack == hc.SHOP_ID_BASE["packs"] + 1 and len(hc.pack_pool(newpack)) == 5
+        assert any(e["product"]["itemid"] == newpack for e in hc.shop_list(hc._state()))
+        assert refused("shop_save", kind="packs", **{"def": {"name": "kosong", "seasons": [93], "ovr": 130}})  # no card
+        assert refused("shop_save", kind="items", **{"def": {"name": "x", "icon": "nope", "type": "EP_LOTTERY", "ep": [1, 2]}})
+        box = save("items", {"name": "Kotak Tes", "icon": "ID50121GP", "type": "ITEM_LOTTERY",
+                             "prizes": [[1, newpack], [1, {"ep": 5000}]]})
+        assert [a["itemid"] for a in hc.item_def(box)["availables"]] == [newpack, hc.EP_ITEM]
+        pkg = save("packages", {"name": "Paket Tes", "icon": "801", "contents": [[box, 2], [hc.EP_ITEM, 1000]]})
+        mon = save("monthly", {"name": "Bulanan Tes", "icon": "801", "days": 7, "now": [], "daily": [[newpack, 1]]})
+        assert {e["shopcategory"] for e in hc.shop_list(hc._state()) if e["product"]["itemid"] in (box, pkg, mon)} == {
+            "USE", "PACKAGE", "MONTHLYPACK"}
+        ep1 = ep()
+        assert post("/shop/purchase", {"shopid": pkg, "productid": pkg, "bunch": 0})["result"] and ep() == ep1 + 1000
+        assert use(box)["result"] and use(box)["result"]
+        A("shop_price", itemid=newpack, price=5000); assert hc.item_def(newpack)["bunches"][0]["price"] == 5000
+        A("shop_price", itemid=newpack, price=None); assert hc.item_def(newpack)["bunches"][0]["price"] == 0
+        A("shop_hide", itemid=8336, hidden=True)
+        assert all(e["product"]["itemid"] != 8336 for e in hc.shop_list(hc._state()))
+        assert not post("/shop/purchase", {"shopid": 8336, "productid": 8336, "bunch": 0})["result"]
+        A("shop_hide", itemid=8336, hidden=False)
+        save("items", {**hc.item_to(hc.ITEMS[501]), "name": "Lucky EP baru"}, itemid=501)  # a built-in, changed
+        assert hc.item_def(501)["name"] == "Lucky EP baru"
+        A("shop_delete", kind="items", itemid=501); assert hc.item_def(501)["name"] == "Lucky EP"  # back to the original
+        assert refused("shop_delete", kind="packs", itemid=newpack)  # still a prize of the box
+        A("shop_lists", lists={"new": [newpack, 501], "mp": [box], "chained": [[pkg, 801]]})
+        assert hc.SHOP_NEW == (newpack, 501) and hc.MP_SHOP == (box,) and hc.CHAINED == {pkg: (pkg, 801)}
+        assert refused("shop_lists", lists={"mp": [pkg]}) and refused("shop_lists", lists={"chained": [[newpack]]})
+        A("shop_free", free=False); assert hc.item_def(8336)["bunches"][0]["price"] > 0; A("shop_free", free=True)
+        hc.apply_shop(); assert newpack in hc.PACKS and hc.SHOP_NEW == (newpack, 501)  # all of it read back from the file
+        assert admin.AdminError("a", "b").text("en") == "b" and admin.AdminError("a", "b").text(None) == "a"
+        hc.apply_shop({}); os.remove(hc.SHOP_FILE)  # the built-in Shop again
+        # every Tim Cadangan card back to Tim inti at once (they went there by themselves while it held 36)
+        st = hc._state(); next(p for p in team()["players"] if not hc.in_squad(team(), p))
+        t = st["teams"][str(hc._default_slot(st))]; t["players"][-1]["team2"] = True; hc._save(st)
+        assert A("team2_clear")["moved"] >= 1 and not any(p.get("team2") for p in team()["players"])
         st = hc._state(); hc.my_coach(st)["scout_used"] = {"vip": time.time()}; hc._save(st)
         assert [s["lock"] for s in A("summary")["scouts"]] == [False] * len(hc.SCOUTS)  # no cooldowns
         A("scouts_reset"); assert not any(s["lock"] for s in A("summary")["scouts"])
@@ -674,6 +721,10 @@ def main():
         url, web = f"http://127.0.0.1:{srv.server_address[1]}", urllib.request.build_opener(urllib.request.ProxyHandler({}))
         try:
             assert b"FO3ID admin" in web.open(url + "/").read()
+            assert web.open(url + "/icon/8194.png").read()[:4] == b"\x89PNG"  # the client's shop icon
+            err = urllib.request.Request(url + "/api/player_grade", b'{"id": "nope", "grade": 2}',
+                                         {"X-FO3-Admin": "1", "X-FO3-Lang": "en"}, method="POST")
+            assert json.load(web.open(err)) == {"error": "player not found"}
             assert json.load(web.open(url + "/api/summary"))["coach"]["ep"] == ep()
             for req in (urllib.request.Request(url + "/api/ep?add=5"),
                         urllib.request.Request(url + "/api/ep", b'{"add": 5}', method="POST")):
@@ -687,25 +738,29 @@ def main():
                 "error": "pemain tidak ditemukan"}
         finally:
             srv.shutdown(); srv.server_close()
-        # --- Tim inti holds 36: further cards go to Tim Cadangan (Tukar Scout's list); old clubs
-        # over the cap are balanced at login; moving into a full Tim inti is refused
+        # --- Tim inti holds the whole club (user: "player dari pack/ trade/market jangan masuk
+        # langsung ke reversed"; it held 36 and every further card went to Tim Cadangan): a new
+        # card joins Tim inti, a login keeps the cards where they are, Tim Cadangan only holds the
+        # cards moved there by hand (Tukar Scout's list), and they can always move back
+        assert hc.FIRST_TEAM_MAX == hc.MAX_PLAYERS
         st = hc._state(); t = st["teams"][str(hc._default_slot(st))]
         for p in t["players"]:
             p.pop("team2", None)
         while len(t["players"]) < 45:
             t["players"].append(dict(t["players"][-1], _id=hc.new_iid()))
+        res = next(p for p in t["players"] if not hc.in_squad(t, p))
+        res["team2"] = True
         hc._save(st)
         assert body(hc.ENDPOINTS[f"/coach/{hc._default_slot(st)}/default"]("", b""))["result"]
         t = hc._state()["teams"][str(hc._default_slot(st))]
-        assert hc.first_team_count(t) == hc.FIRST_TEAM_MAX and sum(bool(p.get("team2")) for p in t["players"]) == 9
+        assert hc.first_team_count(t) == 44 and sum(bool(p.get("team2")) for p in t["players"]) == 1
         # the Skuad tab's move to Tim inti reads limits.firstTeam (missing = it never asks)
         assert hc.coach_me(hc._state(), hc._default_slot(hc._state()))["limits"]["firstTeam"] == hc.FIRST_TEAM_MAX
-        assert all(not p.get("team2") for p in t["players"] if hc.in_squad(t, p))
         new = hc.add_player(t, 88158023)
-        assert new["team2"]
-        res = next(p for p in t["players"] if p.get("team2") and p is not new)
+        assert not new.get("team2")
         hc._save(hc._state() | {"teams": {**hc._state()["teams"], str(hc._default_slot(st)): t}})
-        assert not body(hc.route(f"/player/{hc.iid(res)}/move/firstteam")("", b"{}"))["result"]
+        res = next(p for p in t["players"] if p.get("team2"))
+        assert body(hc.route(f"/player/{hc.iid(res)}/move/firstteam")("", b"{}"))["result"]
         # --- delete a manager: PUT /coach/<slot>/postponed -> "postpone" until hideat (restorable with
         # DELETE /coach/<_id>/postponed), then the slot is free and the club data goes with it
         slot = hc._default_slot(hc._state()); cid = hc.coach_id(slot)

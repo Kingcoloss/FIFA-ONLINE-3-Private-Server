@@ -30,7 +30,8 @@ Tested in the real client (Indonesian UI):
   (+1 to every attribute per level), manager LV.1-100.
 - Game sound and the EA Trax menu music. `tools/eatrax_song.py` puts your own song first in it,
   but the game then crashes after matches (see the known issue below).
-- Admin web page on http://127.0.0.1:8088/ (EP, players, packs, gifts, daily rewards, log).
+- Admin web page on http://127.0.0.1:8088/ (EP, players, packs, gifts, daily rewards, log), in
+  Indonesian or English.
 - Real club kits in matches (kit id = `teamid << 5 | type`; the old `<< 10` gave a checkerboard).
 - Matches play through the second half with **team color** on (season colors used to crash it at
   half time), then show the EXP and reward screens.
@@ -92,6 +93,17 @@ Added, passing the tests but not yet checked in the client:
 - **Tim > Peran** saves the captain and each set-piece taker (issue #8: `PUT /game/my/team/captain`
   and `/game/my/team/kickers/<0-4>` were missing). The five kicker slots (left corner, right
   corner, free kick, penalty, free kick 2) keep their place; an empty one takes a starter.
+- **Shop control on the admin page** (issue #10): every Shop tab (player packs, consumables,
+  packages, monthly packages, Featured, MP Shop, Special bonus, chained packages). New packs (by
+  season, top N, OVR, max grade, position, league), random boxes, EP cards, packages and monthly
+  packages, with any of the client's 147 shop icons. Built-in products can be changed, hidden or
+  given a fixed price, and the whole Shop can be made free or not. Changes go to
+  `gamedata/shop.json`.
+- **Random boxes open** (Kotak Platinum and the rest, issue #12): the box screen lists its prizes
+  from `staticdata.availables`, which was missing, so every box failed at "Gunakan".
+- **New cards join Tim inti**: Tim inti now holds the whole club (200). It held 36, and every
+  further card from a pack, trade or the Market went straight to Tim Cadangan. The admin page can
+  move every Tim Cadangan card back at once.
 - **Market search** finds cards of every season: the game searches only the seasons in
   `/static/roster`, which lacked 29 seasons with Market cards (World Legend, World Best,
   '14 TOTS, …), so e.g. WL R. Gullit never showed up.
@@ -155,7 +167,7 @@ Not done: online modes (ranked, friendly, King of the Hill), Road to World, leag
 |---|---|
 | `http_config.py` | The REST backend the client calls (`https://APSEODESK172`): login, account, coaches, club creation, squad, league, cup, market, upgrade, trades, shop, items, Bag, daily reward, static tables, and `/cdn/` (serves crests and cards from the client's own `_cache`). State lives in `gamedata/state.json`. Env: `FO3_LANGUAGE` (default `ind`), `FO3_GAME` (client folder), `FO3_ASSETS`, `FO3_HALF_LENGTH`, `FO3_ADMIN_PORT`. |
 | `messenger.py` | Notification server on `:28002`. Frames `<u16 LE len><u16 type=2><Blowfish-CBC(key "kueec", IV 0) of JSON+"\n">`; answers `auth`, `ping`, `signon`. `python messenger.py --selftest`. |
-| `admin.py` + `admin/index.html` | Admin page (started by `http_config.py`, localhost only, no password). |
+| `admin.py` + `admin/index.html` | Admin page (started by `http_config.py`, localhost only, no password; Indonesian / English). Its Shop tab saves to `gamedata/shop.json`. |
 | `responses/` | Per-endpoint JSON bodies (`/a/b/c` → `responses/a_b_c.json`, re-read on every request). Shapes come from the client's AS3 code. |
 | `extract_fifadb.py` | Client player DB (`data_0.big`, RefPack + Blowfish) → SQLite. |
 | `gen_teams.py` | Starter squads and club summaries from `gamedata/fifadb.sqlite`. |

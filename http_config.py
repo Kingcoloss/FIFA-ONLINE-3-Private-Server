@@ -2136,9 +2136,11 @@ def ep_cup_record(query, body):
 # --------------------------------------------------------------------------- #
 LINES = {"GK": range(0, 1), "DF": range(1, 9), "MF": range(9, 20), "FW": range(20, 28)}  # Enums.PLAYERPOSITION
 MAX_PLAYERS = 200  # coach.limits.players (squad size; user: "max skuad naikan", was 60)
-# Tim inti (player state "first": Formasi lists only these) holds 36 ("Tim inti x/36" in Skuad);
-# cards beyond that wait in Tim Cadangan, which Tukar Scout trades from.
-FIRST_TEAM_MAX = 36
+# Tim inti (player state "first": Formasi lists only these) holds the whole club ("Tim inti x/200"
+# in Skuad). It held 36 and every further card from a pack, trade or the Market went straight to
+# Tim Cadangan (user: "player dari pack/ trade/market jangan masuk langsung ke reversed"); now
+# Tim Cadangan only holds the cards moved there by hand, which Tukar Scout trades from.
+FIRST_TEAM_MAX = MAX_PLAYERS
 
 
 def first_team_count(team):
@@ -2961,7 +2963,7 @@ def pack_pool(itemid):
         # ones) would win almost every draw: weigh anything under a tenth of the median as that tenth
         card_ovrs([s for s, _ in rows])  # one batch: card by card took 12 s for Semua Pemain's 44,703
         prices = [card_price(s) for s, _ in rows]
-        floor = sorted(prices)[len(prices) // 2] / 10
+        floor = sorted(prices)[len(prices) // 2] / 10 if prices else 0  # no card: an empty pool
         _PACK_POOL[itemid] = [(s, max(p, floor) ** -0.75) for (s, _), p in zip(rows, prices)]
     return _PACK_POOL[itemid]
 
@@ -2993,11 +2995,7 @@ def warm_packs():
     trade3_pool()
 
 
-SHOP_FREE = True  # user: "shop jadi 0 semua" -> every Shop product costs 0 EP
-
-
-def shop_price(value, n):
-    return 0 if SHOP_FREE else sig3(value * n * (0.95 if n > 1 else 1))
+SHOP_FREE = True  # user: "shop jadi 0 semua" -> every Shop product costs 0 EP (admin page: shop.json "free")
 
 
 def item_def(itemid):
@@ -3015,7 +3013,7 @@ def item_def(itemid):
             "type": "LEAGUE" if "league" in f else "POSITION" if "pos" in f else "CUSTOM",
             "unit": "COUNT", "itemicon": f.get("icon", itemid), "currency": "ep",
             **({"bundleicon": f["icon"]} if "icon" in f else {}),  # several packs share one icon
-            "bunches": [{"bunch": n, "price": shop_price(pack_price(itemid), n)} for n in PACK_BUNCHES],
+            "bunches": [{"bunch": n, "price": product_price(itemid, n, lambda: pack_price(itemid))} for n in PACK_BUNCHES],
             **({"draw": {"year": 2017}} if f.get("season") == 88 else {})}
 
 
@@ -3127,13 +3125,20 @@ MONTHLY = {  # itemid: (name, icon, days, items now, daily items, description)
 }
 
 
-def use_item_def(itemid):
+def use_item_def(itemid, prizes=True):
     name, icon, typ, eff, desc = ITEMS[itemid]
     return {"itemid": itemid, "productid": itemid, "name": name, "category": "USE", "type": typ, "unit": "COUNT",
             "itemicon": icon, "bundleicon": icon, "currency": "ep", "stackable": True, "description": desc,
             # TeamManagementEPCardScreen.onQuery sizes the coin counter from count.max
             **({"count": {"min": eff["ep"][0], "max": eff["ep"][1]}} if "ep" in eff else {}),
-            "bunches": [{"bunch": n, "price": 0} for n in PACK_BUNCHES]}
+            # a random box's prizes: TeamManagementRandomCardScreen.SetItemBackground hands
+            # staticdata.availables to its panel as item tiles (GeneralInventoryTileItemRenderer);
+            # none crashed every box at "Gunakan" (issue #12). A box among the prizes shows no prizes
+            # of its own (no loop).
+            **({"availables": [{"itemid": EP_ITEM, "count": p[1], "staticdata": EP_ITEM_DEF} if isinstance(p, tuple)
+                               else {"itemid": p, "count": 1, "staticdata": use_item_def(p, False) if p in ITEMS else item_def(p)}
+                               for _, p in eff["prizes"]]} if prizes and "prizes" in eff else {}),
+            "bunches": [{"bunch": n, "price": product_price(itemid, n)} for n in PACK_BUNCHES]}
 
 
 def package_def(itemid):
@@ -3146,7 +3151,7 @@ def package_def(itemid):
         extra = {}
     return {"itemid": itemid, "productid": itemid, "name": name, "category": "PACKAGE", "type": "ITEM",
             "unit": "COUNT", "itemicon": icon, "bundleicon": icon, "currency": "ep", "description": desc,
-            "bunches": [{"bunch": 1, "price": 0}], **extra,
+            "bunches": [{"bunch": 1, "price": product_price(itemid, 1)}], **extra,
             "items": [{"itemid": i, "count": n, "staticdata": item_def(i)} for i, n in contents]}
 
 
@@ -3176,27 +3181,165 @@ def chained_entry(st, first):
 
 
 def shop_list(st):
-    """GET /shop/list: every Shop tab's products (ShopController filters them by shopcategory)."""
-    return ([shop_entry(i) for i in PACKS] + [shop_entry(i, "USE") for i in ITEMS]
-            + [shop_entry(i, "PACKAGE") for i in PACKAGES if i not in CHAIN_STEPS]
-            + [shop_entry(i, "MILEAGE", MP_SHOPID + i) for i in MP_SHOP]
-            + [shop_entry(i, "MONTHLYPACK") for i in MONTHLY]
-            + [chained_entry(st, first) for first in CHAINED])
+    """GET /shop/list: every Shop tab's products (ShopController filters them by shopcategory);
+    the ones hidden on the admin page are left out."""
+    on = lambda i: i not in SHOP_HIDDEN
+    return ([shop_entry(i) for i in PACKS if on(i)] + [shop_entry(i, "USE") for i in ITEMS if on(i)]
+            + [shop_entry(i, "PACKAGE") for i in PACKAGES if i not in CHAIN_STEPS and on(i)]
+            + [shop_entry(i, "MILEAGE", MP_SHOPID + i) for i in MP_SHOP if on(i)]
+            + [shop_entry(i, "MONTHLYPACK") for i in MONTHLY if on(i)]
+            + [chained_entry(st, first) for first in CHAINED if on(first)])
 
 
 def product_category(itemid):
     return "PLAYERPACK" if itemid in PACKS else "USE" if itemid in ITEMS else "PACKAGE"
 
 
+# --------------------------------------------------------------------------- #
+# Shop catalog from the admin page (user: "di admin page buatkan untuk kontrol shop semua tab, bisa
+# buat pack baru, paket baru dll"; issue #10). gamedata/shop.json holds only what was changed
+# there, on top of the built-in tables above:
+#   free     every product costs 0 EP (default SHOP_FREE)
+#   prices   {itemid: EP for one}: a fixed price, also while the Shop is free (0 = free)
+#   hidden   [itemid]: left out of every Shop tab (cards and items already owned still work)
+#   packs    {itemid: {name, icon, seasons [codes], top, ovr (rating at +1), grade (max +N), pos
+#             (FW/MF/DF/GK), league, all (any card, else ID-licensed only)}}
+#   items    {itemid: {name, icon, type, description, ep [min, max] | prizes [[weight, itemid |
+#             {"ep": n}]] | boost (0..1)}}: the types use_item knows
+#   packages {itemid: {name, icon, contents [[itemid, count]], description}}
+#   monthly  {itemid: {name, icon, days, now [[itemid, count]], daily [[itemid, count]], description}}
+#   lists    {new, best (Rekomendasi), mp (MP Shop), special (Bonus spesial): [itemid],
+#             chained: [[package itemid, ...]] (Paket berantai, bought in order)}
+# A built-in itemid in packs/items/packages/monthly is replaced by that entry. apply_shop()
+# rebuilds the tables in place (every lookup above keeps working) and drops the pack pools.
+# --------------------------------------------------------------------------- #
+SHOP_FILE = os.path.join(HERE, "gamedata", "shop.json")
+SHOP_ITEM_TYPES = ("EP_LOTTERY", "ITEM_LOTTERY", "COACHNAME_CHANGE", "TEAM_CHANGE", "ENHANCEMENT_BOOST")
+SHOP_ID_BASE = {"packs": 93_000_000, "items": 94_000_000, "packages": 95_000_000, "monthly": 96_000_000}
+SHOP_HIDDEN = frozenset()
+_SHOP_BASE = None
+_SHOP = {}
+
+
+def shop_config():
+    """The admin page's Shop changes (gamedata/shop.json), {} when there are none."""
+    try:
+        with open(SHOP_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def _pairs(rows):
+    return [(int(i), int(n)) for i, n in rows]
+
+
+def pack_from(v):
+    f = {k: v[k] for k in ("top", "ovr", "grade", "pos", "league") if v.get(k) not in (None, "", 0)}
+    if v.get("seasons"):
+        f["seasons"] = tuple(int(s) for s in v["seasons"])
+    if v.get("all"):
+        f["all"] = True
+    if v.get("icon"):
+        f["icon"] = v["icon"]
+    return (str(v["name"]), f)
+
+
+def pack_to(entry):
+    name, f = entry
+    seasons = f.get("seasons") or ((f["season"],) if "season" in f else ())
+    return {"name": name, "icon": f.get("icon", ""), "seasons": list(seasons), "all": bool(f.get("all")),
+            **{k: f.get(k) for k in ("top", "ovr", "grade", "pos", "league")}}
+
+
+def item_from(v):
+    t = v["type"]
+    eff = ({"ep": tuple(int(x) for x in v["ep"])} if t == "EP_LOTTERY"
+           else {"prizes": [(int(w), ("ep", int(p["ep"])) if isinstance(p, dict) else int(p)) for w, p in v["prizes"]]}
+           if t == "ITEM_LOTTERY" else {"boost": float(v["boost"])} if t == "ENHANCEMENT_BOOST" else {})
+    return (str(v["name"]), v.get("icon") or "", t, eff, str(v.get("description") or ""))
+
+
+def item_to(entry):
+    name, icon, t, eff, desc = entry
+    return {"name": name, "icon": icon, "type": t, "description": desc,
+            **({"ep": list(eff["ep"])} if "ep" in eff else {}), **({"boost": eff["boost"]} if "boost" in eff else {}),
+            **({"prizes": [[w, {"ep": p[1]} if isinstance(p, tuple) else p] for w, p in eff["prizes"]]}
+               if "prizes" in eff else {})}
+
+
+def package_from(v):
+    return (str(v["name"]), v.get("icon") or "", _pairs(v["contents"]), str(v.get("description") or ""))
+
+
+def package_to(entry):
+    name, icon, contents, desc = entry
+    return {"name": name, "icon": icon, "contents": [list(c) for c in contents], "description": desc}
+
+
+def monthly_from(v):
+    return (str(v["name"]), v.get("icon") or "", int(v["days"]), _pairs(v["now"]), _pairs(v["daily"]),
+            str(v.get("description") or ""))
+
+
+def monthly_to(entry):
+    name, icon, days, now, daily, desc = entry
+    return {"name": name, "icon": icon, "days": days, "now": [list(c) for c in now], "daily": [list(c) for c in daily],
+            "description": desc}
+
+
+SHOP_KINDS = {"packs": (PACKS, pack_from, pack_to), "items": (ITEMS, item_from, item_to),
+              "packages": (PACKAGES, package_from, package_to), "monthly": (MONTHLY, monthly_from, monthly_to)}
+
+
+def apply_shop(cfg=None):
+    """Rebuild the Shop tables from the built-in ones plus gamedata/shop.json (or cfg)."""
+    global _SHOP_BASE, _SHOP, SHOP_FREE, SHOP_HIDDEN, SHOP_NEW, SHOP_BEST, MP_SHOP, SPECIAL, CHAINED, CHAIN_STEPS
+    if _SHOP_BASE is None:
+        _SHOP_BASE = {"free": SHOP_FREE, "new": SHOP_NEW, "best": SHOP_BEST, "mp": MP_SHOP, "special": SPECIAL,
+                      "chained": dict(CHAINED), **{k: dict(t) for k, (t, _, _) in SHOP_KINDS.items()}}
+    _SHOP = shop_config() if cfg is None else cfg
+    before = dict(PACKS)
+    for kind, (table, conv, _) in SHOP_KINDS.items():
+        table.clear()
+        table.update(_SHOP_BASE[kind])
+        table.update({int(k): conv(v) for k, v in (_SHOP.get(kind) or {}).items()})
+    lists = _SHOP.get("lists") or {}
+    SHOP_FREE = bool(_SHOP.get("free", _SHOP_BASE["free"]))
+    SHOP_HIDDEN = frozenset(int(i) for i in _SHOP.get("hidden") or ())
+    SHOP_NEW, SHOP_BEST, MP_SHOP, SPECIAL = (tuple(int(i) for i in lists.get(k, _SHOP_BASE[k]))
+                                             for k in ("new", "best", "mp", "special"))
+    CHAINED = ({int(c[0]): tuple(int(i) for i in c) for c in lists["chained"] if c} if "chained" in lists
+               else dict(_SHOP_BASE["chained"]))
+    CHAIN_STEPS = {i: (first, k) for first, steps in CHAINED.items() for k, i in enumerate(steps)}
+    for k in set(before) | set(PACKS):  # rebuild only the pools of changed packs (all of them take ~7 s)
+        if before.get(k) != PACKS.get(k):
+            _PACK_POOL.pop(k, None)
+
+
+def product_price(itemid, n, value=lambda: 0):
+    """EP for a bunch of n: the admin page's fixed price, else 0 while the Shop is free, else the
+    value (a pack's expected card value); 5% off for 10."""
+    fixed = (_SHOP.get("prices") or {}).get(str(itemid))
+    if fixed is None and SHOP_FREE:
+        return 0
+    one = int(fixed) if fixed is not None else value()
+    return sig3(one * n * (0.95 if n > 1 else 1)) if one else 0
+
+
+apply_shop()
+
+
 def ep_specifictarget(query, body):
     """GET /specifictarget: Special Bonus is open for me (ShopController.getSpecialShopInfo)."""
     return _json({"issell": True, "targets": [{"stid": STSHOPID + i, "endtime": "2035-01-01T00:00:00.000Z"}
-                                              for i in SPECIAL]})
+                                              for i in SPECIAL if i not in SHOP_HIDDEN]})
 
 
 def ep_stshop(query, body):
     """GET /shop/list/STSHOP: the Special Bonus products."""
-    return _json([dict(shop_entry(i, product_category(i), STSHOPID + i), stid=STSHOPID + i) for i in SPECIAL])
+    return _json([dict(shop_entry(i, product_category(i), STSHOPID + i), stid=STSHOPID + i)
+                  for i in SPECIAL if i not in SHOP_HIDDEN])
 
 
 def monthly_list(st):
@@ -3212,7 +3355,7 @@ def ep_monthlypack(query, body):
     if body:  # POST (ShopMonthlyPackageProxy.requestReward)
         today = today_wib()
         for k, m in my_coach(st).get("monthly", {}).items():
-            if m["expire"] > time.time() and today_wib(m["rewarded"]) != today:
+            if m["expire"] > time.time() and today_wib(m["rewarded"]) != today and int(k) in MONTHLY:
                 name, _, _, _, daily, _ = MONTHLY[int(k)]
                 e = bag_add(st, f"{name} - hadiah harian", [{"itemid": i, "count": n} for i, n in daily],
                             msg=f"Hadiah harian {name}.")
@@ -3252,7 +3395,7 @@ def ep_shop_purchase(query, body):
     items go to Item saya, a package's contents too."""
     req = json.loads(body or b"{}")
     itemid = int(req.get("productid") or 0) or int(req.get("shopid") or 0) % MP_SHOPID % STSHOPID
-    if not any(itemid in t for t in (PACKS, ITEMS, PACKAGES, MONTHLY)):
+    if itemid in SHOP_HIDDEN or not any(itemid in t for t in (PACKS, ITEMS, PACKAGES, MONTHLY)):
         return _json({"result": False, "reason": "NOT_EXIST_PRODUCT"})
     bunches = item_def(itemid)["bunches"]
     b = bunches[min(max(int(req.get("bunch") or 0), 0), len(bunches) - 1)]
