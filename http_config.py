@@ -322,30 +322,51 @@ def ep_account_option(query, body):
     return _json({"result": True})
 
 
-def ep_coach_squad(query, body):
-    """PUT /coach/me/squad {squad:{positions,formation,...}, kickers, captain} from Tim > Formasi.
-    Player ids are instance ids (iid)."""
-    req = json.loads(body or b"{}")
-    st = _state(); slot = _default_slot(st); team = st["teams"].get(str(slot))
+def apply_squad(team, req):
+    """Save a squad PUT {squad:{positions,formation,workrate}, kickers, captain} (instance ids)
+    to a stored team. A client still holding old instance ids (e.g. from before a card
+    migration) must not wipe the XI: False, team unchanged, unless it has 11 known starters."""
     sq = req.get("squad") or {}
-    spid_of = {iid(p): p["spid"] for p in team["players"]} if team is not None else {}
+    spid_of = {iid(p): p["spid"] for p in team["players"]}
     positions = [{"id": str(p["id"]), "spid": spid_of[str(p["id"])], "pos": p["pos"],
                   **({"starting": p["starting"]} if p.get("starting") else {})}
                  for p in sq.get("positions") or [] if str(p.get("id")) in spid_of and p.get("pos", 99) <= POS_SUB]
-    # a client still holding old instance ids (e.g. from before a card migration) must not
-    # wipe the XI: keep the stored squad unless the new one has 11 known starters
-    if sum(p["pos"] < POS_SUB for p in positions) == 11:
-        team["squad"]["positions"] = positions
-        for k in ("formation", "workrate"):
-            if k in sq:
-                team["squad"][k] = sq[k]
-        if str(req.get("captain")) in spid_of:
-            team["squad"]["captain"] = str(req["captain"])
-        if req.get("kickers") and all(str(k) in spid_of for k in req["kickers"] if k):
-            # a slot per KICKER_TYPES entry: dropping an empty one shifted the penalty taker (issue #8)
-            team["squad"]["kickers"] = [str(k) if k else "" for k in req["kickers"]][:KICKERS]
+    if sum(p["pos"] < POS_SUB for p in positions) != 11:
+        return False
+    team["squad"]["positions"] = positions
+    for k in ("formation", "workrate"):
+        if k in sq:
+            team["squad"][k] = sq[k]
+    if str(req.get("captain")) in spid_of:
+        team["squad"]["captain"] = str(req["captain"])
+    if req.get("kickers") and all(str(k) in spid_of for k in req["kickers"] if k):
+        # a slot per KICKER_TYPES entry: dropping an empty one shifted the penalty taker (issue #8)
+        team["squad"]["kickers"] = [str(k) if k else "" for k in req["kickers"]][:KICKERS]
+    return True
+
+
+def ep_coach_squad(query, body):
+    """PUT /coach/me/squad {squad:{positions,formation,...}, kickers, captain} from Tim > Formasi."""
+    st = _state(); slot = _default_slot(st); team = st["teams"].get(str(slot))
+    if team is not None and apply_squad(team, json.loads(body or b"{}")):
         _save(st)
     return _json({"result": True, "resources": coach_me_resources(st, slot)})
+
+
+def ep_match_squad(mid, side, query, body):
+    """PUT /match/<id>/side/<side>/squad {squad, kickers, captain} from the pre-match squad screen
+    (SquadScreenHandler.sendSquadToServer: a swap, a sub, a formation). It had no handler, so the
+    generic {result: true} brought no new squad back and every change undid itself (issue #16).
+    Saved to my club like Tim > Formasi; my side is rebuilt from it and comes back in the match
+    resource, which the screen reads (side.<mine>.team.squad). result false shows reason."""
+    st = _state(); slot = _default_slot(st); match = st.get("match") or {}
+    s = (match.get("side") or {}).get(side) if match.get("id") == mid else None
+    team = st["teams"].get(str(slot))
+    if not s or not s["players"] or team is None or not apply_squad(team, json.loads(body or b"{}")):
+        return _json({"result": False, "reason": "PLAYERLIST_CHANGEPLAYER_FAIL_POPUP_INFO_UNUSABLEPLAYER"})
+    s.update(match_side(team, s["team"]["teamid"], s["players"][0], s["tactics"]), ready=s["ready"])
+    _save(st)
+    return _json({"result": True, "resources": [{"uri": f"/match/{mid}", "body": match}] + coach_me_resources(st, slot)})
 
 
 KICKERS = 5  # squad.kickers slots, Enums.KICKER_TYPES: left corner, right corner, free kick, penalty, free kick 2
@@ -395,6 +416,8 @@ def match_side(raw, teamid, user=None, tactics=None):
     team.update(teamid=teamid, summary=team_summary(team, teamid), kit=team_kit(teamid))
     # team color for the user's side only: an AI side is a whole club (+4 for free)
     team["teamcolors"] = active_teamcolors(team) if user else []
+    if user:  # the pre-match squad screen's formation list (side.<mine>.team.formations; was empty, issue #16)
+        team["formations"] = team_formations(teamid)
     # ready: a user side starts unready -- MatchController.sendReady skips the PUT .../ready
     # (no kick-off) when isMySideReady is already true; AI sides are always ready.
     return {"team": team, "squad": team["squad"], "players": [user] if user else [],
@@ -1142,8 +1165,11 @@ def owned_team(raw):
     # SECONDTEAM), set by /player/<id>/move/secondteam (stored as team2); Tukar Scout only
     # lists Tim Cadangan cards. A card in the 18 is always Tim inti (Formasi hides the others;
     # a state.json from before 5ffbfd8 can hold such a card, issue #7).
+    # stamina 0..1: Liga's player lists draw it as a bar (PlayerListItemTeamColorRenderer in
+    # ZONE_LEAGUE; without it the bar was empty, issue #16) and SquadUtil.getPositionScore weighs
+    # it for the best XI. ponytail: always full, no fatigue kept between Liga matches.
     in18 = {str(s.get("id") or s["spid"]) for s in team["squad"]["positions"]}
-    team["players"] = [{**({} if p.get("team2") and iid(p) not in in18 else {"state": "first"}), "grade": 0, "life": 100,
+    team["players"] = [{**({} if p.get("team2") and iid(p) not in in18 else {"state": "first"}), "grade": 0, "life": 100, "stamina": 1,
                         **{k: v for k, v in p.items() if k != "team2"}, "levelinfo": player_levelinfo(p),
                         "_id": iid(p), "id": iid(p), "price": card_price(p["spid"], grade_of(p))}
                        for p in team["players"]]
@@ -3917,6 +3943,7 @@ ROUTES = [
     (re.compile(r"/transfer/my/offer/completed/(\w+)(?:/(\w+))?"), ep_offer_collect),
     (re.compile(r"/match/([0-9a-f]+)/player/ready"), ep_match_player_ready),
     (re.compile(r"/match/([0-9a-f]+)/side/(\w+)/ready"), ep_match_ready),
+    (re.compile(r"/match/([0-9a-f]+)/side/(\w+)/squad"), ep_match_squad),
     (re.compile(r"/match/([0-9a-f]+)/end"), ep_match_end),
     (re.compile(r"/match/([0-9a-f]+)/gamesettings"), ep_match_gamesettings),
     # StaticData bescripts go to native as-is (BeginnersGuideManager.startLeagueTutorial ->

@@ -116,6 +116,10 @@ Added, passing the tests but not yet checked in the client:
   then the EP reward and back to the Liga menu. The button counts the coupons in Item saya
   and stayed off because the item did not exist. New coupons can be made on the admin page (type
   "Kupon Simulasi Liga").
+- **Pre-match squad screen** (Liga and Cup, issue #16): swaps, subs and formation changes now
+  stick and are saved to the club (`PUT /match/<id>/side/<side>/squad` had no handler, so each
+  change undid itself). The formation list is filled, and the stamina bars show full (no fatigue
+  is kept between matches).
 - **Random boxes open** (Kotak Platinum and the rest, issue #12): the box screen lists its prizes
   from `staticdata.availables`, which was missing, so every box failed at "Gunakan".
 - **New cards join Tim inti**: Tim inti now holds the whole club (200). It held 36, and every

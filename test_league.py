@@ -177,6 +177,23 @@ def main():
                 for stage, nxt in (("created", "squad"), ("squad", "setting")):
                     pr = body(hc.route(f"/match/{m['id']}/player/ready")("", json.dumps({"ready": True, "stage": stage}).encode()))
                     assert pr["resources"][0]["body"]["stage"] == nxt, pr
+                # pre-match squad screen (issue #16): it needs the formation list and each player's
+                # stamina; a sub swapped in comes back in the match resource and stays in my club
+                left = m["side"]["left"]["team"]
+                assert left["formations"] and all(p["stamina"] == 1 for p in left["players"])
+                sq = json.loads(json.dumps(left["squad"]))
+                a = next(p for p in sq["positions"] if 0 < p["pos"] < hc.POS_SUB)
+                b = next(p for p in sq["positions"] if p["pos"] == hc.POS_SUB)
+                a["id"], b["id"] = b["id"], a["id"]  # b now holds the benched starter
+                put = lambda s, q: body(hc.route(f"/match/{m['id']}/side/{s}/squad")("", json.dumps(
+                    {"squad": q, "kickers": left["kickers"], "captain": left["captain"], "_method": "PUT"}).encode()))
+                r = put("left", sq)
+                xi = lambda ps: {p["id"] for p in ps if p["pos"] < hc.POS_SUB}
+                assert r["result"] and xi(r["resources"][0]["body"]["side"]["left"]["team"]["squad"]["positions"]) == xi(sq["positions"])
+                assert b["id"] not in xi(hc.coach_me(hc._state(), 0)["team"]["squad"]["positions"])
+                assert put("right", sq)["result"] is False  # the AI side
+                assert put("left", dict(sq, positions=sq["positions"][:5]))["result"] is False  # no XI: kept
+                assert xi(hc._state()["match"]["side"]["left"]["team"]["squad"]["positions"]) == xi(sq["positions"])
                 rd = body(hc.route(f"/match/{m['id']}/side/left/ready")("", b'{"ready": true, "stage": "setting"}'))
                 assert rd["resources"][0]["body"]["stage"] == "playing"
                 stats = {"home": {"id": home, "score": 2}, "away": {"id": away, "score": 1}}
