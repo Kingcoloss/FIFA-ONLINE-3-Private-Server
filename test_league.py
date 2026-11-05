@@ -713,7 +713,11 @@ def main():
         assert post("/shop/purchase", {"shopid": 3001, "productid": 3001, "bunch": 0})["result"]
         club = hc.my_teamid(hc._state())
         assert use(3001, {"teamid": 10})["result"] and hc.my_teamid(hc._state()) == 10  # Ganti tim
-        assert body(hc.route("/static/info/team/summary/10")("", b""))["id"] == 10
+        # Ganti tim's club info and 3D player (TeamChangeScreenSelectPage.onReceivedTeamInfo, issue #23)
+        rm = body(hc.route("/static/info/team/summary/243")("", b""))
+        assert rm["id"] == 243 and rm["summary"]["name"] == "Real Madrid" and rm["summary"]["league"]["id"] == 53
+        assert rm["summary"]["rival"]["name"] and rm["stadium"]["name"] == "Santiago Bernabéu" and rm["stadium"]["capacity"] == 81044
+        assert rm["kit"] == hc.team_kit(243)
         hc.my_coach(st := hc._state())["teamid"] = club; hc._save(st)
         n0 = {i["itemid"]: i["remains"] for i in items()}
         assert post("/shop/purchase", {"shopid": 50881, "productid": 50881, "bunch": 0})["result"]  # Kotak World Best

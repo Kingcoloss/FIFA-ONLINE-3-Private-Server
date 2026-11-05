@@ -134,6 +134,10 @@ Added, passing the tests but not yet checked in the client:
 - **Controller and camera settings stay in matches** (issue #21): after Opsi > Konfirmasi the game
   reads the saved options back from the reply, which had none, so every match put back the options
   from login (keyboard, old camera). In a match, F3-F9 switch the camera (F5 = Co-op).
+- **Ganti tim shows the club and your player** (issue #23): the item's club screen now shows the
+  league, rival, stadium, year built and capacity, and your player in the new club's kit with
+  birth date, height and weight. The server's club info had none of these, and without the kit
+  the 3D player was never drawn.
 - **Random boxes open** (Kotak Platinum and the rest, issue #12): the box screen lists its prizes
   from `staticdata.availables`, which was missing, so every box failed at "Gunakan".
 - **New cards join Tim Cadangan**: a card from a pack, a trade, the Market, the Bag or the admin

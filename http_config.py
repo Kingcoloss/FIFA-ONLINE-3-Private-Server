@@ -825,8 +825,21 @@ def club_stadium(teamid):
 def ep_stadium(sid, query, body):
     """GET /stadium/<id> (TeamStaticInfo.onStadiumChanged via StaticData.getData): the home
     stadium's name and "yearbuilt / capacity" line in Tim > Klub > Informasi tim (issue #9)."""
-    s = stadium_table()[0].get(int(sid))
-    return _json({"id": int(sid), **(s or {"name": "-", "yearbuilt": "-", "capacity": "-"})})
+    return _json(stadium_info(sid))
+
+
+def stadium_info(sid):
+    return {"id": int(sid), **(stadium_table()[0].get(int(sid)) or {"name": "-", "yearbuilt": "-", "capacity": "-"})}
+
+
+def ep_team_summary(teamid, query, body):
+    """GET /static/info/team/summary/<id> {summary, stadium, kit}: Item > Ganti tim
+    (TeamChangeScreenSelectPage.onReceivedTeamInfo) shows summary name, league.id, rival.name and
+    the stadium's name and "yearbuilt / capacity", and dresses its 3D player in kit.availables
+    (no kit = no 3D player, birth date, height or weight; issue #23). The Cup and Boxing Day club
+    pickers read summary.league from the same body."""
+    t = int(teamid)
+    return _json({"id": t, "summary": roster(t)["summary"], "stadium": stadium_info(club_stadium(t)), "kit": team_kit(t)})
 
 
 def team_formations(teamid):
@@ -4103,8 +4116,7 @@ ROUTES = [
     (re.compile(r"/lockerroom/(\w+)/itemset"), ep_lockerroom_itemset),
     (re.compile(r"/lockerroom/(\w+)/jersey"), ep_lockerroom_jersey),
     (re.compile(r"/static/info/authentic/team/(licensed|all)/(\d+)"), ep_authentic_team),
-    # Ganti tim screen: a club's summary for its TeamInfoNew (name/crest id, ovr, teamgrade)
-    (re.compile(r"/static/info/team/summary/(\d+)"), lambda t, q, b: _json({**roster(int(t))["summary"], "id": int(t)})),
+    (re.compile(r"/static/info/team/summary/(\d+)"), ep_team_summary),
     (re.compile(r"/player/(\w+)/move/(firstteam|secondteam)"), ep_player_move),
     (re.compile(r"/player/(\w+)/enhance/(\w+)/preview"), ep_enhance_preview),
     (re.compile(r"/player/(\w+)/enhance2\.5/(\w+)/preview/(\d)/(-?\d+)/(-?\d+)"), ep_enhance25_preview),

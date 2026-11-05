@@ -143,6 +143,10 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
 - **Setelan kontroler dan kamera tetap berlaku di match** (issue #21): setelah Opsi > Konfirmasi,
   game membaca opsi tersimpan dari balasan server, yang dulu kosong, jadi tiap match kembali ke opsi
   saat login (keyboard, kamera lama). Di match, F3-F9 mengganti kamera (F5 = Co-op).
+- **Ganti tim menampilkan klub dan pemainmu** (issue #23): layar klub item ini sekarang menampilkan
+  liga, rival, stadion, tahun dibangun, dan kapasitas, serta pemainmu dengan seragam klub baru beserta
+  tanggal lahir, tinggi, dan berat. Info klub dari server dulu tidak memuat semua itu, dan tanpa
+  seragam pemain 3D tidak pernah digambar.
 - **Kotak acak bisa dibuka** (Kotak Platinum dan lainnya, issue #12): layar kotak menampilkan
   hadiahnya dari `staticdata.availables`, yang belum ada, jadi tiap kotak gagal saat "Gunakan".
 - **Kartu baru masuk Tim Cadangan**: kartu dari pak, trade, Market, Bag, atau halaman admin tampil

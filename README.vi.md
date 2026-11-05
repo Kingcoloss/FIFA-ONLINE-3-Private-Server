@@ -132,6 +132,10 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
 - **Cài đặt tay cầm và camera được giữ trong trận** (issue #21): sau Opsi > Konfirmasi, game đọc lại tùy chọn
   đã lưu từ phản hồi của máy chủ, trước đây không có, nên mỗi trận lại quay về tùy chọn lúc đăng nhập (bàn phím,
   camera cũ). Trong trận, F3-F9 đổi camera (F5 = Co-op).
+- **Ganti tim (đổi đội) hiện câu lạc bộ và cầu thủ của bạn** (issue #23): màn hình câu lạc bộ của vật phẩm này
+  giờ hiện giải đấu, đối thủ derby, sân nhà, năm xây và sức chứa, cùng cầu thủ của bạn trong áo đấu của câu lạc bộ
+  mới với ngày sinh, chiều cao và cân nặng. Trước đây thông tin câu lạc bộ từ máy chủ không có những thứ này, và
+  không có áo đấu thì cầu thủ 3D không bao giờ được vẽ.
 - **Mở được hộp ngẫu nhiên** (Kotak Platinum và các hộp khác, issue #12): màn hình hộp liệt kê phần thưởng
   từ `staticdata.availables`, trước đây bị thiếu, nên mọi hộp đều lỗi khi bấm "Gunakan" (dùng).
 - **Thẻ mới vào Tim Cadangan**: thẻ từ gói, giao dịch, Market, Bag hoặc trang quản trị hiện "-" ở cột Tim
