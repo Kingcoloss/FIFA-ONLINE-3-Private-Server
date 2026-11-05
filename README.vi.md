@@ -127,6 +127,11 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   giờ cũng quyết định đội lên hạng hay xuống hạng cuối mùa). Rekorku liệt kê số trận, điểm, bàn thắng, kiến tạo,
   đường chuyền, tắc bóng và cứu thua của từng cầu thủ trong các trận đã đá của mùa, còn Rekor gabungan hiện đội hình
   tiêu biểu và những người dẫn đầu thống kê của mùa. Chỉ tính cầu thủ của mình, và trận mô phỏng không cộng thống kê cầu thủ.
+- **Squad A / B / C trong Formasi** (issue #20): ô bên trái nút đội hình chọn một trong ba đội hình đã lưu
+  (trước đây trống vì máy chủ không gửi số đội hình). Mỗi đội hình giữ đội chính, sơ đồ và vai trò riêng.
+- **Cài đặt tay cầm và camera được giữ trong trận** (issue #21): sau Opsi > Konfirmasi, game đọc lại tùy chọn
+  đã lưu từ phản hồi của máy chủ, trước đây không có, nên mỗi trận lại quay về tùy chọn lúc đăng nhập (bàn phím,
+  camera cũ). Trong trận, F3-F9 đổi camera (F5 = Co-op).
 - **Mở được hộp ngẫu nhiên** (Kotak Platinum và các hộp khác, issue #12): màn hình hộp liệt kê phần thưởng
   từ `staticdata.availables`, trước đây bị thiếu, nên mọi hộp đều lỗi khi bấm "Gunakan" (dùng).
 - **Thẻ mới vào Tim Cadangan**: thẻ từ gói, giao dịch, Market, Bag hoặc trang quản trị hiện "-" ở cột Tim

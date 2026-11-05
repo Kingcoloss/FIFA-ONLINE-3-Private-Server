@@ -4,7 +4,7 @@
   "Limited_Product_Alarm": {"Period": 1, "amount": 1},
   "MaximumRemainingMatch": 1,
   "club_Friendly": {"Club_Friendly_Invite_Limit_Time": 1},
-  "limit": {"pvecup_igr": 1},
+  "limit": {"pvecup_igr": 1, "preset_squad_count": 3},
   "roleplaymode_option": 1,
   "be_loading_tips": {"tips_pool_max": 10},
   "playertrade_limit": {"CardMinValue": 40, "CardMaxValue": 89, "view_CardMaxValue": "89", "popup_price": 1000000},

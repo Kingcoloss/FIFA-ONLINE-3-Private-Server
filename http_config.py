@@ -20,7 +20,7 @@ https://APSEODESK172 (port 443) for /info/server/locale etc. — no launch arg
 overrides it — so run `http_config.py 443 --tls` and map APSEODESK172 to
 127.0.0.1 in the hosts file.
 """
-import bisect, collections, functools, gzip, http.server, math, os, random, re, sqlite3, ssl, statistics, sys, threading, time
+import bisect, collections, copy, functools, gzip, http.server, math, os, random, re, sqlite3, ssl, statistics, sys, threading, time
 from contextlib import closing
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -295,22 +295,35 @@ def control_option_ok(c):
     return isinstance(c, dict) and all(ok(c.get(k), v) for k, v in CONTROL_DEFAULTS.items())
 
 
+def account_option():
+    """The account's `option`: responses/account_base.json's, with the options the client saved
+    through PUT /account/option layered over it."""
+    with open(os.path.join(RESPONSES, "account_base.json"), encoding="utf-8") as f:
+        opt = json.load(f)["option"]
+    opt.update(_state().get("option", {}))
+    opt["soundOption"] = {**SOUND_DEFAULTS, **(opt.get("soundOption") or {})}
+    if not control_option_ok(opt.get("controlOption")):
+        opt["controlOption"] = CONTROL_DEFAULTS
+    return opt
+
+
 def ep_account(query, body):
-    """GET /account (AccountProxy.accountData): responses/account_base.json, with the options
-    the client saved through PUT /account/option layered over `option`."""
+    """GET /account (AccountProxy.accountData)."""
     with open(os.path.join(RESPONSES, "account_base.json"), encoding="utf-8") as f:
         acc = json.load(f)
-    acc["option"].update(_state().get("option", {}))
-    acc["option"]["soundOption"] = {**SOUND_DEFAULTS, **(acc["option"].get("soundOption") or {})}
-    if not control_option_ok(acc["option"].get("controlOption")):
-        acc["option"]["controlOption"] = CONTROL_DEFAULTS
+    acc["option"] = account_option()
     return _json(acc)
 
 
 def ep_account_option(query, body):
     """PUT /account/option {soundOption, screenOption, controlOption, chatHotKeyOption, aiOption,
     cameraOption} (Opsi > Konfirmasi, leaving a match). A controlOption is kept only when it is
-    complete (see CONTROL_DEFAULTS); otherwise the one saved before stays."""
+    complete (see CONTROL_DEFAULTS); otherwise the one saved before stays.
+    The reply must carry the saved options as resources[0].body (AccountCommand.saveGameOption
+    sets accountProxy.gameOptions from it, and that runs OptionManager.setOptions, which also
+    takes the backup restoreOptions goes back to on every zone change). With no resources the
+    callback threw TypeError #1010, so entering or leaving a match put back the options from
+    login: keyboard instead of the gamepad, the old camera (issue #21)."""
     req = json.loads(body or b"{}")
     st = _state()
     old = st.get("option", {}).get("controlOption")
@@ -319,7 +332,7 @@ def ep_account_option(query, body):
     if ctl:
         st["option"]["controlOption"] = ctl
     _save(st)
-    return _json({"result": True})
+    return _json({"result": True, "resources": [{"uri": "/account/option", "body": account_option()}]})
 
 
 def apply_squad(team, req):
@@ -333,6 +346,13 @@ def apply_squad(team, req):
                  for p in sq.get("positions") or [] if str(p.get("id")) in spid_of and p.get("pos", 99) <= POS_SUB]
     if sum(p["pos"] < POS_SUB for p in positions) != 11:
         return False
+    idx = req.get("presetidx")
+    if isinstance(idx, int) and 0 <= idx < PRESET_SQUADS and idx != team.get("presetidx", 0):
+        # a switch to another of Squad A / B / C (SquadScreenHandler sends the picked one with
+        # its presetidx): the squad being left keeps its slot
+        saved = (team.get("presets") or []) + [None] * PRESET_SQUADS
+        saved[team.get("presetidx", 0)] = copy.deepcopy(team["squad"])
+        team["presets"], team["presetidx"] = saved[:PRESET_SQUADS], idx
     team["squad"]["positions"] = positions
     for k in ("formation", "workrate"):
         if k in sq:
@@ -1166,6 +1186,30 @@ def fill_squad(sq, players):
             s["starting"] = [gen_teams.PARTICIPATION, gen_teams.PARTICIPATION, xy["x"], xy["y"]]
 
 
+# Formasi's squad picker (SquadScreenHandler, issue #20: it was an empty box): STATICVALUES
+# limit.preset_squad_count entries named MULTIPLE_SQUAD_SLOT1.. = Squad A, B, C; a slot i is
+# locked below coach level limit["preset_squad_level<i>"] (none = open). Picking one sends
+# PUT /coach/me/squad {squad, kickers, captain, presetidx} (apply_squad).
+PRESET_SQUADS = 3
+
+
+def preset_squads(team):
+    """coach.teamsquadlist.preset of an owned team (owned_team): one squad per slot. The slot in
+    use (presetidx) is the squad itself; the others as they were left, without cards that are
+    gone and topped up like the squad (a slot never used starts as a copy of the squad)."""
+    # like selectPresetSquad, which keeps only Tim inti cards
+    saved, ids, out = team.get("presets") or [], {p["id"] for p in team["players"] if p.get("state") == "first"}, []
+    for i in range(PRESET_SQUADS):
+        if i == team.get("presetidx", 0) or i >= len(saved) or not saved[i]:
+            out.append(team["squad"])
+            continue
+        sq = copy.deepcopy(saved[i])
+        sq["positions"] = [s for s in sq["positions"] if str(s.get("id")) in ids]
+        fill_squad(sq, team["players"])
+        out.append(sq)
+    return out
+
+
 def owned_team(raw):
     """A stored team ({players:[{spid,...}], squad:{positions,captain,kickers,...}}) in the
     shape the client expects for a club it can show and play with (coach.team, match side.team)."""
@@ -1202,7 +1246,7 @@ def owned_team(raw):
     team["squad"] = sq
     team.update({"staffs": [], "staffroles": [], "staffroleidx": 0, "maxstaff": 0, "staffsmc": {}})
     # PlayerListUtil.generateCaptainFromCoachInfo (Tim > Formasi) reads these at team level
-    team.update({"captain": sq["captain"], "kickers": sq["kickers"], "presetidx": 0})
+    team.update({"captain": sq["captain"], "kickers": sq["kickers"], "presetidx": team.get("presetidx", 0)})
     team.setdefault("formations", [])
     return team
 
@@ -1333,8 +1377,8 @@ def coach_me(st, slot):
         # Formasi opens preset squad team.presetidx (STATICVALUES has `limit`): generateCaptainFrom
         # CoachInfo copies THIS coach-level teamsquadlist into its team and SquadUtil.selectPresetSquad
         # reads .preset[i] {formation, positions, kickers, captain}; none (was []) = "Tidak cukup
-        # pemain". The one preset is the squad itself; the client re-fills holes / bench and saves it.
-        "teamsquadlist": {"preset": [team["squad"]]},
+        # pemain". The client re-fills holes / bench and saves it.
+        "teamsquadlist": {"preset": preset_squads(team)},
     }
 
 

@@ -137,6 +137,12 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   menampilkan pertandingan, rating, gol, assist, umpan, tekel, dan penyelamatan tiap pemain dari
   pertandingan musim ini yang dimainkan, dan Rekor gabungan menampilkan best XI dan pemimpin statistik
   musim ini. Hanya pemain sendiri yang dihitung, dan pertandingan simulasi tidak menambah statistik pemain.
+- **Squad A / B / C di Formasi** (issue #20): kotak di kiri tombol formasi memilih satu dari tiga
+  squad tersimpan (dulu kosong karena server tidak mengirim jumlah squad). Tiap squad menyimpan XI,
+  formasi, dan perannya sendiri.
+- **Setelan kontroler dan kamera tetap berlaku di match** (issue #21): setelah Opsi > Konfirmasi,
+  game membaca opsi tersimpan dari balasan server, yang dulu kosong, jadi tiap match kembali ke opsi
+  saat login (keyboard, kamera lama). Di match, F3-F9 mengganti kamera (F5 = Co-op).
 - **Kotak acak bisa dibuka** (Kotak Platinum dan lainnya, issue #12): layar kotak menampilkan
   hadiahnya dari `staticdata.availables`, yang belum ada, jadi tiap kotak gagal saat "Gunakan".
 - **Kartu baru masuk Tim Cadangan**: kartu dari pak, trade, Market, Bag, atau halaman admin tampil

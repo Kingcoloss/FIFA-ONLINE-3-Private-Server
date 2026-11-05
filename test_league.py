@@ -4,7 +4,7 @@
 
 Runs a whole season through the handlers against a temporary copy of gamedata/state.json.
 """
-import json, os, shutil, sys, tempfile, time
+import copy, json, os, shutil, sys, tempfile, time
 from collections import Counter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -66,7 +66,12 @@ def main():
         # then starts with the pad (keyboardControl = Controller == 0)
         mine = dict(hc.CONTROL_DEFAULTS, Controller=1, Type=2, JoyAttType3=[3, 4, 2, 1, 5, 7, 6, 8])
         save_opt = lambda o: hc.ENDPOINTS["/account/option"]("", json.dumps(o).encode())
-        save_opt({"soundOption": {"BGM": 3}, "controlOption": mine})
+        cam = {"Camera": 2, "CamDetail": 0}  # Co-op (F5 in a match)
+        r = body(save_opt({"soundOption": {"BGM": 3}, "controlOption": mine, "cameraOption": cam}))
+        # the reply carries the saved options: AccountCommand.saveGameOption reads resources[0].body
+        # (OptionManager's backup for every zone change; none = login options back in a match, issue #21)
+        opt = r["resources"][0]["body"]
+        assert opt == body(hc.ENDPOINTS["/account"]("", b""))["option"] and opt["controlOption"] == mine and opt["cameraOption"] == cam
         save_opt({"soundOption": {"BGM": 4}, "controlOption": {}})  # e.g. leaving a match
         assert acc_ctl() == mine and body(hc.ENDPOINTS["/account"]("", b""))["option"]["soundOption"]["BGM"] == 4
         save_opt({"soundOption": {"BGM": 10}, "controlOption": hc.CONTROL_DEFAULTS})
@@ -444,6 +449,27 @@ def main():
         me = hc.coach_me(hc._state(), 0); me_team = me["team"]
         preset = me["teamsquadlist"]["preset"][me_team["presetidx"]]
         assert preset["positions"] == me_team["squad"]["positions"] and preset["formation"] == me_team["squad"]["formation"]
+        # Squad A / B / C (issue #20: the picker was an empty box without limit.preset_squad_count)
+        assert body(hc.from_file("/static/db/STATICVALUES"))["limit"]["preset_squad_count"] == hc.PRESET_SQUADS
+        assert len(me["teamsquadlist"]["preset"]) == hc.PRESET_SQUADS and me_team["presetidx"] == 0
+        sq_a = me_team["squad"]
+        put_sq = lambda sq, i=None: hc.ENDPOINTS["/coach/me/squad"]("", json.dumps(
+            {"squad": sq, "kickers": sq["kickers"], "captain": sq["captain"], **({} if i is None else {"presetidx": i})}).encode())
+        # pick B (starts as a copy of A), swap two starters there and save
+        sq_b = copy.deepcopy(me["teamsquadlist"]["preset"][1])
+        xi = [s for s in sq_b["positions"] if s["pos"] < hc.POS_SUB]
+        xi[0]["pos"], xi[1]["pos"] = xi[1]["pos"], xi[0]["pos"]
+        put_sq(sq_b, 1)
+        me = hc.coach_me(hc._state(), 0)
+        pos_of = lambda sq: {s["id"]: s["pos"] for s in sq["positions"]}
+        assert me["team"]["presetidx"] == 1 and pos_of(me["team"]["squad"]) == pos_of(sq_b)
+        assert pos_of(me["teamsquadlist"]["preset"][0]) == pos_of(sq_a) != pos_of(sq_b)  # A kept
+        put_sq(me["team"]["squad"])  # an edit without presetidx stays on B
+        assert hc.coach_me(hc._state(), 0)["team"]["presetidx"] == 1
+        put_sq(me["teamsquadlist"]["preset"][0], 0)  # back to A
+        me = hc.coach_me(hc._state(), 0)
+        assert me["team"]["presetidx"] == 0 and pos_of(me["team"]["squad"]) == pos_of(sq_a)
+        assert pos_of(me["teamsquadlist"]["preset"][1]) == pos_of(sq_b)
         st = hc._state(); t = st["teams"][str(hc._default_slot(st))]
         hc.remove_player(t, next(p for p in t["players"] if hc.iid(p) == c10)); hc._save(st)
         # --- Upgrade 2.5: the tab, upgrade points (money.es) and boost items

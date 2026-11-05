@@ -128,6 +128,12 @@ Added, passing the tests but not yet checked in the client:
   lists each player's matches, rating, goals, assists, passes, tackles and saves from the season's
   played matches, and Rekor gabungan shows the season's best XI and stat leaders. Only my own
   players are counted, and simulated matches add no player stats.
+- **Squad A / B / C in Formasi** (issue #20): the box left of the formation button picks one of
+  three saved squads (it was empty: the server sent no squad count). Each squad keeps its own XI,
+  formation and roles.
+- **Controller and camera settings stay in matches** (issue #21): after Opsi > Konfirmasi the game
+  reads the saved options back from the reply, which had none, so every match put back the options
+  from login (keyboard, old camera). In a match, F3-F9 switch the camera (F5 = Co-op).
 - **Random boxes open** (Kotak Platinum and the rest, issue #12): the box screen lists its prizes
   from `staticdata.availables`, which was missing, so every box failed at "Gunakan".
 - **New cards join Tim Cadangan**: a card from a pack, a trade, the Market, the Bag or the admin
