@@ -846,6 +846,9 @@ def main():
         # issue #27: draft packs ("Pilih pak pemain", TeamManagementDraftPackScreen) and EXP capsules
         dp = 200005  # 2017 Draft Pick 5
         assert hc.item_def(dp)["category"] == "DRAFTPACK" and hc.item_def(dp)["draft"] == {"season": 88, "grade": 1, "availables": 5}
+        for d in (8223735, 200005, 97093):  # their own icons ship with the server (assets/)
+            icon = hc.item_def(d)["itemicon"]
+            assert icon == hc.item_def(d)["bundleicon"] and hc.asset_path(f"externalAssets/shop/{icon}.png").startswith(hc.OWN_ASSETS)
         top5 = body(hc.route(f"/item/draftpack/{dp}/players/5")("", b""))  # the default picks: the 5 most valuable
         assert len(top5) == 5 and all(p["spid"] // 1000000 == 88 and p["price"] == hc.card_price(p["spid"]) for p in top5)
         assert [p["price"] for p in top5] == sorted((p["price"] for p in top5), reverse=True)

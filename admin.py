@@ -341,16 +341,16 @@ def log(p):
 
 # --- Shop (gamedata/shop.json, format in http_config's "Shop catalog" block) ----------------------
 
-def icon_dir():
-    return os.path.join(hc.ASSETS, "externalAssets", "shop")
-
-
 def shop_icons():
-    """The client's own shop images (externalAssets/shop/<name>.png), the icons a product can use."""
-    try:
-        return sorted(f[:-4] for f in os.listdir(icon_dir()) if f.endswith(".png"))
-    except OSError:
-        return []
+    """The shop images (externalAssets/shop/<name>.png: the client's own plus the server's draft
+    pack icons), the icons a product can use."""
+    names = set()
+    for root in (hc.OWN_ASSETS, hc.ASSETS):
+        try:
+            names.update(f[:-4] for f in os.listdir(os.path.join(root, "externalAssets", "shop")) if f.endswith(".png"))
+        except OSError:
+            pass
+    return sorted(names)
 
 
 def product_tab(kind, itemid):
@@ -627,10 +627,10 @@ class Admin(http.server.BaseHTTPRequestHandler):
             with open(PAGE, "rb") as f:  # the string tables go in as JSON (ASCII, no "</" to end the script)
                 page = f.read().replace(b"/*I18N*/{}", json.dumps(I18N).replace("</", "<\\/").encode())
             return self._send(200, page, "text/html; charset=utf-8")
-        m = re.fullmatch(r"/icon/([A-Za-z0-9_]+)\.png", url.path)  # the client's shop icons
+        m = re.fullmatch(r"/icon/([A-Za-z0-9_]+)\.png", url.path)  # the shop icons
         if m:
-            f = os.path.join(icon_dir(), m.group(1) + ".png")
-            if not os.path.isfile(f):
+            f = hc.asset_path(f"externalAssets/shop/{m.group(1)}.png")
+            if f is None:
                 return self._send(404, b"", "image/png")
             with open(f, "rb") as fh:
                 return self._send(200, fh.read(), "image/png")

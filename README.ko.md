@@ -222,6 +222,7 @@ EALayer3(6.5 MB, `tools/re/ealayer3.py`)로 넣어도, 원본보다 작은 음�
 | `tools/fa_sync.py` | fifaaddict.com 가격 동기화. |
 | `tools/fo4_season.py` | FIFA Online 4의 26 LIVE·25 LIVE 카드(fifaaddict 데이터, 능력치는 +0 기준)를 FO4 시즌 아이콘과 함께 새 시즌 두 개로 추가: `fetch`, `collect` + `import`, `build`, `install`(`data_0.big`은 크기가 바뀌면 안 되므로 그 자리에 다시 쓰고 `Label.big`은 끝에 덧붙여 수정, `restore`로 둘 다 원본 복구). |
 | `tools/fa_faces.py` | 클라이언트 캐시에 없는 선수 미니 얼굴 추가(fifaaddict가 같은 128x128 PNG 제공). `--crests`는 없는 구단 엠블럼 추가(대부분의 구단이 캐시에 없어 게임이 기본 엠블럼을 보여 줌). 중단 후 이어서 실행 가능, `--remove`로 되돌림. |
+| `tools/draft_icons.py` | 드래프트 팩의 상점 아이콘을 `assets/externalAssets/shop/`에 그림(클라이언트 캐시에 드래프트 이미지가 없음). 서버는 이 이미지를 클라이언트 이미지보다 먼저 제공. `<icon> <tag> <picks>`로 관리자 페이지에서 만든 팩용 아이콘을 하나 더 그림. Pillow 필요. |
 | `tools/re/` | 리버스 엔지니어링 도구: `bigdir.py`(BIg4 아카이브 표), `refpack.py`(RefPack 코덱), `eadb.py`(EA "DB" 데이터베이스 표), `abc*.py`(AS3 바이트코드 파서 / 검색 / 구조 추출), `gfxx.py`(UI SWF), `memgrab.py`, `gamectl.ps1`(테스트용 클라이언트 창 조작). |
 | `blaze.py`, `server.py`, `test_client.py`, `analyze_capture.py` | 프로젝트 초기 단계의 EA Blaze 프레이밍(Fire/TDF)과 루프백 테스트 서버. 나중에 클라이언트가 REST + messenger를 쓰는 것으로 밝혀짐. |
 | `analysis/` | 초기 클라이언트 분석 스크립트(문자열, PE 섹션, 네트워크 엔드포인트). |

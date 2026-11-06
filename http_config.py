@@ -81,10 +81,24 @@ ASSETS = os.environ.get("FO3_ASSETS", os.path.join(GAME, "_cache", "games", "fo3
 CDN_PREFIX = "cdn/"
 
 
+# The server's own images, served first: the draft pack icons (tools/draft_icons.py; the client
+# cache has no draft pictures).
+OWN_ASSETS = os.path.join(HERE, "assets")
+
+
+def asset_path(rel):
+    """OWN_ASSETS/rel or ASSETS/rel, whichever exists, else None."""
+    for root in (OWN_ASSETS, ASSETS):
+        f = os.path.normpath(os.path.join(root, rel))
+        if f.startswith(os.path.normpath(root) + os.sep) and os.path.isfile(f):
+            return f
+    return None
+
+
 def cdn_file(rel):
-    """(content-type, bytes) of ASSETS/rel, or None (-> 404, client shows its default)."""
-    f = os.path.normpath(os.path.join(ASSETS, rel))
-    if not f.startswith(os.path.normpath(ASSETS) + os.sep) or not os.path.isfile(f):
+    """(content-type, bytes) of an asset, or None (-> 404, client shows its default)."""
+    f = asset_path(rel)
+    if f is None:
         return None
     ctype = {".png": "image/png", ".jpg": "image/jpeg", ".swf": "application/x-shockwave-flash"}
     with open(f, "rb") as fh:
@@ -3490,10 +3504,11 @@ PACKS[ALL_PLAYERS_PACK] = ("Semua Pemain", {"all": True, "icon": 7675})
 # (n = availables) fills the pick list, the second (n = 100) is the search list; a searched card
 # outside those is priced by POST /transfer/price/default/<grade>. "Konfirmasi" opens the card
 # screen, which posts /item/<_id>/use {id, spids}: one of the picked cards, at the pack's grade.
+# Icons 99000xx are the server's own (assets/, tools/draft_icons.py: season tag + picks).
 PACKS.update({
-    8223735: ("06 Draft Pick 3", {"season": 6, "all": True, "draft": 3}),
-    200005: ("2017 Draft Pick 5", {"season": 88, "all": True, "draft": 5}),
-    97093: ("World Legend Draft Pick 3", {"season": 93, "all": True, "draft": 3, "icon": 8335}),
+    8223735: ("06 Draft Pick 3", {"season": 6, "all": True, "draft": 3, "icon": 9900006}),
+    200005: ("2017 Draft Pick 5", {"season": 88, "all": True, "draft": 5, "icon": 9900088}),
+    97093: ("World Legend Draft Pick 3", {"season": 93, "all": True, "draft": 3, "icon": 9900093}),
 })
 PACK_BUNCHES = (1, 10)  # buy 1 or 10 (5% off)
 _PACK_POOL = {}
