@@ -142,10 +142,12 @@ def main():
         nations, leagues = (body(hc.ENDPOINTS[f"/static/db/{t}"]("", b"")) for t in ("SORTNATION", "SORTLEAGUE"))
         clubs = body(hc.ENDPOINTS["/static/db/SORTTEAM"]("", b""))
         assert nations and all(clubs[str(lg)] for n in nations for lg in leagues[str(n)])
+        assert not any(hc.REST_OF_WORLD in ts for ts in clubs.values())  # not a club to pick
         city = body(hc.route("/static/info/authentic/team/licensed/10")("", b""))
         assert city["teamid"] == 10 == city["summary"]["id"] and len(city["team"]["squad"]["positions"]) == 11
         assert city["team"]["captain"] in {p["id"] for p in city["team"]["players"]}
-        assert hc.roster(243)["summary"]["teamgrade"] == 5.0 and hc.roster(243)["summary"]["id"] == 243
+        stars = {t: hc.roster(t)["summary"]["teamgrade"] for t in hc.gen_teams.DEFAULT_TEAMS}  # Real Madrid: 5 in
+        assert stars[243] == max(stars.values()) >= 4.5 and hc.roster(243)["summary"]["id"] == 243  # 2017, 4.5 at 26 LIVE +0
         # national teams = their players' nationalteamid (most are at clubs): Italy (1343) is in the
         # International league with Italians only (issue #24); that nation stays last in the picker
         intl = clubs[str(hc.gen_teams.NATIONAL_LEAGUE)]

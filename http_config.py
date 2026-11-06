@@ -1671,6 +1671,7 @@ def ep_l2_achievement(query, body):
 # {leagueid: [teamid]}; the picked club's squad is /static/info/authentic/team/licensed/<id>
 # ({teamid, summary, team}, built by gen_teams.team like the six recommended clubs).
 CLUB_MIN_PLAYERS = 16  # licensed 2017 cards a club needs to be listed
+REST_OF_WORLD = 999998  # FO3's team for players of unlicensed clubs (26 LIVE has 91 such cards): not a club
 _CLUBS = []
 
 
@@ -1691,7 +1692,8 @@ def club_index():
             if ntid > 0:  # -1 / 0 = none
                 squads.setdefault((gen_teams.NATIONAL_LEAGUE, ntid), {})[spid] = ovr
             nats.setdefault(lid, collections.Counter())[nat] += 1
-        power = {k: sum(sorted(v.values())[-11:]) / 11 for k, v in squads.items() if len(v) >= CLUB_MIN_PLAYERS}
+        power = {k: sum(sorted(v.values())[-11:]) / 11 for k, v in squads.items()
+                 if len(v) >= CLUB_MIN_PLAYERS and k[1] != REST_OF_WORLD}
         leagues = {}
         for (lid, tid), p in power.items():
             leagues.setdefault(lid, []).append((p, tid))

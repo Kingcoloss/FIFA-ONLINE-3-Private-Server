@@ -6,7 +6,7 @@
 
 > Terjemahan dari [README.md](README.md). Kalau ada yang berbeda, README.md yang terbaru.
 
-**Baru:** kartu 25 LIVE dan 26 LIVE dari FIFA Online 4 sebagai dua season baru (stat dianggap +0, karakteristik dan badge season FO4), dengan 26 LIVE sebagai season default. Lihat `tools/fo4_season.py`.
+**Baru:** kartu 25 LIVE dan 26 LIVE dari FIFA Online 4 sebagai dua season baru (stat dianggap +1, karakteristik dan badge season FO4), dengan 26 LIVE sebagai season default. Lihat `tools/fo4_season.py`.
 
 Private server lokal untuk **FIFA Online 3 Indonesia** (Garena, client build 654420), ditulis
 dengan Python. Garena menutup server resminya pada 2020-06-30; proyek ini membuat ulang backend
@@ -249,7 +249,7 @@ Belum dikerjakan: mode online (ranked, friendly, King of the Hill), Road to Worl
 | `gen_teams.py` | Skuad awal dan ringkasan klub dari `gamedata/fifadb.sqlite`. |
 | `tools/eatrax_song.py` | Menaruh lagu di urutan pertama musik menu EA Trax sebagai EALayer3, mengganti TrackID 1 (mengubah `data_0.big` / `data_1.big` dengan menambahkan di akhir; `--restore` mengembalikan aslinya). Membuat game crash setelah pertandingan, lihat masalah yang diketahui. |
 | `tools/fa_sync.py` | Sinkronisasi harga fifaaddict.com. |
-| `tools/fo4_season.py` | Menambahkan kartu 26 LIVE dan 25 LIVE FIFA Online 4 (data fifaaddict, stat dianggap +0) sebagai dua season baru dengan badge season FO4: `fetch`, `collect` + `import`, `build`, `install` (menulis ulang isi `data_0.big` di tempat, karena ukurannya tidak boleh berubah, dan menambahkan di akhir `Label.big`; `restore` mengembalikan keduanya). |
+| `tools/fo4_season.py` | Menambahkan kartu 26 LIVE dan 25 LIVE FIFA Online 4 (data fifaaddict, stat dianggap +1) sebagai dua season baru dengan badge season FO4: `fetch`, `collect` + `import`, `build`, `install` (menulis ulang isi `data_0.big` di tempat, karena ukurannya tidak boleh berubah, dan menambahkan di akhir `Label.big`; `restore` mengembalikan keduanya). |
 | `tools/fa_faces.py` | Menambahkan wajah mini pemain yang tidak ada di cache client (fifaaddict menyajikan PNG 128x128 yang sama); `--crests` menambahkan logo klub yang tidak ada (kebanyakan klub tidak punya di cache, jadi game menampilkan logo bawaan). Bisa dilanjutkan, `--remove` membatalkannya. |
 | `tools/draft_icons.py` | Menggambar ikon Shop untuk pak draft (cache client tidak punya gambar draft) ke `assets/externalAssets/shop/`, yang dilayani server sebelum gambar milik client; `<icon> <tag> <picks>` menggambar satu lagi, untuk pak buatan halaman admin. Butuh Pillow. |
 | `tools/re/` | Alat bantu reverse engineering: `bigdir.py` (tabel arsip BIg4), `refpack.py` (codec RefPack), `eadb.py` (tabel database "DB" EA), `abc*.py` (parser / grep / penambang skema bytecode AS3), `gfxx.py` (SWF UI), `memgrab.py`, `gamectl.ps1` (mengendalikan jendela client untuk tes). |

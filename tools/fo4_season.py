@@ -14,11 +14,15 @@ fifa online 4".
 Seasons keep FO4's own codes (Nexon's seasonid.json): 300 = "26 LIVE", 325 = "25 LIVE", so a card
 is spid = season * 1e6 + player id, like every FO3 card (PlayerListUtil.getSeason is
 floor(spid / 1e6) and takes codes over 99). Stats are the fifaaddict card page's attributes,
-taken as +0: the client's rating of a card (calcPosOvr) comes out as FO4's OVR, and the grade
-bonus goes on top. Players FO3 already knows (same birth date and name) keep their player id,
+taken as +1 (user, after "+0" first: "Session 25,26 state grade 0 hanya untuk manager baru, untuk
+trading marker dan pack harus pakai state+1"): stored PLUS1 lower, so the client's rating
+(calcPosOvr) of a +1 card from the Market, a pack or a trade comes out as FO4's OVR, and a new
+club's +0 starters are PLUS1 below it. Players FO3 already knows (same birth date and name) keep their player id,
 face and names; the others get a new id from NEW_PID up, a generic head copied from a FO3 player
-with the same skin tone, and names in every names table. No card photo for those (silhouette),
-and clubs newer than FIFA 17 have no name or crest in the client.
+with the same skin tone, and names in every names table. No card photo for those (silhouette).
+A player whose club FO3 does not have (no FO3 card plays there, so the client has neither its
+name nor its crest) goes to FO3's Rest of the World team, like FO3's own players of unlicensed
+clubs (user: "Jika player session 25 26 klub nya tidak ada di db maka masuk rest of world").
 
 fetch walks fifaaddict's search (100 rows a page, so it splits by rating, then position; one
 request every DELAY s, cached in %TEMP%/fo4_cache so a rerun resumes), plus one search per FO3
@@ -43,6 +47,11 @@ SEASON_NAMES = {300: "26 LIVE", 325: "25 LIVE"}
 POSITIONS = "st,lw,rw,cf,cam,lm,rm,cm,cdm,lwb,rwb,lb,rb,cb,gk".split(",")
 CAP, DELAY = 100, 2.0
 NEW_PID = 700000  # first player id for players FO3 does not have (FO3's are below 300000)
+with open(os.path.join(ROOT, "responses", "static_db_PLAYERGRADE.json"), encoding="utf-8") as _f:
+    PLUS1 = json.load(_f)["1"]["boost"]["PLAYER_ALLATTRIBUTES_ALL"]  # FO3's +1 all-attribute boost (5)
+REST_OF_WORLD = (999998, 9998)  # FO3's (teamid, leagueid) for players of unlicensed clubs (11,000+ cards)
+FO3_CLUB = {131682: 44, 115845: 39, 115841: 46}  # FO4's new ids of clubs FO3 has: Lombardia FC = Inter,
+# Bergamo Calcio = Atalanta, SS Lazio = Lazio (Milano FC stays out: FO3 has no AC Milan)
 
 
 # --- window.__NUXT__ (a JS function call returning an object literal) -------------------------
@@ -379,6 +388,7 @@ def cmd_build(a):
         c.execute(f"DELETE FROM {t} WHERE spid / 1000000 IN ({','.join('?' * len(seasons))})", seasons)
     for t in NAME_TABLES:
         c.execute(f"DELETE FROM {t} WHERE playerid BETWEEN ? AND ?", (NEW_PID, NEW_PID + 99999))
+    clubs = {r[0] for r in c.execute("SELECT DISTINCT teamid FROM players")}  # the clubs FO3 has
     # FO3's players: birth date -> [(pid, full, short)], and each pid's newest card (its face)
     born, best = collections.defaultdict(list), {}
     names = {r[0]: (r[1], r[2]) for r in c.execute("SELECT playerid, full_eng, short_eng FROM nameseng")}
@@ -418,6 +428,8 @@ def cmd_build(a):
         spid = season * 1000000 + pid
         poss = [POS[p] for p in (db.get(f"pos{i}") for i in range(1, 5)) if p in POS][:4]
         ovr = int(db.get("current_ovr") or db.get("pos1val") or 0)
+        tid = FO3_CLUB.get(int(db.get("team_id") or 0), int(db.get("team_id") or 0))
+        team, league = (tid, int(db.get("league_id") or 0)) if tid in clubs else REST_OF_WORLD
         base.update({k: max(1, min(99, int(attr[k]))) for k in STATS if k in attr})
         base.update(spid=spid, playerid=pid, birthdate=f"{when[1]}/{when[2]}/{when[0]} 12:00:00 AM",
                     height=int(db["height"]), weight=int(db["weight"]),
@@ -426,12 +438,13 @@ def cmd_build(a):
                     attackingworkrate=WORKRATE.get(db.get("workrate_att"), 0), defensiveworkrate=WORKRATE.get(db.get("workrate_def"), 0),
                     internationalrep=REPUTATION.get((db.get("reputation") or "").lower(), 1),
                     overallrating=ovr, potential=ovr, nationality=int(db["nation_id"]),
-                    leagueid=int(db.get("league_id") or 0), teamid=int(db.get("team_id") or 0),
+                    leagueid=league, teamid=team,
                     nationalteamid=int(db.get("nation_squad_id") or 0) or -1,
                     trait1=sum(1 << FO3_TRAITS.index(t) for t in card.get("fo3traits", [])),  # Karakteristik
                     contractvaliduntil=2027, playerjointeamdate="Tue, 01 Jul 2025 00:00:00 GMT", historyopen=0,
                     **{f"preferredposition{i + 1}": (poss[i] if i < len(poss) else -1) for i in range(4)})
-        base["badges"] = badges(base)  # Style
+        base["badges"] = badges(base)  # Style, from FO4's stats (the +1 card's)
+        base.update({k: max(1, base[k] - PLUS1) for k in STATS if k in attr}, overallrating=ovr - PLUS1, potential=ovr - PLUS1)
         c.execute(f"INSERT INTO players ({','.join(cols)}) VALUES ({','.join('?' * len(cols))})", [base[k] for k in cols])
         for t in PERM_TABLES:
             c.execute(f"INSERT INTO {t} (spid, licensed, transferable) VALUES (?, 1, 1)", (spid,))
@@ -729,21 +742,16 @@ def engine_db(db, meta):
 
 
 def locale_additions():
-    """(names rows of the new players, (teamid, name, leagueid) of FO4 clubs) for <lang>.db."""
+    """The names rows of the new players for <lang>.db (its clubs are FO3's: build puts the
+    players of the others in Rest of the World)."""
     with closing(sqlite3.connect(FIFADB)) as c:
-        names = c.execute("SELECT playerid, full, short, full_eng, short_eng, jersey FROM nameseng "
-                          "WHERE playerid BETWEEN ? AND ?", (NEW_PID, NEW_PID + 99999)).fetchall()
-    teams = {}
-    for card in load_cards().values():
-        tid, name = int(card["db"].get("team_id") or 0), plain(card["row"].get("team_name") or "")
-        if tid > 0 and name:
-            teams[tid] = (tid, name, int(card["db"].get("league_id") or 0))
-    return names, sorted(teams.values())
+        return c.execute("SELECT playerid, full, short, full_eng, short_eng, jersey FROM nameseng "
+                         "WHERE playerid BETWEEN ? AND ?", (NEW_PID, NEW_PID + 99999)).fetchall()
 
 
-def locale_db(plain_db, names, teams, trim=False):
-    """A <lang>.db with the new players' names and the clubs it lacks; trim drops the names of
-    players without a card (when the packed DB would not fit its place)."""
+def locale_db(plain_db, names, trim=False):
+    """A <lang>.db with the new players' names; trim drops the names of players without a card
+    (when the packed DB would not fit its place)."""
     cards = None
     if trim:
         with closing(sqlite3.connect(FIFADB)) as c:
@@ -751,7 +759,6 @@ def locale_db(plain_db, names, teams, trim=False):
 
     def edit(c):
         c.executemany("INSERT OR REPLACE INTO names (playerid, full, short, full_eng, short_eng, jersey) VALUES (?,?,?,?,?,?)", names)
-        c.executemany("INSERT OR IGNORE INTO team (teamid, teamname, leagueid) VALUES (?,?,?)", teams)
         if cards:
             c.execute("CREATE TEMP TABLE keep (playerid INTEGER PRIMARY KEY)")
             c.executemany("INSERT INTO keep VALUES (?)", [(p,) for p in cards])
@@ -806,10 +813,10 @@ def cmd_install(a):
         raise SystemExit("close the game first (fifazf.exe is running)")
     data0, label = _originals(a.game)
     room = {n: size for n, off, size, usize in bigdir.entries(data0)}
-    names, teams = locale_additions()
+    names = locale_additions()
     files, want = {}, {}
     for entry, make in [(FIFADB_ENTRY, lambda shipped, trim: client_db())] + [
-            (f"data/db2/{loc}.db.db2", lambda shipped, trim: locale_db(_plain(shipped), names, teams, trim)) for loc in LOCALES]:
+            (f"data/db2/{loc}.db.db2", lambda shipped, trim: locale_db(_plain(shipped), names, trim)) for loc in LOCALES]:
         shipped = bigdir.read(data0, entry)  # inflated, encrypted
         for trim in (False, True):
             plain_db = make(shipped, trim)
@@ -843,7 +850,7 @@ def cmd_install(a):
     for entry, plain_db in want.items():
         assert bytes(decrypt(bigdir.read(data0, entry))[16:]) == plain_db[16:], entry
     assert os.path.getsize(data0) == os.path.getsize(os.path.join(BACKUP, "data_0.big"))
-    print(f"installed into {a.game}: {len(names)} new names, {len(teams)} clubs, season icons "
+    print(f"installed into {a.game}: {len(names)} new names, season icons "
           f"{', '.join(SEASON_NAMES[s] for s in CLASSES.values())}")
 
 
