@@ -1816,8 +1816,9 @@ def sim_result(match, events, my_home, rng=random):
     """match.result for a simulated Liga match, shaped like the report a played match posts at
     /match/<id>/end, which PostMatchResultDefaultScene.onResultReceived reads (scores, the
     formation's player stats, possession, attack direction, MOTM). Built from the simulation's
-    events; it was missing, so the result screen after a simulation stayed blank. Ids are player
-    ids (spid % 1e6) as in the client's own report; y counts from the far goal (keeper at 0.98)."""
+    events; it was missing, so the result screen after a simulation stayed blank. id/dbid are
+    player ids (spid % 1e6) as in the client's own report, spid the card's (fill_players); y counts
+    from the far goal (keeper at 0.98)."""
     pair = lambda lo, hi, rate: (lambda n: [round(n * rate), n])(rng.randint(lo, hi))
     teams = []
     for t, s in ((0, "left"), (1, "right")):
@@ -1829,8 +1830,9 @@ def sim_result(match, events, my_home, rng=random):
             saves, yellow = mine.count("SAVE_EVENT"), mine.count("YELLOW_CARD_EVENT")
             pid, start = int(p["spid"]) % 1000000, p.get("starting") or [1, 1, 0.5, 0.5]
             players.append({
-                # role = the squad position: 0 (keeper) put every player at the goal (issue #26)
-                "id": str(pid), "spid": pid, "dbid": pid, "role": p["pos"], "x": start[2], "y": round(1 - start[3], 4),
+                # role = the squad position (0 = keeper put every player at the goal) and spid = the
+                # card's, whose season the labels show (issue #26); id/dbid stay the player id
+                "id": str(pid), "spid": int(p["spid"]), "dbid": pid, "role": p["pos"], "x": start[2], "y": round(1 - start[3], 4),
                 "rating": round(min(10.0, max(4.0, 6.0 + goals + 0.5 * assists + 0.3 * saves - 0.4 * yellow
                                                    + rng.uniform(-0.4, 0.9))), 1),
                 "goals": goals, "assists": assists, "saves": saves, "shotsOnGoal": goals + shots,
@@ -2189,18 +2191,30 @@ def ep_match_gamesettings(mid, query, body):
     return _json({"result": True, "resources": [{"uri": f"/match/{mid}", "body": match}]})
 
 
-def fill_roles(match, stats):
-    """The game sends every matchStats player with role 0, though x/y are right. The result
-    screen's pitch (GameResultPlayerInfo) puts role 0 = GK at the goal, so all eleven were
-    stacked there (issue #26). players[i] is squad slot i: role = that slot's pos."""
+def fill_players(match, stats):
+    """The game sends matchStats players with role 0 and the player id (spid % 1e6) as spid,
+    though x/y are right. The result screen's pitch (GameResultPlayerInfo) puts role 0 = GK at
+    the goal, so all eleven were stacked there, and its labels take the season from the spid
+    (SeasonIcon.setSeasonBySpid), so every card showed the current season (issue #26).
+    players[i] is squad slot i: role = that slot's pos; spid = the card's full spid (players,
+    substitutes, MOTM)."""
     sides = match.get("side") or {}
+    if not sides:
+        return
     for key, default in (("home", "left"), ("away", "right")):
         t = stats.get(key) or {}
         hits = [s for s in sides if str(sides[s]["team"]["teamid"]) == str(t.get("id"))]
-        pos = sides[hits[0] if len(hits) == 1 else default]["squad"]["positions"] if sides else []
+        pos = sides[hits[0] if len(hits) == 1 else default]["squad"]["positions"]
         for p, slot in zip(t.get("players") or [], pos):
             if not p.get("role"):
                 p["role"] = slot["pos"]
+        full = {int(s["spid"]) % 1000000: int(s["spid"]) for s in pos}
+        mine = (t.get("players") or []) + (t.get("substitutes") or [])
+        if (stats.get("motm") or {}).get("team") == key:
+            mine.append(stats["motm"])
+        for e in mine:
+            if isinstance(e, dict) and e.get("spid"):
+                e["spid"] = full.get(int(e["spid"]) % 1000000, e["spid"])
 
 
 def ep_match_end(mid, query, body):
@@ -2212,7 +2226,7 @@ def ep_match_end(mid, query, body):
     match = st.get("match") if (st.get("match") or {}).get("id") == mid else None
     out = {"result": True}
     if match is not None and match.get("stage") != "closed":  # credit once
-        fill_roles(match, req)
+        fill_players(match, req)
         match["result"] = {k: v for k, v in req.items() if k != "_method"}
         match["reward"] = match_reward(st, req)
         add_ep(st, match["reward"]["money"]["reward"]["total"])

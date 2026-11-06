@@ -199,7 +199,8 @@ def main():
                 assert (res["home"]["score"], res["away"]["score"]) == (g["home"], g["away"]) and res["home"]["id"] == home
                 for s, t in ((res["myTeam"], 0), (res["opponentTeam"], 1)):
                     assert len(res[s]["players"]) == 11 and sum(p["goals"] for p in res[s]["players"]) == res[s]["score"]
-                    assert {p["spid"] for p in res[s]["players"]} == {x % 1000000 for x in xi[t]}
+                    # the card's spid: the labels show its season (issue #26)
+                    assert {p["spid"] for p in res[s]["players"]} == xi[t]
                     # each at his squad position on the result screen's pitch, not all at the goal (issue #26)
                     slots = [p["pos"] for p in sim[("left", "right")[t]]["team"]["squad"]["positions"] if p["pos"] < hc.POS_SUB]
                     assert [p["role"] for p in res[s]["players"]] == slots and slots.count(0) == 1
@@ -245,11 +246,16 @@ def main():
                 stats[stats["myTeam"]]["players"] = [{"spid": int(p["spid"]) % 1000000, "goals": int(i == 0), "rating": 7,
                                                       "passes": [3, 4], "tackles": [1, 2], "role": 0} for i, p in enumerate(xi)]
                 stats[stats["myTeam"]]["reserved"] = [{"id": "1", "rating": 0}]
+                stats["motm"] = {"team": stats["myTeam"], "spid": int(xi[1]["spid"]) % 1000000, "rating": 9}
                 items0 = {i["itemid"]: i["remains"] for i in hc.my_coach(hc._state()).get("items", [])}
                 r = body(hc.route(f"/match/{m['id']}/end")("", json.dumps(stats).encode()))
                 body(hc.route(f"/match/{m['id']}/end")("", json.dumps(stats).encode()))  # a resend credits nothing
-                roles = [p["role"] for p in r["resources"][0]["body"]["result"][stats["myTeam"]]["players"]]
+                done = r["resources"][0]["body"]["result"]
+                roles = [p["role"] for p in done[stats["myTeam"]]["players"]]
                 assert roles == [p["pos"] for p in xi], roles
+                # the game reports player ids; the result carries the cards' spids (season labels)
+                assert [p["spid"] for p in done[stats["myTeam"]]["players"]] == [int(p["spid"]) for p in xi]
+                assert done["motm"]["spid"] == int(xi[1]["spid"])
                 # reward card (issue #26): 3 cards, the first is mine and credited once
                 rw0 = r["resources"][0]["body"]["reward"]
                 cards = rw0["extra"]["availables"]
