@@ -28,7 +28,7 @@ sys.path.insert(0, HERE)  # `python -I` leaves the script dir off sys.path
 import gen_teams
 TLS = "--tls" in sys.argv
 _args = [a for a in sys.argv[1:] if a != "--tls"]
-PORT = int(_args[0]) if _args else 8080
+PORT = int(_args[0]) if _args and _args[0].isdigit() else 8080  # (imported by tools: their own args)
 LOG = os.path.join(HERE, "captures", "http_config.log")
 CERT = os.path.join(HERE, "certs", "server.pem")  # self-signed, CN/SAN APSEODESK172
 os.makedirs(os.path.dirname(LOG), exist_ok=True)

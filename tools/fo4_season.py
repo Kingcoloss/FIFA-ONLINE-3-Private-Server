@@ -14,10 +14,10 @@ fifa online 4".
 Seasons keep FO4's own codes (Nexon's seasonid.json): 300 = "26 LIVE", 325 = "25 LIVE", so a card
 is spid = season * 1e6 + player id, like every FO3 card (PlayerListUtil.getSeason is
 floor(spid / 1e6) and takes codes over 99). Stats are the fifaaddict card page's attributes,
-taken as +1 (user, after "+0" first: "Session 25,26 state grade 0 hanya untuk manager baru, untuk
-trading marker dan pack harus pakai state+1"): stored PLUS1 lower, so the client's rating
-(calcPosOvr) of a +1 card from the Market, a pack or a trade comes out as FO4's OVR, and a new
-club's +0 starters are PLUS1 below it. Players FO3 already knows (same birth date and name) keep their player id,
+taken as +0: the client's rating of a card (calcPosOvr) comes out as FO4's OVR, and the grade
+bonus goes on top. overallrating, the rating the Market list shows, is the +1 one (PLUS1 above),
+as on every FO3 card (user: "mbape 79 adalah +0 sementara +1 adalah 84, digambar harusnya 84").
+Players FO3 already knows (same birth date and name) keep their player id,
 face and names; the others get a new id from NEW_PID up, a generic head copied from a FO3 player
 with the same skin tone, and names in every names table. No card photo for those (silhouette).
 A player whose club FO3 does not have (no FO3 card plays there, so the client has neither its
@@ -437,14 +437,13 @@ def cmd_build(a):
                     weakfootabilitytypecode=int(db.get("foot_weak") or 3), skillmoves=max(0, int(db.get("skill_level") or 1) - 1),
                     attackingworkrate=WORKRATE.get(db.get("workrate_att"), 0), defensiveworkrate=WORKRATE.get(db.get("workrate_def"), 0),
                     internationalrep=REPUTATION.get((db.get("reputation") or "").lower(), 1),
-                    overallrating=ovr, potential=ovr, nationality=int(db["nation_id"]),
+                    overallrating=ovr + PLUS1, potential=ovr + PLUS1, nationality=int(db["nation_id"]),
                     leagueid=league, teamid=team,
                     nationalteamid=int(db.get("nation_squad_id") or 0) or -1,
                     trait1=sum(1 << FO3_TRAITS.index(t) for t in card.get("fo3traits", [])),  # Karakteristik
                     contractvaliduntil=2027, playerjointeamdate="Tue, 01 Jul 2025 00:00:00 GMT", historyopen=0,
                     **{f"preferredposition{i + 1}": (poss[i] if i < len(poss) else -1) for i in range(4)})
-        base["badges"] = badges(base)  # Style, from FO4's stats (the +1 card's)
-        base.update({k: max(1, base[k] - PLUS1) for k in STATS if k in attr}, overallrating=ovr - PLUS1, potential=ovr - PLUS1)
+        base["badges"] = badges(base)  # Style
         c.execute(f"INSERT INTO players ({','.join(cols)}) VALUES ({','.join('?' * len(cols))})", [base[k] for k in cols])
         for t in PERM_TABLES:
             c.execute(f"INSERT INTO {t} (spid, licensed, transferable) VALUES (?, 1, 1)", (spid,))
@@ -454,6 +453,10 @@ def cmd_build(a):
             for t in NAME_TABLES:
                 c.execute(f"INSERT OR REPLACE INTO {t} (playerid, full, short, full_eng, short_eng, jersey) VALUES (?,?,?,?,?,?)",
                           (pid, full, short, full, short, jersey))
+    sys.path.insert(0, ROOT)
+    from http_config import POSOVR  # exactly the client's own +0 rating + PLUS1, as on FO3's cards
+    c.execute(f"UPDATE players AS p SET overallrating = {POSOVR} + ?1, potential = {POSOVR} + ?1 "
+              f"WHERE spid / 1000000 IN ({','.join(str(s) for s in seasons)})", (PLUS1,))
     c.commit()
     assert c.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     c.close()

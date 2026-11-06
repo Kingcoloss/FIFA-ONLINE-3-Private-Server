@@ -146,8 +146,7 @@ def main():
         city = body(hc.route("/static/info/authentic/team/licensed/10")("", b""))
         assert city["teamid"] == 10 == city["summary"]["id"] and len(city["team"]["squad"]["positions"]) == 11
         assert city["team"]["captain"] in {p["id"] for p in city["team"]["players"]}
-        stars = {t: hc.roster(t)["summary"]["teamgrade"] for t in hc.gen_teams.DEFAULT_TEAMS}  # Real Madrid: 5 in
-        assert stars[243] == max(stars.values()) >= 4.5 and hc.roster(243)["summary"]["id"] == 243  # 2017, 4.5 at 26 LIVE +0
+        assert hc.roster(243)["summary"]["teamgrade"] == 5.0 and hc.roster(243)["summary"]["id"] == 243
         # national teams = their players' nationalteamid (most are at clubs): Italy (1343) is in the
         # International league with Italians only (issue #24); that nation stays last in the picker
         intl = clubs[str(hc.gen_teams.NATIONAL_LEAGUE)]

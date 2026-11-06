@@ -1,4 +1,4 @@
-[![SEASON UPGRADE 25, 26](docs/season-upgrade-25-26.svg)](https://www.mediafire.com/file/bfkbuj3u4rwsetd/FO3ID-Season-25-26-LIVE-client.rar/file)
+[![SEASON UPGRADE 25, 26](docs/season-upgrade-25-26.svg)](https://www.mediafire.com/file/7yteho45esxfnu8/FO3ID-Season-25-26-LIVE-client.rar/file)
 
 # FO3ID Private Server
 
@@ -6,7 +6,7 @@
 
 > Bản dịch của [README.md](README.md). Nếu có chỗ khác nhau, README.md là bản mới nhất.
 
-**Mới:** thẻ 25 LIVE và 26 LIVE của FIFA Online 4 thành hai mùa mới (chỉ số tính là +1, đặc tính và biểu tượng mùa của FO4), 26 LIVE là mùa mặc định. Xem `tools/fo4_season.py`.
+**Mới:** thẻ 25 LIVE và 26 LIVE của FIFA Online 4 thành hai mùa mới (chỉ số tính là +0, đặc tính và biểu tượng mùa của FO4), 26 LIVE là mùa mặc định. Xem `tools/fo4_season.py`.
 
 Máy chủ riêng chạy cục bộ cho **FIFA Online 3 Indonesia** (Garena, client build 654420), viết bằng
 Python. Garena đã đóng máy chủ chính thức ngày 2020-06-30; dự án này dựng lại phần backend mà client
@@ -235,7 +235,7 @@ Chưa làm: chế độ online (xếp hạng, giao hữu, King of the Hill), Roa
 | `gen_teams.py` | Đội hình khởi đầu và tóm tắt CLB từ `gamedata/fifadb.sqlite`. |
 | `tools/eatrax_song.py` | Đặt một bài hát lên đầu nhạc menu EA Trax dưới dạng EALayer3, thay TrackID 1 (sửa `data_0.big` / `data_1.big` bằng cách ghi nối thêm; `--restore` khôi phục bản gốc). Làm game crash sau trận, xem lỗi đã biết. |
 | `tools/fa_sync.py` | Đồng bộ giá từ fifaaddict.com. |
-| `tools/fo4_season.py` | Thêm thẻ 26 LIVE và 25 LIVE của FIFA Online 4 (dữ liệu fifaaddict, chỉ số tính là +1) thành hai mùa mới với biểu tượng mùa của FO4: `fetch`, `collect` + `import`, `build`, `install` (ghi đè các mục trong `data_0.big` tại chỗ vì kích thước tệp không được đổi, và ghi nối thêm vào `Label.big`; `restore` khôi phục cả hai). |
+| `tools/fo4_season.py` | Thêm thẻ 26 LIVE và 25 LIVE của FIFA Online 4 (dữ liệu fifaaddict, chỉ số tính là +0) thành hai mùa mới với biểu tượng mùa của FO4: `fetch`, `collect` + `import`, `build`, `install` (ghi đè các mục trong `data_0.big` tại chỗ vì kích thước tệp không được đổi, và ghi nối thêm vào `Label.big`; `restore` khôi phục cả hai). |
 | `tools/fa_faces.py` | Thêm ảnh mặt nhỏ của cầu thủ còn thiếu trong bộ nhớ đệm của client (fifaaddict có cùng loại PNG 128x128); `--crests` thêm logo CLB còn thiếu (đa số CLB không có trong bộ nhớ đệm nên game hiện logo mặc định). Chạy tiếp được nếu bị ngắt, `--remove` hoàn tác. |
 | `tools/draft_icons.py` | Vẽ biểu tượng Shop cho các gói draft (bộ nhớ đệm của client không có ảnh draft) vào `assets/externalAssets/shop/`, máy chủ gửi các ảnh này trước ảnh của client; `<icon> <tag> <picks>` vẽ thêm một biểu tượng cho gói tạo trên trang admin. Cần Pillow. |
 | `tools/re/` | Công cụ hỗ trợ dịch ngược: `bigdir.py` (bảng lưu trữ BIg4), `refpack.py` (codec RefPack), `eadb.py` (bảng cơ sở dữ liệu "DB" của EA), `abc*.py` (phân tích / tìm kiếm / khai thác cấu trúc bytecode AS3), `gfxx.py` (SWF giao diện), `memgrab.py`, `gamectl.ps1` (điều khiển cửa sổ client khi kiểm thử). |

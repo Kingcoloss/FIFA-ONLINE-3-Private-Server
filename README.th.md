@@ -1,4 +1,4 @@
-[![SEASON UPGRADE 25, 26](docs/season-upgrade-25-26.svg)](https://www.mediafire.com/file/bfkbuj3u4rwsetd/FO3ID-Season-25-26-LIVE-client.rar/file)
+[![SEASON UPGRADE 25, 26](docs/season-upgrade-25-26.svg)](https://www.mediafire.com/file/7yteho45esxfnu8/FO3ID-Season-25-26-LIVE-client.rar/file)
 
 # FO3ID Private Server
 
@@ -6,7 +6,7 @@
 
 > แปลจาก [README.md](README.md) ถ้าเนื้อหาไม่ตรงกัน ให้ถือ README.md เป็นฉบับล่าสุด
 
-**ใหม่:** การ์ด 25 LIVE และ 26 LIVE ของ FIFA Online 4 เป็นสองซีซันใหม่ (ค่าสถานะนับเป็น +1 ใช้คุณลักษณะและไอคอนซีซันของ FO4) โดย 26 LIVE เป็นซีซันเริ่มต้น ดู `tools/fo4_season.py`
+**ใหม่:** การ์ด 25 LIVE และ 26 LIVE ของ FIFA Online 4 เป็นสองซีซันใหม่ (ค่าสถานะนับเป็น +0 ใช้คุณลักษณะและไอคอนซีซันของ FO4) โดย 26 LIVE เป็นซีซันเริ่มต้น ดู `tools/fo4_season.py`
 
 เซิร์ฟเวอร์ส่วนตัวแบบโลคัลสำหรับ **FIFA Online 3 อินโดนีเซีย** (Garena, ไคลเอนต์บิลด์ 654420) เขียนด้วย
 Python Garena ปิดเซิร์ฟเวอร์ทางการไปเมื่อ 2020-06-30 โปรเจกต์นี้สร้างแบ็กเอนด์ที่ไคลเอนต์คุยด้วยขึ้นมาใหม่
@@ -216,7 +216,7 @@ TrackID 1 โดยแบงก์เพลงเล็กกว่าของ�
 | `gen_teams.py` | สควอดเริ่มต้นและข้อมูลสรุปสโมสรจาก `gamedata/fifadb.sqlite` |
 | `tools/eatrax_song.py` | ใส่เพลงเป็นเพลงแรกของเพลงเมนู EA Trax ในรูปแบบ EALayer3 แทน TrackID 1 (แก้ `data_0.big` / `data_1.big` แบบต่อท้าย `--restore` คืนไฟล์เดิม) ทำให้เกมแครชหลังแมตช์ ดูปัญหาที่ทราบ |
 | `tools/fa_sync.py` | ซิงก์ราคาจาก fifaaddict.com |
-| `tools/fo4_season.py` | เพิ่มการ์ด 26 LIVE และ 25 LIVE ของ FIFA Online 4 (ข้อมูลจาก fifaaddict ค่าสถานะนับเป็น +1) เป็นสองซีซันใหม่พร้อมไอคอนซีซันของ FO4: `fetch`, `collect` + `import`, `build`, `install` (เขียนทับข้อมูลใน `data_0.big` ในที่เดิมเพราะขนาดไฟล์ต้องไม่เปลี่ยน และแก้ `Label.big` แบบต่อท้าย `restore` คืนไฟล์เดิมทั้งสอง) |
+| `tools/fo4_season.py` | เพิ่มการ์ด 26 LIVE และ 25 LIVE ของ FIFA Online 4 (ข้อมูลจาก fifaaddict ค่าสถานะนับเป็น +0) เป็นสองซีซันใหม่พร้อมไอคอนซีซันของ FO4: `fetch`, `collect` + `import`, `build`, `install` (เขียนทับข้อมูลใน `data_0.big` ในที่เดิมเพราะขนาดไฟล์ต้องไม่เปลี่ยน และแก้ `Label.big` แบบต่อท้าย `restore` คืนไฟล์เดิมทั้งสอง) |
 | `tools/fa_faces.py` | เพิ่มรูปหน้านักเตะขนาดเล็กที่ไม่มีในแคชของไคลเอนต์ (fifaaddict มี PNG 128x128 แบบเดียวกัน) `--crests` เพิ่มโลโก้สโมสรที่ขาด (สโมสรส่วนใหญ่ไม่มีในแคช เกมจึงแสดงโลโก้เริ่มต้น) ทำต่อจากเดิมได้ `--remove` ยกเลิก |
 | `tools/draft_icons.py` | วาดไอคอนร้านค้าของแพ็กดราฟต์ (แคชของไคลเอนต์ไม่มีรูปดราฟต์) ลงใน `assets/externalAssets/shop/` ซึ่งเซิร์ฟเวอร์ส่งให้ก่อนรูปของไคลเอนต์ `<icon> <tag> <picks>` วาดเพิ่มอีกอันสำหรับแพ็กที่สร้างในหน้าแอดมิน ต้องใช้ Pillow |
 | `tools/re/` | เครื่องมือช่วยรีเวิร์สเอนจิเนียริง: `bigdir.py` (ตารางอาร์ไคฟ์ BIg4), `refpack.py` (โคเดก RefPack), `eadb.py` (ตารางฐานข้อมูล "DB" ของ EA), `abc*.py` (ตัวแยก / ค้นหา / ขุดโครงสร้าง bytecode AS3), `gfxx.py` (SWF ของ UI), `memgrab.py`, `gamectl.ps1` (ควบคุมหน้าต่างไคลเอนต์สำหรับเทสต์) |
