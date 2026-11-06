@@ -126,6 +126,12 @@
   报告为门将。现在服务器按阵容位置给每名球员设置位置。
 - **赛后奖励卡**（issue #26）：奖励画面的卡片之前是空的。现在会发三张卡：你选的那张给 EP（1,000 到 10,000）、
   球员包（Semua Pemain 或 '14 Top 200）或 Lucky EP 道具，另外两张显示本可以得到的奖励。
+- **选秀卡包和经验胶囊**（issue #27）：Shop > Pak pemain 出售选秀卡包（"06 Draft Pick 3"、"2017 Draft Pick 5"、
+  "World Legend Draft Pick 3"）。"Gunakan" 打开挑选球员界面，默认填入该赛季最值钱的卡；挑选该赛季的 N 张卡
+  （可按名字、联赛或俱乐部搜索），然后打开其中一张。Shop > Dapat dikonsumsi 出售经验胶囊（1,000、5,000、
+  Max = LV.23、一个限 LV.10 及以下、一个限 2017 卡）：选一名球员，他获得这些经验。选秀界面的请求
+  （`/item/draftpack/<id>/players/<n>`、`/transfer/price/default/<grade>`）和胶囊道具类型之前都没有。
+  管理页面可以再做更多（卡包的 "Draft" 栏位，道具类型 "EXP Capsule"）。
 - **随机箱可以打开**（Kotak Platinum 等，issue #12）：箱子界面从 `staticdata.availables` 列出奖品，
   之前缺少这个字段，所以每个箱子在 "Gunakan"（使用）时都会失败。
 - **新球员卡进入 Tim Cadangan**：从卡包、交易、Market、Bag 或管理后台得到的卡，在 Skuad 的 Tim 一栏显示

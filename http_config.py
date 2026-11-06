@@ -3472,6 +3472,17 @@ PACKS[82214356] = ("07 Top 200", {"season": 7, "top": 200, "all": True})  # the 
 # their 200 best; '17 alone has 15,000+ cards); the "ALL" icon of All Season Top 300 +8
 ALL_PLAYERS_PACK = 92000000
 PACKS[ALL_PLAYERS_PACK] = ("Semua Pemain", {"all": True, "icon": 7675})
+# Draft packs (issue #27, "Pilih pak pemain", category DRAFTPACK): Item saya > Pemain > Gunakan
+# opens TeamManagementDraftPackScreen for one season (staticdata.draft {season, grade, availables}).
+# GET /item/draftpack/<itemid>/players/<n> = the pack's n most valuable cards: the first call
+# (n = availables) fills the pick list, the second (n = 100) is the search list; a searched card
+# outside those is priced by POST /transfer/price/default/<grade>. "Konfirmasi" opens the card
+# screen, which posts /item/<_id>/use {id, spids}: one of the picked cards, at the pack's grade.
+PACKS.update({
+    8223735: ("06 Draft Pick 3", {"season": 6, "all": True, "draft": 3}),
+    200005: ("2017 Draft Pick 5", {"season": 88, "all": True, "draft": 5}),
+    97093: ("World Legend Draft Pick 3", {"season": 93, "all": True, "draft": 3, "icon": 8335}),
+})
 PACK_BUNCHES = (1, 10)  # buy 1 or 10 (5% off)
 _PACK_POOL = {}
 
@@ -3503,9 +3514,16 @@ def pack_pool(itemid):
 
 def pack_grades(itemid):
     """[(grade, weight)]: a "+N" pack's card comes at a random grade +1..+N, lower grades more
-    likely (weight N-g+1: for +5 that is 33/27/20/13/7%); other packs give +1."""
-    n = PACKS[itemid][1].get("grade", 1)
-    return [(g, n - g + 1) for g in range(1, n + 1)]
+    likely (weight N-g+1: for +5 that is 33/27/20/13/7%); other packs give +1. A draft pack's
+    cards come at its grade (the draft screen shows their prices at it)."""
+    f = PACKS[itemid][1]
+    n = f.get("grade", 1)
+    return [(n, 1)] if f.get("draft") else [(g, n - g + 1) for g in range(1, n + 1)]
+
+
+def draft_top(itemid, n):
+    """A draft pack's n most valuable cards (the default picks and the search list)."""
+    return sorted((s for s, _ in pack_pool(itemid)), key=lambda s: (-card_price(s), s))[:n]
 
 
 def pack_grade(itemid):
@@ -3515,6 +3533,11 @@ def pack_grade(itemid):
 
 @functools.lru_cache(maxsize=None)
 def pack_price(itemid):
+    draft = PACKS[itemid][1].get("draft")
+    if draft:  # worth the default picks (the n best cards) at the pack's grade
+        g = pack_grades(itemid)[0][0]
+        top = draft_top(itemid, draft)
+        return sig3(sum(card_price(s, g) for s in top) / len(top)) if top else 0
     pool, grades = pack_pool(itemid), pack_grades(itemid)
     gw = sum(w for _, w in grades)
     return sig3(sum(card_price(s, g) * w * gwt for s, w in pool for g, gwt in grades) / sum(w for _, w in pool) / gw)
@@ -3542,12 +3565,16 @@ def item_def(itemid):
     if itemid in PACKAGES or itemid in MONTHLY:
         return package_def(itemid)
     name, f = PACKS[itemid]
-    return {"itemid": itemid, "productid": itemid, "name": name, "category": "PLAYERPACK",
-            "type": "LEAGUE" if "league" in f else "POSITION" if "pos" in f else "CUSTOM",
-            "unit": "COUNT", "itemicon": f.get("icon", itemid), "currency": "ep",
-            **({"bundleicon": f["icon"]} if "icon" in f else {}),  # several packs share one icon
-            "bunches": [{"bunch": n, "price": product_price(itemid, n, lambda: pack_price(itemid))} for n in PACK_BUNCHES],
-            **({"draw": {"year": 2017}} if f.get("season") == 88 else {})}
+    d = {"itemid": itemid, "productid": itemid, "name": name, "category": "PLAYERPACK",
+         "type": "LEAGUE" if "league" in f else "POSITION" if "pos" in f else "CUSTOM",
+         "unit": "COUNT", "itemicon": f.get("icon", itemid), "currency": "ep",
+         **({"bundleicon": f["icon"]} if "icon" in f else {}),  # several packs share one icon
+         "bunches": [{"bunch": n, "price": product_price(itemid, n, lambda: pack_price(itemid))} for n in PACK_BUNCHES],
+         **({"draw": {"year": 2017}} if f.get("season") == 88 else {})}
+    if f.get("draft"):  # one season: the draft screen's name search filters on it
+        d.update(category="DRAFTPACK", type="DRAFTPACK", draft={
+            "season": (f.get("seasons") or (f.get("season"),))[0], "grade": f.get("grade", 1), "availables": f["draft"]})
+    return d
 
 
 # --------------------------------------------------------------------------- #
@@ -3615,6 +3642,16 @@ ITEMS = {  # itemid: (name, icon, type, effect, description)
     # items of type LEAGUE_SIMULATION and stays off at 0 (a click then opens the Shop on its
     # SIMULATION_ITEM_ID "2001"); each simulated match uses one up (ep_l2_match)
     2001: ("Simulasi Liga", 2001, "LEAGUE_SIMULATION", {}, "Liga: hasil satu pertandingan langsung, tanpa main."),
+    # EXP capsules (issue #27, "Level capsule"; TeamManagementExpCapsuleScreen): "Gunakan" lists the
+    # players it fits (below the max level, at most level lv, of the season) and posts
+    # /item/<_id>/use {targetid}; that player gets the EXP. LV.1 -> LV.23 takes 25.300 EXP.
+    6001: ("EXP Capsule 1.000", "ID50071", "PLAYER_EXP_CAPSULE", {"exp": 1000}, "EXP pemain +1.000."),
+    6002: ("EXP Capsule 5.000", "ID50071", "PLAYER_EXP_CAPSULE", {"exp": 5000}, "EXP pemain +5.000."),
+    6003: ("EXP Capsule Max", "ID50071", "PLAYER_EXP_CAPSULE", {"exp": 25_300}, "Pemain langsung ke level max (LV.23)."),
+    6004: ("EXP Capsule LV.10", "ID50071", "PLAYER_EXP_CAPSULE", {"exp": 3000, "lv": 10},
+           "EXP pemain +3.000, untuk pemain LV.10 ke bawah."),
+    6005: ("EXP Capsule 2017", "ID50071", "PLAYER_EXP_CAPSULE", {"exp": 10_000, "season": 88},
+           "EXP pemain +10.000, untuk pemain musim 2017."),
 }
 SIM_COUPON = 2001
 PACKAGES = {  # itemid: (name, icon, [(itemid, count)], description); bought = contents to Item saya
@@ -3670,6 +3707,8 @@ def use_item_def(itemid, prizes=True):
             "itemicon": icon, "bundleicon": icon, "currency": "ep", "stackable": True, "description": desc,
             # TeamManagementEPCardScreen.onQuery sizes the coin counter from count.max
             **({"count": {"min": eff["ep"][0], "max": eff["ep"][1]}} if "ep" in eff else {}),
+            # an EXP capsule's EXP and limits (GeneralInventoryTileItemRenderer.useUseItem)
+            **{"capsule" + k: eff[k] for k in ("exp", "lv", "season") if eff.get(k)},
             # a random box's prizes: TeamManagementRandomCardScreen.SetItemBackground hands
             # staticdata.availables to its panel as item tiles (GeneralInventoryTileItemRenderer);
             # none crashed every box at "Gunakan" (issue #12). A box among the prizes shows no prizes
@@ -3747,9 +3786,10 @@ def product_category(itemid):
 #   prices   {itemid: EP for one}: a fixed price, also while the Shop is free (0 = free)
 #   hidden   [itemid]: left out of every Shop tab (cards and items already owned still work)
 #   packs    {itemid: {name, icon, seasons [codes], top, ovr (rating at +1), grade (max +N), pos
-#             (FW/MF/DF/GK), league, all (any card, else ID-licensed only)}}
+#             (FW/MF/DF/GK), league, all (any card, else ID-licensed only), draft (pick N of
+#             one season's cards, opened at +grade)}}
 #   items    {itemid: {name, icon, type, description, ep [min, max] | prizes [[weight, itemid |
-#             {"ep": n}]] | boost (0..1)}}: the types use_item knows
+#             {"ep": n}]] | boost (0..1) | exp, lv, season (EXP capsule)}}: the types use_item knows
 #   packages {itemid: {name, icon, contents [[itemid, count]], description}}
 #   monthly  {itemid: {name, icon, days, now [[itemid, count]], daily [[itemid, count]], description}}
 #   lists    {new, best (Rekomendasi), mp (MP Shop), special (Bonus spesial): [itemid],
@@ -3758,7 +3798,8 @@ def product_category(itemid):
 # rebuilds the tables in place (every lookup above keeps working) and drops the pack pools.
 # --------------------------------------------------------------------------- #
 SHOP_FILE = os.path.join(HERE, "gamedata", "shop.json")
-SHOP_ITEM_TYPES = ("EP_LOTTERY", "ITEM_LOTTERY", "COACHNAME_CHANGE", "TEAM_CHANGE", "ENHANCEMENT_BOOST", "LEAGUE_SIMULATION")
+SHOP_ITEM_TYPES = ("EP_LOTTERY", "ITEM_LOTTERY", "COACHNAME_CHANGE", "TEAM_CHANGE", "ENHANCEMENT_BOOST", "LEAGUE_SIMULATION",
+                   "PLAYER_EXP_CAPSULE")
 SHOP_ID_BASE = {"packs": 93_000_000, "items": 94_000_000, "packages": 95_000_000, "monthly": 96_000_000}
 SHOP_HIDDEN = frozenset()
 _SHOP_BASE = None
@@ -3779,7 +3820,7 @@ def _pairs(rows):
 
 
 def pack_from(v):
-    f = {k: v[k] for k in ("top", "ovr", "grade", "pos", "league") if v.get(k) not in (None, "", 0)}
+    f = {k: v[k] for k in ("top", "ovr", "grade", "pos", "league", "draft") if v.get(k) not in (None, "", 0)}
     if v.get("seasons"):
         f["seasons"] = tuple(int(s) for s in v["seasons"])
     if v.get("all"):
@@ -3793,14 +3834,15 @@ def pack_to(entry):
     name, f = entry
     seasons = f.get("seasons") or ((f["season"],) if "season" in f else ())
     return {"name": name, "icon": f.get("icon", ""), "seasons": list(seasons), "all": bool(f.get("all")),
-            **{k: f.get(k) for k in ("top", "ovr", "grade", "pos", "league")}}
+            **{k: f.get(k) for k in ("top", "ovr", "grade", "pos", "league", "draft")}}
 
 
 def item_from(v):
     t = v["type"]
     eff = ({"ep": tuple(int(x) for x in v["ep"])} if t == "EP_LOTTERY"
            else {"prizes": [(int(w), ("ep", int(p["ep"])) if isinstance(p, dict) else int(p)) for w, p in v["prizes"]]}
-           if t == "ITEM_LOTTERY" else {"boost": float(v["boost"])} if t == "ENHANCEMENT_BOOST" else {})
+           if t == "ITEM_LOTTERY" else {"boost": float(v["boost"])} if t == "ENHANCEMENT_BOOST"
+           else {k: int(v[k]) for k in ("exp", "lv", "season") if v.get(k)} if t == "PLAYER_EXP_CAPSULE" else {})
     return (str(v["name"]), v.get("icon") or "", t, eff, str(v.get("description") or ""))
 
 
@@ -3808,6 +3850,7 @@ def item_to(entry):
     name, icon, t, eff, desc = entry
     return {"name": name, "icon": icon, "type": t, "description": desc,
             **({"ep": list(eff["ep"])} if "ep" in eff else {}), **({"boost": eff["boost"]} if "boost" in eff else {}),
+            **{k: eff[k] for k in ("exp", "lv", "season") if k in eff},
             **({"prizes": [[w, {"ep": p[1]} if isinstance(p, tuple) else p] for w, p in eff["prizes"]]}
                if "prizes" in eff else {})}
 
@@ -3996,6 +4039,13 @@ def use_item(st, slot, coach, it, req):
         if not roster(teamid)["team"]["players"]:
             return {"result": False, "reason": "ITEM_USE_ERROR"}
         coach["teamid"] = teamid
+    elif typ == "PLAYER_EXP_CAPSULE":  # the players ExpCapsuleSelectingPage lists: below the max level, lv, season
+        p = next((p for p in st["teams"][str(slot)]["players"] if iid(p) == str(req.get("targetid"))), None)
+        level = player_levelinfo(p)["level"] if p else PLAYER_MAX_LEVEL
+        if (level >= PLAYER_MAX_LEVEL or level > (eff.get("lv") or PLAYER_MAX_LEVEL)
+                or eff.get("season") and p["spid"] // 1000000 != eff["season"]):
+            return {"result": False, "reason": "ITEM_USE_ERROR"}
+        gain_exp(p, eff["exp"], player_need, PLAYER_MAX_LEVEL)
     it["remains"] -= 1
     if not it["remains"]:
         coach["items"].remove(it)
@@ -4007,8 +4057,9 @@ def ep_item_use(item_id, query, body):
     see use_item."""
     st = _state(); slot = _default_slot(st); coach = my_coach(st); team = st["teams"][str(slot)]
     it = next((i for i in coach.get("items", []) if i["_id"] == item_id and i["remains"] > 0), None)
+    req = json.loads(body or b"{}")
     if it is not None and it["itemid"] in ITEMS:
-        out = use_item(st, slot, coach, it, json.loads(body or b"{}"))
+        out = use_item(st, slot, coach, it, req)
         if out["result"]:
             _save(st)
         return _json({**out, "resources": coach_me_resources(st, slot)})
@@ -4017,7 +4068,17 @@ def ep_item_use(item_id, query, body):
     if len(team["players"]) >= MAX_PLAYERS:
         return _json({"result": False, "reason": "Exceed plyer limit"})  # client shows "squad full"
     pool = pack_pool(it["itemid"])
-    spid = random.choices([s for s, _ in pool], [w for _, w in pool])[0]
+    draft = PACKS[it["itemid"]][1].get("draft")
+    if draft:  # one of the cards picked on the draft screen, each as likely
+        try:
+            picks = sorted({int(s) for s in req.get("spids") or []})
+        except (TypeError, ValueError):
+            picks = []
+        if len(picks) != draft or not set(picks) <= {s for s, _ in pool}:
+            return _json({"result": False, "reason": "ITEM_USE_ERROR"})
+        spid = random.choice(picks)
+    else:
+        spid = random.choices([s for s, _ in pool], [w for _, w in pool])[0]
     g = pack_grade(it["itemid"])
     p = add_player(team, spid, g)
     it["remains"] -= 1
@@ -4026,6 +4087,28 @@ def ep_item_use(item_id, query, body):
     _save(st)
     return _json({"result": True, "player": {"_id": p["_id"], "spid": spid, "grade": g, "price": card_price(spid, g)},
                   "resources": coach_me_resources(st, slot)})
+
+
+def ep_draftpack_players(itemid, n, query, body):
+    """GET /item/draftpack/<itemid>/players/<n>: the draft pack's n most valuable cards
+    [{spid, price}] (the client sets their grade itself)."""
+    itemid = int(itemid)
+    if not PACKS.get(itemid, ("", {}))[1].get("draft"):
+        return _json([])
+    g = pack_grades(itemid)[0][0]
+    return _json([{"spid": s, "price": card_price(s, g)} for s in draft_top(itemid, int(n))])
+
+
+def ep_transfer_price_default(grade, query, body):
+    """POST /transfer/price/default/<grade> {spids}: Market prices of cards at that grade
+    ({prices: [{spid, price}]}; the draft screen's search results outside its list)."""
+    spids = []
+    for s in json.loads(body or b"{}").get("spids") or []:
+        try:
+            spids.append(int(s))
+        except (TypeError, ValueError):
+            pass
+    return _json({"prices": [{"spid": s, "price": card_price(s, int(grade))} for s in spids if on_market(s)]})
 
 
 def ep_static_item(query, body):
@@ -4199,6 +4282,8 @@ def ep_bag_unpackall(query, body):
 # Path-pattern routes (ids in the path); checked after the exact ENDPOINTS.
 ROUTES = [
     (re.compile(r"/item/(\w+)/use"), ep_item_use),
+    (re.compile(r"/item/draftpack/(\d+)/players/(\d+)"), ep_draftpack_players),
+    (re.compile(r"/transfer/price/default/(\d+)"), ep_transfer_price_default),
     (re.compile(r"/item/depottoitem/(\w+)"), ep_depot_to_item),
     (re.compile(r"/bag/(\w+)/unpack"), ep_bag_unpack),
     (re.compile(r"/coach/(\w+)/postponed"), ep_coach_postponed),

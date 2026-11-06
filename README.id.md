@@ -159,6 +159,13 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
 - **Kartu hadiah setelah match** (issue #26): kartu di layar hadiah dulu kosong. Sekarang ada tiga
   kartu: kartu yang kamu pilih berisi EP (1.000 sampai 10.000), pack pemain (Semua Pemain atau
   '14 Top 200) atau item Lucky EP, dan dua kartu lainnya menunjukkan hadiah yang bisa didapat.
+- **Pak draft dan EXP capsule** (issue #27): Shop > Pak pemain menjual pak draft ("06 Draft Pick 3",
+  "2017 Draft Pick 5", "World Legend Draft Pick 3"). "Gunakan" membuka layar pilih pemain, terisi kartu
+  termahal musim itu; pilih N kartu musim itu (cari nama, liga atau klub) dan salah satunya yang dibuka.
+  Shop > Dapat dikonsumsi menjual EXP capsule (1.000, 5.000, Max = LV.23, satu untuk LV.10 ke bawah,
+  satu untuk kartu 2017): pilih pemain, dia dapat EXP-nya. Request layar draft
+  (`/item/draftpack/<id>/players/<n>`, `/transfer/price/default/<grade>`) dan jenis item capsule belum
+  ada. Admin page bisa membuat lagi keduanya (isian "Draft" di pak, jenis item "EXP Capsule").
 - **Kotak acak bisa dibuka** (Kotak Platinum dan lainnya, issue #12): layar kotak menampilkan
   hadiahnya dari `staticdata.availables`, yang belum ada, jadi tiap kotak gagal saat "Gunakan".
 - **Kartu baru masuk Tim Cadangan**: kartu dari pak, trade, Market, Bag, atau halaman admin tampil

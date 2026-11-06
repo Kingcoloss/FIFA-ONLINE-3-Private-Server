@@ -503,8 +503,8 @@ function renderProducts() {
 /* editor dialog: one form per kind, rows for prizes / contents */
 let editing = null;
 const DEFAULTS = {
-  packs: {name: "", icon: "", seasons: [], top: null, ovr: null, grade: null, pos: null, league: null, all: true},
-  items: {name: "", icon: "", type: "ITEM_LOTTERY", description: "", ep: [100000, 1000000], prizes: [], boost: 0.1},
+  packs: {name: "", icon: "", seasons: [], top: null, ovr: null, grade: null, pos: null, league: null, all: true, draft: null},
+  items: {name: "", icon: "", type: "ITEM_LOTTERY", description: "", ep: [100000, 1000000], prizes: [], boost: 0.1, exp: 1000, lv: null, season: null},
   packages: {name: "", icon: "", description: "", contents: []},
   monthly: {name: "", icon: "", description: "", days: 30, now: [], daily: []},
 };
@@ -543,7 +543,7 @@ function openEditor(kind, p) {
       <div class="grid2" style="margin-top:10px">${field(t("f_top"), num("top", d.top, 1, 100000))}${field(t("f_ovr"), num("ovr", d.ovr, 40, 130))}
       ${field(t("f_grade"), num("grade", d.grade, 1, 10))}
       ${field(t("f_pos"), `<select data-k="pos"><option value="">${esc(t("any"))}</option>${SHOP.positions.map(x => `<option${x === d.pos ? " selected" : ""}>${x}</option>`).join("")}</select>`)}
-      ${field(t("f_league"), num("league", d.league, 1, 1000000))}</div>
+      ${field(t("f_league"), num("league", d.league, 1, 1000000))}${field(t("f_draft"), num("draft", d.draft, 1, 10))}</div>
       <label class="check" style="margin-top:10px"><input type="checkbox" data-k="all" ${d.all ? "checked" : ""}> ${esc(t("f_all"))}</label>`;
   } else if (kind === "items") {
     body += desc + `<div class="row">${field(t("f_type"), `<select data-k="type">${SHOP.item_types.map(x => `<option value="${x}"${x === d.type ? " selected" : ""}>${esc(t("t_" + x))}</option>`).join("")}</select>`)}</div>
@@ -564,6 +564,8 @@ function renderTypeFields(type) {
   $("#typeFields").innerHTML = type === "EP_LOTTERY" ? `<div class="row">${field(t("f_ep_min"), num("ep_min", d.ep?.[0] ?? 100000, 1, 0, 1000))}${field(t("f_ep_max"), num("ep_max", d.ep?.[1] ?? 1000000, 1, 0, 1000))}</div>`
     : type === "ITEM_LOTTERY" ? `<h3>${esc(t("f_prizes"))}</h3>` + rowsBox("prizes", "prizes", d.prizes || [], t("add_prize"))
     : type === "ENHANCEMENT_BOOST" ? `<div class="row">${field(t("f_boost"), num("boost", Math.round((d.boost ?? 0.1) * 100), 1, 100))}</div>`
+    : type === "PLAYER_EXP_CAPSULE" ? `<div class="row">${field(t("f_exp"), num("exp", d.exp || 1000, 1, 10000000))}${field(t("f_maxlv"), num("lv", d.lv, 1, 22))}
+      ${field(t("th_season"), `<select data-k="season"><option value="">${esc(t("any"))}</option>${SHOP.seasons.map(s => `<option value="${s.code}"${s.code === d.season ? " selected" : ""}>${esc(s.label)}</option>`).join("")}</select>`)}</div>`
     : `<p class="muted">${esc(t("none_type"))}</p>`;
 }
 function readRows(box) {
@@ -576,13 +578,15 @@ function readEditor() {
   const optNum = k => v(k) === "" ? null : Number(v(k));
   const d = {name: v("name").trim(), icon: editing.icon};
   if (editing.kind === "packs") Object.assign(d, {seasons: $$("[data-season]", f).filter(c => c.checked).map(c => Number(c.dataset.season)),
-    top: optNum("top"), ovr: optNum("ovr"), grade: optNum("grade"), pos: v("pos") || null, league: optNum("league"), all: $("[data-k=all]", f).checked});
+    top: optNum("top"), ovr: optNum("ovr"), grade: optNum("grade"), pos: v("pos") || null, league: optNum("league"), all: $("[data-k=all]", f).checked,
+    draft: optNum("draft")});
   else d.description = v("description").trim();
   if (editing.kind === "items") {
     d.type = v("type");
     if (d.type === "EP_LOTTERY") d.ep = [Number(v("ep_min")), Number(v("ep_max"))];
     if (d.type === "ITEM_LOTTERY") d.prizes = readRows($("[data-rows=prizes]", f));
     if (d.type === "ENHANCEMENT_BOOST") d.boost = Number(v("boost")) / 100;
+    if (d.type === "PLAYER_EXP_CAPSULE") Object.assign(d, {exp: Number(v("exp")), lv: optNum("lv"), season: optNum("season")});
   }
   if (editing.kind === "packages") d.contents = readRows($("[data-rows=contents]", f));
   if (editing.kind === "monthly") Object.assign(d, {days: Number(v("days")), now: readRows($("[data-rows=now]", f)), daily: readRows($("[data-rows=daily]", f))});

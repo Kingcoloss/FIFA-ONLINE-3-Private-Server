@@ -841,6 +841,38 @@ def main():
         assert all(1 <= p["grade"] <= 5 and p["spid"] // 1000000 == 14 and p["price"] == hc.card_price(p["spid"], p["grade"])
                    for p in opened) and len({p["grade"] for p in opened}) > 1  # a random grade +1..+5
         assert team()["players"][-1]["grade"] == opened[-1]["grade"]
+        # issue #27: draft packs ("Pilih pak pemain", TeamManagementDraftPackScreen) and EXP capsules
+        dp = 200005  # 2017 Draft Pick 5
+        assert hc.item_def(dp)["category"] == "DRAFTPACK" and hc.item_def(dp)["draft"] == {"season": 88, "grade": 1, "availables": 5}
+        top5 = body(hc.route(f"/item/draftpack/{dp}/players/5")("", b""))  # the default picks: the 5 most valuable
+        assert len(top5) == 5 and all(p["spid"] // 1000000 == 88 and p["price"] == hc.card_price(p["spid"]) for p in top5)
+        assert [p["price"] for p in top5] == sorted((p["price"] for p in top5), reverse=True)
+        assert len(body(hc.route(f"/item/draftpack/{dp}/players/100")("", b""))) == 100  # the search list
+        assert body(hc.route("/item/draftpack/28007/players/5")("", b"")) == []  # not a draft pack
+        priced = body(hc.route("/transfer/price/default/3")("", json.dumps({"spids": [88158023, 1]}).encode()))
+        assert priced == {"prices": [{"spid": 88158023, "price": hc.card_price(88158023, 3)}]}
+        assert post("/shop/purchase", {"shopid": dp, "productid": dp, "bunch": 0})["result"]
+        picks = [p["spid"] for p in top5]
+        assert not use(dp, {"spids": picks[:4]})["result"]  # all 5 picks
+        assert not use(dp, {"spids": picks[:4] + [91190871]})["result"]  # a World Best card is no 2017 pick
+        got = use(dp, {"spids": picks})
+        assert got["result"] and got["player"]["spid"] in picks and got["player"]["grade"] == 1
+        assert not any(i["itemid"] == dp for i in items())  # used up
+        # EXP capsule (PLAYER_EXP_CAPSULE): /item/<_id>/use {targetid} gives that player its EXP
+        assert {k: hc.item_def(6004).get(k) for k in ("type", "capsuleexp", "capsulelv", "capsuleseason")} == {
+            "type": "PLAYER_EXP_CAPSULE", "capsuleexp": 3000, "capsulelv": 10, "capsuleseason": None}
+        for i in (6004, 6005, 6003, 6001):
+            assert post("/shop/purchase", {"shopid": i, "productid": i, "bunch": 0})["result"]
+        lv = lambda pid: hc.player_levelinfo(next(x for x in team()["players"] if hc.iid(x) == pid))
+        assert lv(got["player"]["_id"]) == {"level": 1, "exp": 0, "to": 100}
+        assert not use(6004, {"targetid": "nope"})["result"]
+        assert use(6004, {"targetid": got["player"]["_id"]})["result"] and lv(got["player"]["_id"]) == {"level": 8, "exp": 200, "to": 800}
+        assert not use(6005, {"targetid": opened[0]["_id"]})["result"]  # a '14 card, the capsule is for 2017 ones
+        assert use(6005, {"targetid": got["player"]["_id"]})["result"] and lv(got["player"]["_id"]) == {"level": 16, "exp": 1000, "to": 1600}
+        assert post("/shop/purchase", {"shopid": 6004, "productid": 6004, "bunch": 0})["result"]
+        assert not use(6004, {"targetid": got["player"]["_id"]})["result"]  # above LV.10
+        assert use(6003, {"targetid": opened[0]["_id"]})["result"] and lv(opened[0]["_id"])["level"] == hc.PLAYER_MAX_LEVEL
+        assert not use(6001, {"targetid": opened[0]["_id"]})["result"]  # already at the max level
         # --- admin page API (admin.py)
         import admin, urllib.error, urllib.request
         admin.hc = hc
@@ -903,6 +935,12 @@ def main():
         assert newpack == hc.SHOP_ID_BASE["packs"] + 1 and len(hc.pack_pool(newpack)) == 5
         assert any(e["product"]["itemid"] == newpack for e in hc.shop_list(hc._state()))
         assert refused("shop_save", kind="packs", **{"def": {"name": "kosong", "seasons": [93], "ovr": 130}})  # no card
+        draftpack = save("packs", {"name": "Draft Tes", "icon": "200005", "seasons": [93], "draft": 3, "grade": 2, "all": True})
+        assert hc.item_def(draftpack)["draft"] == {"season": 93, "grade": 2, "availables": 3}
+        assert refused("shop_save", kind="packs", **{"def": {"name": "x", "seasons": [93, 91], "draft": 3}})  # one season
+        capsule = save("items", {"name": "Kapsul Tes", "icon": "ID50071", "type": "PLAYER_EXP_CAPSULE", "exp": 500, "lv": 5,
+                                 "season": 88})
+        assert [hc.item_def(capsule)[k] for k in ("capsuleexp", "capsulelv", "capsuleseason")] == [500, 5, 88]
         assert refused("shop_save", kind="items", **{"def": {"name": "x", "icon": "nope", "type": "EP_LOTTERY", "ep": [1, 2]}})
         box = save("items", {"name": "Kotak Tes", "icon": "ID50121GP", "type": "ITEM_LOTTERY",
                              "prizes": [[1, newpack], [1, {"ep": 5000}]]})

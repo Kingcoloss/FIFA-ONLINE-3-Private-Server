@@ -149,6 +149,13 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
 - **Thẻ thưởng sau trận** (issue #26): các thẻ trên màn hình thưởng trước đây trống. Giờ có ba thẻ:
   thẻ bạn chọn cho EP (1.000 đến 10.000), gói cầu thủ (Semua Pemain hoặc '14 Top 200) hoặc vật phẩm
   Lucky EP, hai thẻ còn lại cho thấy phần thưởng có thể nhận.
+- **Gói draft và viên EXP** (issue #27): Shop > Pak pemain bán gói draft ("06 Draft Pick 3",
+  "2017 Draft Pick 5", "World Legend Draft Pick 3"). "Gunakan" mở màn hình chọn cầu thủ, điền sẵn các thẻ
+  giá trị nhất của mùa đó; chọn N thẻ của mùa đó (tìm theo tên, giải đấu hoặc câu lạc bộ) rồi một thẻ trong
+  số đó được mở. Shop > Dapat dikonsumsi bán viên EXP (1.000, 5.000, Max = LV.23, một viên cho LV.10 trở
+  xuống, một viên cho thẻ 2017): chọn một cầu thủ và anh ấy nhận EXP đó. Trước đây thiếu các yêu cầu của
+  màn hình draft (`/item/draftpack/<id>/players/<n>`, `/transfer/price/default/<grade>`) và loại vật phẩm
+  viên EXP. Trang admin tạo thêm được cả hai (ô "Draft" của gói, loại vật phẩm "EXP Capsule").
 - **Mở được hộp ngẫu nhiên** (Kotak Platinum và các hộp khác, issue #12): màn hình hộp liệt kê phần thưởng
   từ `staticdata.availables`, trước đây bị thiếu, nên mọi hộp đều lỗi khi bấm "Gunakan" (dùng).
 - **Thẻ mới vào Tim Cadangan**: thẻ từ gói, giao dịch, Market, Bag hoặc trang quản trị hiện "-" ở cột Tim

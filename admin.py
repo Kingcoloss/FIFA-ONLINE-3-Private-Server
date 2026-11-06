@@ -385,7 +385,7 @@ def save_shop(cfg):
     """Write gamedata/shop.json and rebuild the Shop; a pack without a single card is refused."""
     old = hc.shop_config()
     hc.apply_shop(cfg)
-    empty = [i for i in (cfg.get("packs") or {}) if not hc.pack_pool(int(i))]
+    empty = [i for i, v in (cfg.get("packs") or {}).items() if len(hc.pack_pool(int(i))) < (v.get("draft") or 1)]
     if empty:
         hc.apply_shop(old)
         raise AdminError("e_pack_empty", empty[0])
@@ -450,10 +450,13 @@ def check_def(kind, d, itemid):
         if pos and pos not in hc.POSITIONS:
             raise AdminError("e_unknown_pos")
         opt = lambda k, lo, hi, w: as_int(d[k], lo, hi, w) if d.get(k) not in (None, "", 0, "0") else None
+        draft = opt("draft", 1, 10, ("f_draft",))
+        if draft and len(seasons) != 1:  # the draft screen searches one season
+            raise AdminError("e_draft_season")
         return {"name": name, "icon": icon_of(d.get("icon"), False), "seasons": seasons, "all": bool(d.get("all")),
                 "top": opt("top", 1, 100000, ("f_top",)), "ovr": opt("ovr", 40, 130, ("f_ovr",)),
                 "grade": opt("grade", 1, 10, ("f_grade",)), "pos": pos or None,
-                "league": opt("league", 1, 10 ** 6, ("f_league",))}
+                "league": opt("league", 1, 10 ** 6, ("f_league",)), "draft": draft}
     if kind == "items":
         t = str(d.get("type") or "")
         if t not in hc.SHOP_ITEM_TYPES:
@@ -471,6 +474,12 @@ def check_def(kind, d, itemid):
             out["prizes"] = prizes
         elif t == "ENHANCEMENT_BOOST":
             out["boost"] = as_int(round(float(d.get("boost") or 0) * 100), 1, 100, ("f_boost",)) / 100
+        elif t == "PLAYER_EXP_CAPSULE":
+            out["exp"] = as_int(d.get("exp"), 1, 10 ** 7, ("f_exp",))
+            if d.get("lv") not in (None, "", 0, "0"):
+                out["lv"] = as_int(d["lv"], 1, hc.PLAYER_MAX_LEVEL - 1, ("f_maxlv",))
+            if d.get("season") not in (None, "", 0, "0"):
+                out["season"] = as_int(d["season"], 1, 99, ("th_season",))
         return out
     if kind == "packages":
         return {"name": name, "icon": icon_of(d.get("icon")), "description": desc,
@@ -707,7 +716,9 @@ I18N = {
         f_top="Top N kartu terbaik", f_ovr="OVR minimal (kartu +1)", f_grade="Grade maks. (+1 … +N)", f_pos="Posisi", any="semua",
         f_league="ID liga", f_all="Semua kartu Market (bukan hanya lisensi ID)", f_type="Jenis",
         t_EP_LOTTERY="Kartu EP (acak)", t_ITEM_LOTTERY="Kotak acak", t_COACHNAME_CHANGE="Ganti nama manager", t_TEAM_CHANGE="Ganti tim",
-        t_ENHANCEMENT_BOOST="Boost upgrade", t_LEAGUE_SIMULATION="Kupon Simulasi Liga", f_ep_min="EP minimal", f_ep_max="EP maksimal", f_prizes="Hadiah (maks. 10)",
+        t_ENHANCEMENT_BOOST="Boost upgrade", t_LEAGUE_SIMULATION="Kupon Simulasi Liga",
+        t_PLAYER_EXP_CAPSULE="EXP Capsule (EXP pemain)", f_exp="EXP", f_maxlv="Untuk pemain sampai level (kosong = semua)", f_draft="Draft: pilih N pemain, kartu di grade maks. (kosong = pak biasa)",
+        e_draft_season="Pak draft harus tepat satu musim", f_ep_min="EP minimal", f_ep_max="EP maksimal", f_prizes="Hadiah (maks. 10)",
         f_weight="Bobot", f_prize="Hadiah", f_ep_amount="Jumlah EP", add_prize="Tambah hadiah", f_boost="Boost peluang upgrade (%)",
         f_contents="Isi", add_row="Tambah baris", f_days="Lama (hari)", f_now="Isi langsung saat dibeli", f_daily="Isi tiap hari",
         remove="Hapus", save="Simpan", cancel="Batal", none_type="Tidak perlu isian lain.", icons_count="{0} ikon dari client", ph_icon="cari nama ikon",
@@ -783,7 +794,9 @@ I18N = {
         f_top="Top N best cards", f_ovr="Min OVR (card at +1)", f_grade="Max grade (+1 … +N)", f_pos="Position", any="any",
         f_league="League id", f_all="Every Market card (not only ID-licensed)", f_type="Type",
         t_EP_LOTTERY="EP card (random)", t_ITEM_LOTTERY="Random box", t_COACHNAME_CHANGE="Manager name change", t_TEAM_CHANGE="Club change",
-        t_ENHANCEMENT_BOOST="Upgrade boost", t_LEAGUE_SIMULATION="League Simulation coupon", f_ep_min="Min EP", f_ep_max="Max EP", f_prizes="Prizes (up to 10)",
+        t_ENHANCEMENT_BOOST="Upgrade boost", t_LEAGUE_SIMULATION="League Simulation coupon",
+        t_PLAYER_EXP_CAPSULE="EXP Capsule (player EXP)", f_exp="EXP", f_maxlv="For players up to level (empty = any)", f_draft="Draft: pick N players, card at the max grade (empty = normal pack)",
+        e_draft_season="A draft pack needs exactly one season", f_ep_min="Min EP", f_ep_max="Max EP", f_prizes="Prizes (up to 10)",
         f_weight="Weight", f_prize="Prize", f_ep_amount="EP amount", add_prize="Add a prize", f_boost="Upgrade chance boost (%)",
         f_contents="Contents", add_row="Add a row", f_days="Length (days)", f_now="Items at purchase", f_daily="Items every day",
         remove="Remove", save="Save", cancel="Cancel", none_type="Nothing else to fill in.", icons_count="{0} icons from the client", ph_icon="icon name",
@@ -861,7 +874,9 @@ I18N = {
         f_top="最佳 N 张卡", f_ovr="最低 OVR（+1 时）", f_grade="最高强化等级（+1 … +N）", f_pos="位置", any="全部",
         f_league="联赛 ID", f_all="所有 Market 球员卡（不只是 ID 授权的）", f_type="类型",
         t_EP_LOTTERY="EP 卡（随机）", t_ITEM_LOTTERY="随机箱", t_COACHNAME_CHANGE="经理改名", t_TEAM_CHANGE="更换球队",
-        t_ENHANCEMENT_BOOST="强化加成", t_LEAGUE_SIMULATION="联赛模拟券", f_ep_min="最少 EP", f_ep_max="最多 EP", f_prizes="奖品（最多 10 个）",
+        t_ENHANCEMENT_BOOST="强化加成", t_LEAGUE_SIMULATION="联赛模拟券",
+        t_PLAYER_EXP_CAPSULE="经验胶囊（球员经验）", f_exp="经验值", f_maxlv="适用球员最高等级（留空 = 不限）", f_draft="选秀：挑选 N 名球员，卡片为最高等级（留空 = 普通卡包）",
+        e_draft_season="选秀卡包必须只选一个赛季", f_ep_min="最少 EP", f_ep_max="最多 EP", f_prizes="奖品（最多 10 个）",
         f_weight="权重", f_prize="奖品", f_ep_amount="EP 数量", add_prize="添加奖品", f_boost="强化成功率加成（%）",
         f_contents="内容", add_row="添加一行", f_days="天数", f_now="购买时立即获得", f_daily="每天获得",
         remove="移除", save="保存", cancel="取消", none_type="无需填写其他内容。", icons_count="客户端中的 {0} 个图标", ph_icon="搜索图标名",
@@ -938,7 +953,9 @@ I18N = {
         f_top="การ์ดดีที่สุด N ใบ", f_ovr="OVR ขั้นต่ำ (การ์ด +1)", f_grade="เกรดสูงสุด (+1 … +N)", f_pos="ตำแหน่ง", any="ทั้งหมด",
         f_league="ID ลีก", f_all="การ์ดทั้งหมดใน Market (ไม่ใช่เฉพาะที่มีลิขสิทธิ์ ID)", f_type="ประเภท",
         t_EP_LOTTERY="การ์ด EP (สุ่ม)", t_ITEM_LOTTERY="กล่องสุ่ม", t_COACHNAME_CHANGE="เปลี่ยนชื่อผู้จัดการ", t_TEAM_CHANGE="เปลี่ยนทีม",
-        t_ENHANCEMENT_BOOST="บูสต์อัปเกรด", t_LEAGUE_SIMULATION="คูปองจำลองลีก", f_ep_min="EP ขั้นต่ำ", f_ep_max="EP สูงสุด", f_prizes="รางวัล (สูงสุด 10)",
+        t_ENHANCEMENT_BOOST="บูสต์อัปเกรด", t_LEAGUE_SIMULATION="คูปองจำลองลีก",
+        t_PLAYER_EXP_CAPSULE="แคปซูล EXP (EXP นักเตะ)", f_exp="EXP", f_maxlv="ใช้กับนักเตะเลเวลไม่เกิน (ว่าง = ทั้งหมด)", f_draft="ดราฟต์: เลือกนักเตะ N คน การ์ดได้เกรดสูงสุด (ว่าง = แพ็คปกติ)",
+        e_draft_season="แพ็คดราฟต์ต้องมีซีซั่นเดียวเท่านั้น", f_ep_min="EP ขั้นต่ำ", f_ep_max="EP สูงสุด", f_prizes="รางวัล (สูงสุด 10)",
         f_weight="น้ำหนัก", f_prize="รางวัล", f_ep_amount="จำนวน EP", add_prize="เพิ่มรางวัล", f_boost="เพิ่มโอกาสอัปเกรด (%)",
         f_contents="สิ่งที่ได้", add_row="เพิ่มแถว", f_days="ระยะเวลา (วัน)", f_now="ได้ทันทีเมื่อซื้อ", f_daily="ได้ทุกวัน",
         remove="ลบ", save="บันทึก", cancel="ยกเลิก", none_type="ไม่ต้องกรอกอย่างอื่น", icons_count="ไอคอน {0} รูปจากไคลเอนต์", ph_icon="ค้นหาชื่อไอคอน",
@@ -1015,7 +1032,9 @@ I18N = {
         f_top="N thẻ tốt nhất", f_ovr="OVR tối thiểu (thẻ +1)", f_grade="Cấp tối đa (+1 … +N)", f_pos="Vị trí", any="tất cả",
         f_league="ID giải đấu", f_all="Mọi thẻ trên Market (không chỉ thẻ có bản quyền ID)", f_type="Loại",
         t_EP_LOTTERY="Thẻ EP (ngẫu nhiên)", t_ITEM_LOTTERY="Hộp ngẫu nhiên", t_COACHNAME_CHANGE="Đổi tên HLV", t_TEAM_CHANGE="Đổi đội",
-        t_ENHANCEMENT_BOOST="Tăng tỉ lệ nâng cấp", t_LEAGUE_SIMULATION="Phiếu Mô phỏng giải đấu", f_ep_min="EP tối thiểu", f_ep_max="EP tối đa", f_prizes="Phần thưởng (tối đa 10)",
+        t_ENHANCEMENT_BOOST="Tăng tỉ lệ nâng cấp", t_LEAGUE_SIMULATION="Phiếu Mô phỏng giải đấu",
+        t_PLAYER_EXP_CAPSULE="Viên EXP (EXP cầu thủ)", f_exp="EXP", f_maxlv="Cho cầu thủ đến cấp (trống = tất cả)", f_draft="Draft: chọn N cầu thủ, thẻ ở cấp tối đa (trống = gói thường)",
+        e_draft_season="Gói draft phải có đúng một mùa giải", f_ep_min="EP tối thiểu", f_ep_max="EP tối đa", f_prizes="Phần thưởng (tối đa 10)",
         f_weight="Trọng số", f_prize="Phần thưởng", f_ep_amount="Số EP", add_prize="Thêm phần thưởng", f_boost="Tăng tỉ lệ nâng cấp (%)",
         f_contents="Nội dung", add_row="Thêm dòng", f_days="Thời hạn (ngày)", f_now="Nhận ngay khi mua", f_daily="Nhận mỗi ngày",
         remove="Xóa", save="Lưu", cancel="Hủy", none_type="Không cần nhập gì thêm.", icons_count="{0} biểu tượng từ client", ph_icon="tìm tên biểu tượng",
@@ -1092,7 +1111,9 @@ I18N = {
         f_top="상위 N장", f_ovr="최소 OVR(+1 카드 기준)", f_grade="최대 강화 등급(+1 … +N)", f_pos="포지션", any="전체",
         f_league="리그 ID", f_all="Market의 모든 카드(ID 라이선스 카드만이 아님)", f_type="종류",
         t_EP_LOTTERY="EP 카드(랜덤)", t_ITEM_LOTTERY="랜덤 박스", t_COACHNAME_CHANGE="감독 이름 변경", t_TEAM_CHANGE="팀 변경",
-        t_ENHANCEMENT_BOOST="강화 부스트", t_LEAGUE_SIMULATION="리그 시뮬레이션 쿠폰", f_ep_min="최소 EP", f_ep_max="최대 EP", f_prizes="보상(최대 10개)",
+        t_ENHANCEMENT_BOOST="강화 부스트", t_LEAGUE_SIMULATION="리그 시뮬레이션 쿠폰",
+        t_PLAYER_EXP_CAPSULE="경험치 캡슐(선수 경험치)", f_exp="경험치", f_maxlv="사용 가능한 선수 최대 레벨(비우면 전체)", f_draft="드래프트: 선수 N명 선택, 카드는 최대 강화 등급(비우면 일반 팩)",
+        e_draft_season="드래프트 팩은 시즌을 하나만 골라야 합니다", f_ep_min="최소 EP", f_ep_max="최대 EP", f_prizes="보상(최대 10개)",
         f_weight="가중치", f_prize="보상", f_ep_amount="EP 수량", add_prize="보상 추가", f_boost="강화 확률 부스트(%)",
         f_contents="구성", add_row="행 추가", f_days="기간(일)", f_now="구매 즉시 지급", f_daily="매일 지급",
         remove="삭제", save="저장", cancel="취소", none_type="더 입력할 것이 없습니다.", icons_count="클라이언트 아이콘 {0}개", ph_icon="아이콘 이름 검색",

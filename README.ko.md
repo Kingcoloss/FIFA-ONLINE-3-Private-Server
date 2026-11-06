@@ -136,6 +136,13 @@ Gudang 등은 게임에 표시되는 화면 이름이라, 게임에서 찾기 �
 - **경기 후 보상 카드**(issue #26): 보상 화면의 카드가 비어 있었음. 이제 카드 3장이 나오고, 고른 카드는
   EP(1,000~10,000), 선수 팩(Semua Pemain 또는 '14 Top 200) 또는 Lucky EP 아이템을 줌. 나머지 두 장은 받을 수
   있었던 보상을 보여 줌.
+- **드래프트 팩과 경험치 캡슐**(issue #27): Shop > Pak pemain에서 드래프트 팩("06 Draft Pick 3",
+  "2017 Draft Pick 5", "World Legend Draft Pick 3")을 판매. "Gunakan"을 누르면 그 시즌에서 가장 비싼 카드로
+  채워진 선수 선택 화면이 열리고, 그 시즌 카드 N장을 고르면(이름, 리그, 클럽으로 검색) 그중 한 장이 열림.
+  Shop > Dapat dikonsumsi에서 경험치 캡슐(1,000, 5,000, Max = LV.23, LV.10 이하용 1종, 2017 카드용 1종)을
+  판매: 선수를 고르면 그 경험치를 받음. 드래프트 화면의 요청(`/item/draftpack/<id>/players/<n>`,
+  `/transfer/price/default/<grade>`)과 캡슐 아이템 종류가 없었음. 관리 페이지에서 둘 다 더 만들 수 있음
+  (팩의 "Draft" 항목, 아이템 종류 "EXP Capsule").
 - **랜덤 박스 열림**(Kotak Platinum 등, issue #12): 박스 화면은 `staticdata.availables`에서 보상 목록을
   가져오는데, 이게 없어서 모든 박스가 "Gunakan"(사용)에서 실패했음.
 - **새 카드는 Tim Cadangan으로**: 팩, 트레이드, Market, Bag, 관리자 페이지에서 얻은 카드는 Skuad의 Tim

@@ -151,6 +151,13 @@ Added, passing the tests but not yet checked in the client:
 - **Reward cards after a match** (issue #26): the reward screen's cards were empty. Now three
   cards are dealt: the one you pick gives EP (1,000 to 10,000), a player pack (Semua Pemain or
   '14 Top 200) or a Lucky EP item, and the other two show what you could have got.
+- **Draft packs and EXP capsules** (issue #27): Shop > Pak pemain sells draft packs ("06 Draft Pick 3",
+  "2017 Draft Pick 5", "World Legend Draft Pick 3"). "Gunakan" opens the player picker, filled with the
+  season's most valuable cards; pick N cards of that season (search by name, league or club) and one of
+  them is opened. Shop > Dapat dikonsumsi sells EXP capsules (1,000, 5,000, Max = LV.23, one for LV.10
+  and below, one for 2017 cards): pick a player and he gets the EXP. The draft screen's requests
+  (`/item/draftpack/<id>/players/<n>`, `/transfer/price/default/<grade>`) and the capsule item type were
+  missing. The admin page makes more of both (a pack's "Draft" field, item type "EXP Capsule").
 - **Random boxes open** (Kotak Platinum and the rest, issue #12): the box screen lists its prizes
   from `staticdata.availables`, which was missing, so every box failed at "Gunakan".
 - **New cards join Tim Cadangan**: a card from a pack, a trade, the Market, the Bag or the admin
