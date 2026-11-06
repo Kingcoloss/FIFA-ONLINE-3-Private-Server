@@ -54,20 +54,32 @@ def entries(path):
     return [e[1:] for e in _walk(table(path))]
 
 
-def patch(path, files, align=0x800):
+def patch(path, files, align=0x800, in_place=False, at=None):
     """Append {name: bytes (stored) | (refpacked bytes, unpacked size)} to the archive and
     re-point those entries; the table keeps its size because names do not change.
+    in_place: write each one over its entry's own bytes instead (it must fit there), or at the
+    offset `at` gives for its name (the caller keeps that space free), so the archive keeps its
+    length (the game caches all of data_0.big: 40 MB more crashed its boot).
     Returns {name: (offset, size, usize)}."""
     t = bytearray(table(path))
+    old = {name: (off, size) for _, name, off, size, _ in _walk(t)}
     placed = {}
     with open(path, "r+b") as f:
         end = f.seek(0, 2)
         for name, data in files.items():
             data, usize = data if isinstance(data, tuple) else (data, 0)
-            off = -(-end // align) * align
+            if in_place and name in (at or {}):
+                off = at[name]
+                assert off + len(data) <= end
+            elif in_place:
+                off, room = old[name]
+                assert len(data) <= room, f"{name}: {len(data)} bytes, its slot holds {room}"
+            else:
+                off = -(-end // align) * align
             f.seek(off)
             f.write(data)
-            end = off + len(data)
+            if not in_place:
+                end = off + len(data)
             placed[name] = (off, len(data), usize)
         todo = dict(placed)
         for p, name, *_ in list(_walk(t)):
@@ -81,7 +93,8 @@ def patch(path, files, align=0x800):
                 t[p + 16 + i] = ((d << 4) | (d >> 4)) & 0xFF
                 k = ((d or size & 0xFF) - 0x66) & 0xFF
         assert not todo, f"not in {path}: {list(todo)}"
-        struct.pack_into("<I", t, 4, end)  # archive size
+        if not in_place:
+            struct.pack_into("<I", t, 4, end)  # archive size
         f.seek(0)
         f.write(t)
     return placed

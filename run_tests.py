@@ -36,6 +36,7 @@ def main():
     results.append(("blaze", step("blaze self-test", ["blaze.py"])))
     results.append(("analyze_capture", step("analyze_capture self-test", ["analyze_capture.py", "--selftest"])))
     results.append(("league", step("league self-test", ["test_league.py"])))
+    results.append(("fo4_season", step("fo4_season self-test", [os.path.join("tools", "fo4_season.py"), "selftest"])))
 
     print("\n=== loopback (server + test_client) ===")
     srv = subprocess.Popen([PY, "-u", "server.py", str(R), str(N)], cwd=HERE,

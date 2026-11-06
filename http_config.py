@@ -424,10 +424,10 @@ def ep_team_role(kicker, query, body):
 
 
 def roster(teamid):
-    """{summary, team} of a club: the gen_teams.py roster file if there is one, else built
-    the same way straight from fifadb (league opponents)."""
+    """{summary, team} of a club: the gen_teams.py roster file if there is one (2017 squads, so
+    not while 26 LIVE is the current season), else built the same way straight from fifadb."""
     f = os.path.join(RESPONSES, f"static_info_authentic_team_all_{teamid}.json")
-    if os.path.isfile(f):
+    if os.path.isfile(f) and gen_teams.CURRENT_SEASON == gen_teams.LEGACY_SEASON:
         with open(f) as fh:
             return json.load(fh)
     with closing(_db()) as c:
@@ -1665,10 +1665,12 @@ def club_index():
     their best eleven); a league's nation is its players' most common nationality. National
     teams are league 78 with their players' nationalteamid as the squad (gen_teams.team)."""
     if not _CLUBS:
-        with closing(_db()) as c:
+        with closing(_db()) as c:  # current-season cards + 2017 cards of the players without one
             rows = c.execute(f"""SELECT p.spid, p.leagueid, p.teamid, p.nationalteamid, p.nationality, {POSOVR}
                                  FROM players p JOIN permid m ON m.spid = p.spid AND m.licensed = 1
-                                 WHERE p.spid / 1000000 = ?""", (gen_teams.CURRENT_SEASON,)).fetchall()
+                                 WHERE p.spid / 1000000 = ?1 OR (p.spid / 1000000 = ?2 AND p.playerid NOT IN
+                                       (SELECT playerid FROM players WHERE spid / 1000000 = ?1))""",
+                             (gen_teams.CURRENT_SEASON, gen_teams.LEGACY_SEASON)).fetchall()
         squads, nats = {}, {}
         for spid, lid, tid, ntid, nat, ovr in rows:
             squads.setdefault((lid, tid), {})[spid] = ovr
@@ -1719,6 +1721,13 @@ def ep_authentic_team(kind, teamid, query, body):
     team = dict(r["team"], players=[dict(p, id=str(p["spid"])) for p in r["team"]["players"]])
     team["captain"] = str(team["squad"].get("captain") or "")
     return _json({**r, "team": team, "teamid": int(teamid), "kit": team_kit(int(teamid))})
+
+
+def ep_recommendation(query, body):
+    """/static/info/authentic/team/recommendation: the six quick-creation clubs, built from
+    fifadb (responses/'s gen_teams.py file serves them while 2017 is the current season)."""
+    with closing(_db()) as c:
+        return _json([t for t in (gen_teams.team(c, i) for i in gen_teams.DEFAULT_TEAMS) if t])
 
 
 def ep_l2_calendar(query, body):
@@ -3410,11 +3419,12 @@ PACKS = {  # itemid (= shop icon): (name, pool)
     8223510: ("DF NEW 70+ 2017", {"pos": "DF", "ovr": 70, "season": 88}),
     82214068: ("World Best 300 2017", {"top": 300, "season": 88}),
     82214180: ("World Best 50 2017", {"top": 50, "season": 88}),
-    # This Season = 2017 (spid season 88 = the client's DEFAULT_SEASON_ID, badge '17)
-    45011: ("This Season Top 10", {"top": 10, "season": 88}),
-    45012: ("This Season Top 20", {"top": 20, "season": 88}),
-    45013: ("This Season Top 30", {"top": 30, "season": 88}),  # (Top 50 = World Best 50 2017)
-    45097: ("This Season Top 30 +8", {"top": 30, "season": 88, "grade": 8}),
+    # This Season = the current season: 26 LIVE once tools/fo4_season.py installed it, else
+    # 2017 (spid season 88 = the client's DEFAULT_SEASON_ID, badge '17)
+    45011: ("This Season Top 10", {"top": 10, "season": gen_teams.CURRENT_SEASON}),
+    45012: ("This Season Top 20", {"top": 20, "season": gen_teams.CURRENT_SEASON}),
+    45013: ("This Season Top 30", {"top": 30, "season": gen_teams.CURRENT_SEASON}),  # (Top 50 = World Best 50 2017)
+    45097: ("This Season Top 30 +8", {"top": 30, "season": gen_teams.CURRENT_SEASON, "grade": 8}),
     # older seasons; fifaaddict season codes: 2006..2011 = 6..11, 2014 = 14, 2015 = 15
     45004: ("06-11 Player Top 10", {"top": 10, "seasons": (6, 7, 8, 9, 10, 11)}),
     45006: ("06-11 Player Top 30", {"top": 30, "seasons": (6, 7, 8, 9, 10, 11)}),
@@ -3463,6 +3473,8 @@ FA_SEASONS = (
     ("CC", (24,), 8547), ("17TH", (44,), 8545), ("TCO92", (49,), 8546), ("MUA", (55,), 8547), ("ML", (71,), 8549),
     ("TL", (51,), 8549), ("VL", (61,), 8549), ("CL", (89,), 8549), ("KL02", (95,), 8546), ("CEL", (31, 33), 8335),
     ("U23", (29,), 8545), ("KXI", (97,), 8546), ("MUL", (48,), 8547), ("VS", (73,), 2000006),
+    # FIFA Online 4's 26 LIVE / 25 LIVE (tools/fo4_season.py; empty until it is installed)
+    ("26 LIVE", (300,), 45011), ("25 LIVE", (325,), 45013),
 )
 # each one the season's 200 best cards (user: "all session pack  top 50 ganti menjadi top 200")
 PACKS.update({92000000 + codes[0]: (f"{label} Top 200", {"seasons": codes, "icon": icon, "top": 200, "all": True})
@@ -3539,6 +3551,8 @@ def pack_price(itemid):
         top = draft_top(itemid, draft)
         return sig3(sum(card_price(s, g) for s in top) / len(top)) if top else 0
     pool, grades = pack_pool(itemid), pack_grades(itemid)
+    if not pool:
+        return 0
     gw = sum(w for _, w in grades)
     return sig3(sum(card_price(s, g) * w * gwt for s, w in pool for g, gwt in grades) / sum(w for _, w in pool) / gw)
 
@@ -3765,9 +3779,9 @@ def chained_entry(st, first):
 
 def shop_list(st):
     """GET /shop/list: every Shop tab's products (ShopController filters them by shopcategory);
-    the ones hidden on the admin page are left out."""
+    the ones hidden on the admin page and packs without a card (a season not installed) are left out."""
     on = lambda i: i not in SHOP_HIDDEN
-    return ([shop_entry(i) for i in PACKS if on(i)] + [shop_entry(i, "USE") for i in ITEMS if on(i)]
+    return ([shop_entry(i) for i in PACKS if on(i) and pack_pool(i)] + [shop_entry(i, "USE") for i in ITEMS if on(i)]
             + [shop_entry(i, "PACKAGE") for i in PACKAGES if i not in CHAIN_STEPS and on(i)]
             + [shop_entry(i, "MILEAGE", MP_SHOPID + i) for i in MP_SHOP if on(i)]
             + [shop_entry(i, "MONTHLYPACK") for i in MONTHLY if on(i)]
@@ -4354,6 +4368,7 @@ for _slot in (0, 1):  # two coach slots
 ENDPOINTS["/account"] = ep_account
 ENDPOINTS["/account/option"] = ep_account_option
 ENDPOINTS["/coach/me/squad"] = ep_coach_squad
+ENDPOINTS["/static/info/authentic/team/recommendation"] = ep_recommendation
 ENDPOINTS["/match/campaign"] = ep_match_campaign
 ENDPOINTS["/game/my/tactic/all"] = ep_tactic_all
 ENDPOINTS["/game/my/team/captain"] = lambda q, b: ep_team_role(None, q, b)
@@ -4408,6 +4423,8 @@ def from_file(path):
     """responses/<path, '/' -> '_'>.json overrides the handler; re-read every request so
     response shapes can be iterated against the live client without a restart."""
     f = os.path.join(RESPONSES, path.strip("/").replace("/", "_") + ".json")
+    if path.startswith("/static/info/authentic/team/") and gen_teams.CURRENT_SEASON != gen_teams.LEGACY_SEASON:
+        return None  # gen_teams.py's files hold 2017 squads: ep_recommendation / roster build them
     if os.path.isfile(f):
         with open(f, "rb") as fh:
             return ("application/json", fh.read())

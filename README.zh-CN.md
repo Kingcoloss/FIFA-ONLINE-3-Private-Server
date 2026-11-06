@@ -1,8 +1,12 @@
+![SEASON UPGRADE 25, 26](docs/season-upgrade-25-26.svg)
+
 # FO3ID Private Server
 
 [English](README.md) | [Bahasa Indonesia](README.id.md) | **简体中文** | [ไทย](README.th.md) | [Tiếng Việt](README.vi.md) | [한국어](README.ko.md)
 
 > 本文译自 [README.md](README.md)。如有出入，以 README.md 为准。
+
+**新增：** FIFA Online 4 的 25 LIVE 和 26 LIVE 球员卡作为两个新赛季（属性按 +0 计，使用 FO4 的特性和赛季徽章），26 LIVE 为默认赛季。见 `tools/fo4_season.py`。
 
 这是 **FIFA Online 3 印尼版**（Garena，客户端版本 654420）的本地私服，用 Python 编写。Garena 已于
 2020-06-30 关闭官方服务器；本项目重新实现了客户端所连接的后端，让游戏可以在一台电脑上离线游玩。
@@ -202,6 +206,7 @@
 | `gen_teams.py` | 根据 `gamedata/fifadb.sqlite` 生成初始阵容和俱乐部概要。 |
 | `tools/eatrax_song.py` | 把一首歌以 EALayer3 格式放到 EA Trax 菜单音乐的第一首，替换 TrackID 1（以追加方式修改 `data_0.big` / `data_1.big`；`--restore` 恢复原文件）。会导致比赛后崩溃，见已知问题。 |
 | `tools/fa_sync.py` | 同步 fifaaddict.com 价格。 |
+| `tools/fo4_season.py` | 把 FIFA Online 4 的 26 LIVE 和 25 LIVE 球员卡（fifaaddict 数据，属性按 +0 计）加为两个新赛季，使用 FO4 的赛季徽章：`fetch`、`collect` + `import`、`build`、`install`（就地改写 `data_0.big` 中的条目，因为它的大小不能改变；以追加方式修改 `Label.big`；`restore` 恢复这两个文件）。 |
 | `tools/fa_faces.py` | 补充客户端缓存中缺少的球员小头像（fifaaddict 提供同样的 128x128 PNG）；`--crests` 补充缺少的俱乐部队徽（大多数俱乐部在缓存中没有，游戏会显示默认队徽）。可断点续传，`--remove` 撤销。 |
 | `tools/re/` | 逆向工程辅助工具：`bigdir.py`（BIg4 归档表）、`refpack.py`（RefPack 编解码）、`eadb.py`（EA "DB" 数据库表）、`abc*.py`（AS3 字节码解析 / 搜索 / 结构挖掘）、`gfxx.py`（界面 SWF）、`memgrab.py`、`gamectl.ps1`（测试时操控客户端窗口）。 |
 | `blaze.py`、`server.py`、`test_client.py`、`analyze_capture.py` | 项目第一阶段的 EA Blaze 帧格式（Fire/TDF）和回环测试服务器；后来发现客户端用的是 REST + messenger。 |

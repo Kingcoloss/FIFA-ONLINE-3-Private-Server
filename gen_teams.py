@@ -53,7 +53,27 @@ def jersey_name(c, playerid):
     return r[0] if r else ""
 
 
-CURRENT_SEASON = 88  # spid // 1e6 of the "2017" cards (fifaaddict season badge y2088)
+LEGACY_SEASON = 88  # spid // 1e6 of the "2017" cards (fifaaddict season badge y2088)
+FO4_SEASON = 300  # FIFA Online 4's 26 LIVE (tools/fo4_season.py)
+
+
+def _current_season():
+    """26 LIVE once tools/fo4_season.py has put it in fifadb (user: "nanti ganti default session
+    ke 26"), else 2017. Clubs take their 26 LIVE cards first and fill up with 2017 ones."""
+    if not os.path.exists(DB):
+        return LEGACY_SEASON
+    c = sqlite3.connect(DB)
+    try:
+        lo = FO4_SEASON * 1000000
+        hit = c.execute("SELECT 1 FROM players WHERE spid BETWEEN ? AND ? LIMIT 1", (lo, lo + 999999)).fetchone()
+    except sqlite3.Error:
+        hit = None
+    finally:
+        c.close()
+    return FO4_SEASON if hit else LEGACY_SEASON
+
+
+CURRENT_SEASON = _current_season()
 # fifadb leagueid of the national teams ("International"). A national team's squad is its
 # players' nationalteamid: most of them are at clubs (teamid = the club), so building it from
 # teamid alone left out Italy, England, Germany, Spain, ... (GitHub issue #24).
@@ -77,19 +97,24 @@ def team(c, teamid):
     hc = _hc()
     if teamid <= 0:  # no card has one; nationalteamid -1 = none (would match 53k cards)
         return None
+    # with 26 LIVE current, a player who has a 26 LIVE card plays for that card's club only (his
+    # 2017 card is at his 2017 club); then 2017 cards, then older ones
     rows = c.execute("""SELECT p.* FROM players p JOIN permid m ON m.spid = p.spid AND m.licensed = 1
-                        WHERE ? IN (p.teamid, p.nationalteamid)
-                        ORDER BY (p.spid / 1000000 != ?), (p.spid < 1000000), p.spid""",
-                     (teamid, CURRENT_SEASON)).fetchall()
+                        WHERE ?1 IN (p.teamid, p.nationalteamid)
+                        AND (?2 = ?3 OR p.spid / 1000000 = ?2
+                             OR p.playerid NOT IN (SELECT playerid FROM players WHERE spid / 1000000 = ?2))
+                        ORDER BY (p.spid / 1000000 != ?2), (p.spid / 1000000 != ?3), (p.spid < 1000000), p.spid""",
+                     (teamid, CURRENT_SEASON, LEGACY_SEASON)).fetchall()
     national = any(r["nationalteamid"] == teamid for r in rows)
     best = {}
     # the club's current-season cards (as on fifaaddict); older seasons (former players, e.g.
     # a 2006 Ronaldinho at Barcelona) and season 0 (engine template cards, ratings 120+, not on
     # fifaaddict) only when the current squad is too small
     for r in rows:
-        if r["spid"] // 1000000 == CURRENT_SEASON or len(best) < SELECTABLE:
+        if r["spid"] // 1000000 in (CURRENT_SEASON, LEGACY_SEASON) or len(best) < SELECTABLE:
             best.setdefault(r["playerid"], r)
-    rows = sorted(best.values(), key=lambda r: -r["overallrating"])[:30]
+    # current-season cards first (2017's overallrating column runs ~5 above the client's rating)
+    rows = sorted(best.values(), key=lambda r: (r["spid"] // 1000000 != CURRENT_SEASON, -r["overallrating"]))[:30]
     if len(rows) < 11:
         return None
     # XI: best (player, slot) pairs by the client's rating at that slot (the "Attr" the squad

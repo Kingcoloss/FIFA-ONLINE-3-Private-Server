@@ -1,6 +1,10 @@
+![SEASON UPGRADE 25, 26](docs/season-upgrade-25-26.svg)
+
 # FO3ID Private Server
 
 **English** | [Bahasa Indonesia](README.id.md) | [简体中文](README.zh-CN.md) | [ไทย](README.th.md) | [Tiếng Việt](README.vi.md) | [한국어](README.ko.md)
+
+**New:** FIFA Online 4's 25 LIVE and 26 LIVE cards as two new seasons (stats as +0, FO4's traits and season badges), with 26 LIVE as the default season. See `tools/fo4_season.py`.
 
 A local private server for **FIFA Online 3 Indonesia** (Garena, client build 654420), written in
 Python. Garena shut the official servers down on 2020-06-30; this project re-implements the
@@ -235,6 +239,7 @@ Not done: online modes (ranked, friendly, King of the Hill), Road to World, leag
 | `gen_teams.py` | Starter squads and club summaries from `gamedata/fifadb.sqlite`. |
 | `tools/eatrax_song.py` | Puts a song first in the game's EA Trax menu music as EALayer3, replacing TrackID 1 (edits `data_0.big` / `data_1.big` by appending; `--restore` puts the originals back). Crashes the game after matches, see the known issue. |
 | `tools/fa_sync.py` | fifaaddict.com price sync. |
+| `tools/fo4_season.py` | Adds FIFA Online 4's 26 LIVE and 25 LIVE cards (fifaaddict data, stats as +0) as two new seasons with FO4's season badges: `fetch`, `collect` + `import`, `build`, `install` (rewrites entries of `data_0.big` in place, as its size must not change, and appends to `Label.big`; `restore` puts both back). |
 | `tools/fa_faces.py` | Adds the player mini faces missing from the client's cache (fifaaddict serves the same 128x128 PNGs); `--crests` adds the missing club crests (most clubs have none in the cache, so the game shows a default one). Resumable, `--remove` undoes it. |
 | `tools/re/` | Reverse-engineering helpers: `bigdir.py` (BIg4 archive tables), `refpack.py` (RefPack codec), `eadb.py` (EA "DB" database tables), `abc*.py` (AS3 bytecode parser / grep / schema miner), `gfxx.py` (UI SWFs), `memgrab.py`, `gamectl.ps1` (drive the client window for tests). |
 | `blaze.py`, `server.py`, `test_client.py`, `analyze_capture.py` | EA Blaze framing (Fire/TDF) and a loopback test server from the first phase of the project; the client turned out to use REST + the messenger instead. |

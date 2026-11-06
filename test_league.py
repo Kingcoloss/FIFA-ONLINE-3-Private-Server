@@ -34,8 +34,7 @@ def main():
         hc.MATCH_REWARD_FILE = os.path.join(tmp, "match_rewards.json")  # default match rewards; admin test writes here
         # a fresh account through the client's club creation (the live state may hold no manager)
         hc._save({"coaches": [], "defaultcoachid": "", "teams": {}})
-        with open(os.path.join(hc.RESPONSES, "static_info_authentic_team_all_241.json")) as f:
-            spids = [p["spid"] for p in json.load(f)["team"]["players"]]
+        spids = [p["spid"] for p in hc.roster(241)["team"]["players"]]  # 2017 file, or built for 26 LIVE
         assert body(hc.ENDPOINTS["/coach/0/new/step/3"]("", json.dumps({"id": 241, "spids": spids}).encode()))["result"]
         assert body(hc.ENDPOINTS["/coach/0"]("", json.dumps({"id": 241, "coachName": "Tester"}).encode()))["result"]
         assert body(hc.ENDPOINTS["/coach/0/default"]("", b""))["result"]
@@ -635,7 +634,7 @@ def main():
         ladder = body(hc.ENDPOINTS["/players/trade2/info"]("", b""))
         assert len(ladder) == 14 and all(e["expandme"] == "player" and e["coach"] and e["grade"] <= hc.trade2_max_grade(int(k))
                                          for k, e in ladder.items())
-        give = [p for p in team()["players"] if not hc.in_squad(team(), p)][:3]
+        give = [p for p in team()["players"] if not hc.in_squad(team(), p) and hc.grade_of(p)][:3]  # +0 = no value
         tp = hc.trade2_tp(give)
         pr = post("/players/trade2/proposal", {"players": [hc.iid(p) for p in give]})
         assert pr["result"] and len(pr["props"]) == tt["playertrade2_normal"]["3"] + 2, pr
@@ -707,7 +706,10 @@ def main():
         # --- shop: player packs for EP (1 or 10); Item saya opens one card per use
         shop = body(hc.ENDPOINTS["/shop/list"]("", b""))
         cats = Counter(e["shopcategory"] for e in shop)
-        assert cats == {"PLAYERPACK": len(hc.PACKS), "USE": len(hc.ITEMS), "PACKAGE": len(hc.PACKAGES) - len(hc.CHAIN_STEPS),
+        # packs without a card (the FO4 seasons before tools/fo4_season.py install) stay out
+        assert not hc.pack_pool(92000300) or 92000300 in {e["shopid"] for e in shop}
+        assert cats == {"PLAYERPACK": sum(1 for i in hc.PACKS if hc.pack_pool(i)), "USE": len(hc.ITEMS),
+                        "PACKAGE": len(hc.PACKAGES) - len(hc.CHAIN_STEPS),
                         "MILEAGE": len(hc.MP_SHOP), "MONTHLYPACK": len(hc.MONTHLY), "CHAINED": len(hc.CHAINED)}
         assert all(b["price"] == 0 for e in shop for b in e["product"]["staticdata"]["bunches"])  # free Shop
         pid = 8223509  # MF NEW 70+ 2017
