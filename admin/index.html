@@ -102,6 +102,7 @@
              overflow: auto; padding: 8px; border: 1px solid var(--line); border-radius: var(--radius); background: #172330; }
   .rows .r { display: flex; flex-wrap: wrap; gap: 6px; align-items: end; margin: 4px 0; }
   .rows select { max-width: 320px; }
+  .rows .chance { min-width: 8.5em; padding-bottom: 8px; }
   .icons { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; }
   .icons button { display: grid; justify-items: center; gap: 2px; padding: 6px 4px; border: 1px solid var(--line);
                   border-radius: var(--radius); background: #172330; cursor: pointer; font-size: 11px; color: var(--mute); word-break: break-all; }
@@ -142,6 +143,7 @@
     <button role="tab" data-tab="item" data-i18n="nav_item"></button>
     <button role="tab" data-tab="shop" data-i18n="nav_shop"></button>
     <button role="tab" data-tab="harian" data-i18n="nav_harian"></button>
+    <button role="tab" data-tab="match" data-i18n="nav_match"></button>
     <button role="tab" data-tab="scout" data-i18n="nav_scout"></button>
     <button role="tab" data-tab="log" data-i18n="nav_log"></button>
   </nav>
@@ -264,6 +266,22 @@
       <div class="row">
         <button class="b" id="dailyAdd" data-i18n="daily_add"></button>
         <button class="b primary" id="dailySave" data-i18n="daily_save"></button>
+      </div>
+    </section>
+
+    <section id="match" hidden>
+      <h2 data-i18n="mr_title"></h2>
+      <p class="lead" id="mrLead"></p>
+      <h3 data-i18n="mr_result"></h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th data-i18n="th_result"></th><th>EP</th><th data-i18n="mr_coach_exp"></th><th data-i18n="mr_player_exp"></th></tr></thead>
+        <tbody id="mrResult"></tbody>
+      </table></div>
+      <h3 data-i18n="mr_cards"></h3>
+      <div class="rows" id="mrCards" data-rowkind="prizes"></div>
+      <div class="row">
+        <button class="b" id="mrAdd" data-i18n="add_prize"></button>
+        <button class="b primary" id="mrSave" data-i18n="save"></button>
       </div>
     </section>
 
@@ -400,6 +418,16 @@ const loaders = {
       [t("f_last"), st.last || t("never")], [t("f_today_wib"), d.today],
     ]);
     renderDaily(d.table);
+  },
+  async match() {
+    if (!SHOP) SHOP = await api("shop");  // the prize list: packs and items
+    const d = await api("match_rewards");
+    $("#mrLead").textContent = t("mr_lead", d.file);
+    const label = {ep: "EP", coach: t("mr_coach_exp"), player: t("mr_player_exp")};
+    $("#mrResult").innerHTML = ["win", "draw", "loss"].map(k => `<tr data-res="${k}"><td>${esc(t("mr_" + k))}</td>
+      ${Object.keys(label).map(f => `<td><input type="number" min="0" step="${f === "ep" ? 100 : 10}" value="${d.result[k][f]}" data-f="${f}" aria-label="${esc(t("mr_" + k))} ${esc(label[f])}"></td>`).join("")}</tr>`).join("");
+    $("#mrCards").innerHTML = d.cards.map(r => rowHtml("prizes", r)).join("");
+    mrChances();
   },
   async scout() {
     const s = await api("summary");
@@ -736,6 +764,27 @@ $("#dailyAdd").addEventListener("click", () => { const tb = readDaily(); tb.push
 $("#dailySave").addEventListener("click", () => act(async () => { await api("daily_set", {table: readDaily()}); await loaders.harian(); }, t("daily_saved")));
 $("#dailyGrant").addEventListener("click", () => act(async () => { const r = await api("daily_grant", {}); await loaders.harian(); say(t("sent_bag", r.title), "ok"); }));
 $("#dailyReset").addEventListener("click", () => { if (confirm(t("confirm_reset_streak"))) act(async () => { await api("daily_reset", {}); await loaders.harian(); }, t("streak_reset")); });
+function mrChances() {  // each card's chance = its weight / all weights
+  const rows = $$("#mrCards .r"), w = rows.map(r => Number($("[data-r=w]", r).value) || 0), sum = w.reduce((a, b) => a + b, 0);
+  rows.forEach((r, i) => {
+    if (!$(".chance", r)) $("[data-rowdel]", r).insertAdjacentHTML("beforebegin", `<span class="muted chance"></span>`);
+    $(".chance", r).textContent = t("mr_chance", sum ? (100 * w[i] / sum).toFixed(1) : 0);
+  });
+}
+$("#mrCards").addEventListener("input", mrChances);
+$("#mrCards").addEventListener("change", e => {
+  if (e.target.dataset.r === "prize") $("[data-r=ep]", e.target.closest(".r")).disabled = e.target.value !== "ep";
+});
+$("#mrCards").addEventListener("click", e => { if (e.target.hasAttribute("data-rowdel")) { e.target.closest(".r").remove(); mrChances(); } });
+$("#mrAdd").addEventListener("click", () => {
+  if ($$("#mrCards .r").length >= 10) return;
+  $("#mrCards").insertAdjacentHTML("beforeend", rowHtml("prizes", [10, {ep: 1000}])); mrChances();
+});
+$("#mrSave").addEventListener("click", () => act(async () => {
+  const result = Object.fromEntries($$("#mrResult tr").map(tr => [tr.dataset.res, Object.fromEntries($$("input", tr).map(i => [i.dataset.f, Number(i.value)]))]));
+  await api("match_rewards_set", {result, cards: readRows($("#mrCards"))});
+  await loaders.match();
+}, t("mr_saved")));
 $("#scoutReset").addEventListener("click", () => act(async () => { await api("scouts_reset", {}); await loaders.scout(); }, t("scouts_ready")));
 $("#logRefresh").addEventListener("click", () => loaders.log());
 setInterval(() => { if ($("#logAuto").checked && !$("#log").hidden) loaders.log(); }, 3000);

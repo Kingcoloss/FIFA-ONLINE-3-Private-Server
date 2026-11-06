@@ -35,7 +35,7 @@ Diuji di client asli (UI bahasa Indonesia):
   per level), manager LV.1-100.
 - Suara game dan musik menu EA Trax. `tools/eatrax_song.py` menaruh lagumu sendiri di urutan
   pertama, tapi game lalu crash setelah pertandingan (lihat masalah yang diketahui di bawah).
-- Halaman admin web di http://127.0.0.1:8088/ (EP, pemain, pak, hadiah, hadiah harian, Shop, log)
+- Halaman admin web di http://127.0.0.1:8088/ (EP, pemain, pak, hadiah, hadiah harian, hadiah match, Shop, log)
   dengan pilihan bahasa (issue #15): Bahasa Indonesia, English, 简体中文, ไทย, Tiếng Việt, 한국어;
   browser mengingat pilihannya.
 - Jersey klub asli di pertandingan (kit id = `teamid << 5 | type`; `<< 10` yang lama menghasilkan

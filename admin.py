@@ -25,7 +25,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PAGE = os.path.join(HERE, "admin", "index.html")
 POS_NAMES = "GK SW RWB RB RCB CB LCB LB LWB RDM CDM LDM RM RCM CM LCM LM RAM CAM LAM RF CF LF RW RS ST LS LW".split()
 API = {}
-READ_ONLY = {"summary", "players", "search", "packs", "daily", "log", "shop"}  # the rest must be POST + header
+READ_ONLY = {"summary", "players", "search", "packs", "daily", "match_rewards", "log", "shop"}  # the rest must be POST + header
 hc = None  # the http_config module, set by start() (or by tests)
 
 
@@ -75,6 +75,11 @@ def player(st, pid):
     if p is None:
         raise AdminError("e_player_missing")
     return p
+
+
+def rel(path):
+    """A settings file's path for the page: relative to the server folder when on its drive."""
+    return os.path.relpath(path, HERE) if os.path.splitdrive(path)[0] == os.path.splitdrive(HERE)[0] else path
 
 
 def as_int(v, lo, hi, what):
@@ -248,7 +253,7 @@ def bag_send(p):
 def daily(p):
     st = hc._state()
     return {"table": hc.daily_table(), "status": coach(st).get("daily") or {"last": "", "streak": 0, "total": 0},
-            "today": hc.today_wib(), "file": os.path.relpath(hc.DAILY_FILE, HERE)}
+            "today": hc.today_wib(), "file": rel(hc.DAILY_FILE)}
 
 
 @api("daily_set")
@@ -291,6 +296,28 @@ def daily_grant(p):
     e = hc.daily_login(st)
     hc._save(st)
     return {"title": e["title"] if e else None}
+
+
+@api("match_rewards")
+def match_rewards(p):
+    return {**hc.match_reward_cfg(), "file": rel(hc.MATCH_REWARD_FILE)}
+
+
+@api("match_rewards_set")
+def match_rewards_set(p):
+    """EP and exp by result plus the reward cards (gamedata/match_rewards.json, read at every match end)."""
+    res = p.get("result") or {}
+    result = {k: {"ep": as_int((res.get(k) or {}).get("ep"), 0, 10 ** 9, "EP"),
+                  "coach": as_int((res.get(k) or {}).get("coach"), 0, 10 ** 6, ("mr_coach_exp",)),
+                  "player": as_int((res.get(k) or {}).get("player"), 0, 10 ** 6, ("mr_player_exp",))}
+              for k in ("win", "draw", "loss")}
+    cards = [prize_row(w, prize) for w, prize in p.get("cards") or []]
+    if not 1 <= len(cards) <= 10:
+        raise AdminError("e_prizes")
+    cfg = {"result": result, "cards": cards}
+    with open(hc.MATCH_REWARD_FILE, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=1)
+    return cfg
 
 
 @api("scouts_reset")
@@ -351,8 +378,7 @@ def shop(p):
             "item_types": list(hc.SHOP_ITEM_TYPES), "positions": list(hc.POSITIONS),
             "seasons": [{"code": c, "label": label} for label, codes in hc.tc_seasons() for c in codes],
             "ep_item": hc.EP_ITEM, "es_item": hc.ES_ITEM,
-            "file": os.path.relpath(hc.SHOP_FILE, HERE) if os.path.splitdrive(hc.SHOP_FILE)[0] == os.path.splitdrive(HERE)[0]
-            else hc.SHOP_FILE}
+            "file": rel(hc.SHOP_FILE)}
 
 
 def save_shop(cfg):
@@ -404,6 +430,16 @@ def rows_of(rows, what, kinds, lo=1, hi=10):
     return out
 
 
+def prize_row(w, prize, not_id=None):
+    """[weight, {"ep": n} | itemid of a pack or item] from a prize row of the page."""
+    w = as_int(w, 1, 1000, ("f_weight",))
+    if isinstance(prize, dict):
+        return [w, {"ep": as_int(prize.get("ep"), 1, 10 ** 12, "EP")}]
+    if int(prize) != not_id and known(prize, "packs", "items"):
+        return [w, int(prize)]
+    raise AdminError("e_unknown_prize", prize)
+
+
 def check_def(kind, d, itemid):
     """A clean shop.json entry from the page's form, or AdminError."""
     name = text(d.get("name"), ("f_name",))
@@ -429,15 +465,7 @@ def check_def(kind, d, itemid):
                 raise AdminError("e_ep_range")
             out["ep"] = [lo, hi]
         elif t == "ITEM_LOTTERY":
-            prizes = []
-            for w, prize in d.get("prizes") or []:
-                w = as_int(w, 1, 1000, ("f_weight",))
-                if isinstance(prize, dict):
-                    prizes.append([w, {"ep": as_int(prize.get("ep"), 1, 10 ** 12, "EP")}])
-                elif int(prize) != itemid and known(prize, "packs", "items"):
-                    prizes.append([w, int(prize)])
-                else:
-                    raise AdminError("e_unknown_prize", prize)
+            prizes = [prize_row(w, prize, itemid) for w, prize in d.get("prizes") or []]
             if not 1 <= len(prizes) <= 10:  # the box screen shows up to 10 (cardCandidate0..9)
                 raise AdminError("e_prizes")
             out["prizes"] = prizes
@@ -692,6 +720,7 @@ I18N = {
         drop_day="Hapus hari", daily_add="Tambah hari", daily_save="Simpan tabel", f_total="Total hari login", f_last="Terakhir dapat hadiah",
         never="belum pernah", f_today_wib="Hari ini (WIB)", daily_saved="Tabel hadiah harian disimpan.", sent_bag="\"{0}\" dikirim ke Bag.",
         confirm_reset_streak="Reset streak login ke 0?", streak_reset="Streak direset.",
+        nav_match="Hadiah match", mr_title="Hadiah match", mr_lead="Diberikan setelah setiap match yang dimainkan dan setiap Simulasi Liga: EP dan EXP menurut hasil, lalu tiga kartu hadiah. Kartu yang dibuka pemain diambil acak dari daftar kartu menurut bobotnya. Tersimpan di {0}; berlaku mulai match berikutnya.", mr_result="Menurut hasil", th_result="Hasil", mr_win="Menang", mr_draw="Seri", mr_loss="Kalah", mr_coach_exp="EXP manajer", mr_player_exp="EXP tiap pemain", mr_cards="Kartu hadiah", mr_chance="peluang {0}%", mr_saved="Hadiah match disimpan.",
         scout_title="Scout (Tukar Scout)", scout_lead="Scout yang baru dipakai terkunci sampai cooldown habis.", th_available="Tersedia lagi",
         locked="terkunci", ready="siap dipakai", now="sekarang", no_quest="tanpa quest", scout_reset="Reset cooldown semua scout",
         scouts_ready="Semua scout siap dipakai lagi.", q_value="nilai pemain ≥", q_grade="grade ≥", q_count="jumlah", q_season="musim",
@@ -767,6 +796,7 @@ I18N = {
         drop_day="Remove day", daily_add="Add a day", daily_save="Save table", f_total="Days logged in", f_last="Last reward",
         never="never", f_today_wib="Today (WIB)", daily_saved="Daily reward table saved.", sent_bag="\"{0}\" sent to the Bag.",
         confirm_reset_streak="Reset the login streak to 0?", streak_reset="Streak reset.",
+        nav_match="Match rewards", mr_title="Match rewards", mr_lead="Given after every played match and every Liga simulation: EP and exp by result, then three reward cards. The card the player opens is drawn from the card list by weight. Saved in {0}; used from the next match.", mr_result="By result", th_result="Result", mr_win="Win", mr_draw="Draw", mr_loss="Loss", mr_coach_exp="Manager exp", mr_player_exp="Exp per player", mr_cards="Reward cards", mr_chance="chance {0}%", mr_saved="Match rewards saved.",
         scout_title="Scouts (Tukar Scout)", scout_lead="A scout just used stays locked until its cooldown ends.", th_available="Available again",
         locked="locked", ready="ready", now="now", no_quest="no quest", scout_reset="Reset every scout's cooldown",
         scouts_ready="Every scout is ready again.", q_value="player value ≥", q_grade="grade ≥", q_count="count", q_season="season",
@@ -844,6 +874,7 @@ I18N = {
         drop_day="删除这一天", daily_add="添加一天", daily_save="保存奖励表", f_total="累计登录天数", f_last="上次领奖",
         never="从未", f_today_wib="今天（WIB）", daily_saved="每日奖励表已保存。", sent_bag="“{0}”已发送到 Bag。",
         confirm_reset_streak="把连续登录重置为 0？", streak_reset="连续登录已重置。",
+        nav_match="比赛奖励", mr_title="比赛奖励", mr_lead="每场比赛结束后和每次联赛模拟后发放：按结果给 EP 和经验，然后发三张奖励卡。玩家翻开的卡按权重从卡片列表中随机抽取。保存在 {0}；从下一场比赛开始生效。", mr_result="按结果", th_result="结果", mr_win="胜", mr_draw="平", mr_loss="负", mr_coach_exp="经理经验", mr_player_exp="每名球员经验", mr_cards="奖励卡", mr_chance="概率 {0}%", mr_saved="比赛奖励已保存。",
         scout_title="球探（Tukar Scout）", scout_lead="刚用过的球探会锁定，直到冷却结束。", th_available="再次可用",
         locked="已锁定", ready="可用", now="现在", no_quest="无任务", scout_reset="重置所有球探的冷却",
         scouts_ready="所有球探已可再次使用。", q_value="球员身价 ≥", q_grade="强化等级 ≥", q_count="数量", q_season="赛季",
@@ -920,6 +951,7 @@ I18N = {
         drop_day="ลบวัน", daily_add="เพิ่มวัน", daily_save="บันทึกตาราง", f_total="จำนวนวันที่ล็อกอิน", f_last="ได้รางวัลล่าสุด",
         never="ยังไม่เคย", f_today_wib="วันนี้ (WIB)", daily_saved="บันทึกตารางรางวัลรายวันแล้ว", sent_bag="ส่ง \"{0}\" ไปที่ Bag แล้ว",
         confirm_reset_streak="รีเซ็ตการล็อกอินต่อเนื่องเป็น 0?", streak_reset="รีเซ็ตการล็อกอินต่อเนื่องแล้ว",
+        nav_match="รางวัลหลังแมตช์", mr_title="รางวัลหลังแมตช์", mr_lead="มอบให้หลังทุกแมตช์ที่เล่นและทุกครั้งที่จำลองลีก: EP และ EXP ตามผลการแข่งขัน แล้วมีการ์ดรางวัลสามใบ การ์ดที่ผู้เล่นเปิดจะสุ่มจากรายการการ์ดตามน้ำหนัก บันทึกไว้ที่ {0} ใช้ตั้งแต่แมตช์ถัดไป", mr_result="ตามผลการแข่งขัน", th_result="ผล", mr_win="ชนะ", mr_draw="เสมอ", mr_loss="แพ้", mr_coach_exp="EXP ผู้จัดการ", mr_player_exp="EXP ต่อผู้เล่น", mr_cards="การ์ดรางวัล", mr_chance="โอกาส {0}%", mr_saved="บันทึกรางวัลหลังแมตช์แล้ว",
         scout_title="แมวมอง (Tukar Scout)", scout_lead="แมวมองที่เพิ่งใช้จะถูกล็อกจนกว่าคูลดาวน์จะหมด", th_available="ใช้ได้อีกครั้ง",
         locked="ล็อกอยู่", ready="พร้อมใช้", now="ตอนนี้", no_quest="ไม่มีเควสต์", scout_reset="รีเซ็ตคูลดาวน์ของแมวมองทั้งหมด",
         scouts_ready="แมวมองทั้งหมดพร้อมใช้อีกครั้ง", q_value="มูลค่านักเตะ ≥", q_grade="เกรด ≥", q_count="จำนวน", q_season="ซีซั่น",
@@ -996,6 +1028,7 @@ I18N = {
         drop_day="Xóa ngày", daily_add="Thêm ngày", daily_save="Lưu bảng", f_total="Tổng số ngày đăng nhập", f_last="Lần nhận quà gần nhất",
         never="chưa bao giờ", f_today_wib="Hôm nay (WIB)", daily_saved="Đã lưu bảng quà hằng ngày.", sent_bag="Đã gửi \"{0}\" vào Bag.",
         confirm_reset_streak="Đặt lại chuỗi đăng nhập về 0?", streak_reset="Đã đặt lại chuỗi đăng nhập.",
+        nav_match="Thưởng sau trận", mr_title="Thưởng sau trận", mr_lead="Trao sau mỗi trận đã đá và mỗi lần mô phỏng Liga: EP và EXP theo kết quả, rồi ba thẻ thưởng. Thẻ người chơi lật được rút ngẫu nhiên từ danh sách thẻ theo trọng số. Lưu trong {0}; áp dụng từ trận tiếp theo.", mr_result="Theo kết quả", th_result="Kết quả", mr_win="Thắng", mr_draw="Hòa", mr_loss="Thua", mr_coach_exp="EXP huấn luyện viên", mr_player_exp="EXP mỗi cầu thủ", mr_cards="Thẻ thưởng", mr_chance="tỉ lệ {0}%", mr_saved="Đã lưu thưởng sau trận.",
         scout_title="Tuyển trạch viên (Tukar Scout)", scout_lead="Tuyển trạch viên vừa dùng sẽ bị khóa đến khi hết thời gian hồi.", th_available="Dùng lại được lúc",
         locked="đang khóa", ready="sẵn sàng", now="ngay bây giờ", no_quest="không có nhiệm vụ", scout_reset="Đặt lại thời gian hồi của mọi tuyển trạch viên",
         scouts_ready="Mọi tuyển trạch viên đã sẵn sàng.", q_value="giá trị cầu thủ ≥", q_grade="cấp ≥", q_count="số lượng", q_season="mùa",
@@ -1072,6 +1105,7 @@ I18N = {
         drop_day="이 날 삭제", daily_add="날 추가", daily_save="표 저장", f_total="총 로그인 일수", f_last="마지막 보상",
         never="없음", f_today_wib="오늘(WIB)", daily_saved="출석 보상 표를 저장했습니다.", sent_bag="\"{0}\"을(를) Bag으로 보냈습니다.",
         confirm_reset_streak="연속 로그인을 0으로 초기화할까요?", streak_reset="연속 로그인을 초기화했습니다.",
+        nav_match="경기 보상", mr_title="경기 보상", mr_lead="플레이한 모든 경기와 리그 시뮬레이션 뒤에 지급됩니다: 결과에 따른 EP와 경험치, 그리고 보상 카드 3장. 선수가 여는 카드는 카드 목록에서 가중치에 따라 무작위로 뽑힙니다. {0}에 저장되며 다음 경기부터 적용됩니다.", mr_result="결과별", th_result="결과", mr_win="승", mr_draw="무", mr_loss="패", mr_coach_exp="감독 경험치", mr_player_exp="선수당 경험치", mr_cards="보상 카드", mr_chance="확률 {0}%", mr_saved="경기 보상을 저장했습니다.",
         scout_title="스카우트(Tukar Scout)", scout_lead="방금 쓴 스카우트는 쿨다운이 끝날 때까지 잠깁니다.", th_available="다시 사용 가능",
         locked="잠김", ready="사용 가능", now="지금", no_quest="퀘스트 없음", scout_reset="모든 스카우트 쿨다운 초기화",
         scouts_ready="모든 스카우트를 다시 쓸 수 있습니다.", q_value="선수 가치 ≥", q_grade="강화 등급 ≥", q_count="수량", q_season="시즌",

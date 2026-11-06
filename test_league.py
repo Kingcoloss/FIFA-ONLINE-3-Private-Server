@@ -31,6 +31,7 @@ def main():
     try:
         hc.STATE = os.path.join(tmp, "state.json")
         hc.SHOP_FILE = os.path.join(tmp, "shop.json"); hc.apply_shop({})  # the built-in Shop, not the live edits
+        hc.MATCH_REWARD_FILE = os.path.join(tmp, "match_rewards.json")  # default match rewards; admin test writes here
         # a fresh account through the client's club creation (the live state may hold no manager)
         hc._save({"coaches": [], "defaultcoachid": "", "teams": {}})
         with open(os.path.join(hc.RESPONSES, "static_info_authentic_team_all_241.json")) as f:
@@ -262,7 +263,7 @@ def main():
                 assert got["result"]["home"]["score"] == 2 and got["stage"] == "closed"
                 assert got["reward"]["money"]["reward"]["total"] == (2000 if home == me else 500)
                 # exp: coach by result, each of my 11 players by result (+20 for a goal); kept
-                rw, cexp = got["reward"], hc.EXP_WIN[0] if home == me else hc.EXP_LOSS[0]
+                rw, cexp = got["reward"], hc.MATCH_REWARD_DEFAULT["result"]["win" if home == me else "loss"]["coach"]
                 assert rw["coach"]["prev"] == lv0 and rw["coach"]["reward"]["total"] == cexp
                 assert hc.coach_me(hc._state(), 0)["levelinfo"] == rw["coach"]["current"]
                 assert len(rw["players"]) == 11 and rw["players"][0]["reward"]["total"] == rw["players"][1]["reward"]["total"] + 20
@@ -869,6 +870,21 @@ def main():
         A("daily_reset")
         assert A("daily_grant")["title"].endswith("hari ke-1") and A("daily_grant")["title"].endswith("hari ke-2")
         assert [b["items"] for b in body(hc.ENDPOINTS["/bag"]("", b""))] == [hc.reward_items(r) for r in tbl]
+        # --- match rewards (user: "tambahkan di admin page untuk setting reward hadiah match")
+        assert A("match_rewards")["cards"] == hc.MATCH_REWARD_DEFAULT["cards"]
+        res = {k: {"ep": 7000, "coach": 50, "player": 40} for k in ("win", "draw", "loss")}
+        cfg = A("match_rewards_set", result=res, cards=[[1, {"ep": 777}], [2, pid]])
+        assert cfg == {"result": res, "cards": [[1, {"ep": 777}], [2, pid]]} and hc.match_reward_cfg() == cfg
+        ep1, n1, st = ep(), items()[0]["remains"], hc._state()
+        rw = hc.match_reward(st, {"myTeam": "home", "opponentTeam": "away", "home": {"score": 1}, "away": {"score": 0}})
+        hc._save(st)
+        assert rw["money"]["reward"]["total"] == 7000 and rw["coach"]["reward"]["total"] == 50
+        assert {c["itemid"] for c in rw["extra"]["availables"]} <= {hc.EP_ITEM, pid}
+        mine = rw["extra"]["availables"][0]  # the opened card is credited
+        assert (ep(), items()[0]["remains"]) == ((ep1 + 777, n1) if mine["itemid"] == hc.EP_ITEM else (ep1, n1 + 1))
+        assert refused("match_rewards_set", result=res, cards=[[1, 2]]) and refused("match_rewards_set", result=res, cards=[])
+        assert refused("match_rewards_set", result={}, cards=[[1, {"ep": 1}]])
+        os.remove(hc.MATCH_REWARD_FILE)
         # --- Shop control (issue #10; user: "kontrol shop semua tab, bisa buat pack baru, paket baru
         # dll"): new pack / item / package / monthly with the client's icons, prices, hidden, tab lists
         sh = A("shop")

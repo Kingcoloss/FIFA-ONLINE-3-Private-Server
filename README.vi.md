@@ -37,7 +37,7 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   cấp HLV / cầu thủ: EXP sau mỗi trận, cầu thủ LV.1-23 (+1 mọi chỉ số mỗi cấp), HLV LV.1-100.
 - Âm thanh game và nhạc menu EA Trax. `tools/eatrax_song.py` đặt bài hát của bạn lên đầu, nhưng sau đó
   game bị crash sau mỗi trận (xem lỗi đã biết bên dưới).
-- Trang quản trị web tại http://127.0.0.1:8088/ (EP, cầu thủ, gói, quà, quà hằng ngày, Cửa hàng, nhật ký)
+- Trang quản trị web tại http://127.0.0.1:8088/ (EP, cầu thủ, gói, quà, quà hằng ngày, thưởng sau trận, Cửa hàng, nhật ký)
   có chọn ngôn ngữ (issue #15): Bahasa Indonesia, English, 简体中文, ไทย, Tiếng Việt, 한국어; trình duyệt
   nhớ lựa chọn.
 - Áo đấu CLB thật trong trận (kit id = `teamid << 5 | type`; kiểu cũ `<< 10` hiện thành ô bàn cờ).

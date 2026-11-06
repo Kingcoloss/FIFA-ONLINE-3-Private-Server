@@ -33,7 +33,7 @@ Tested in the real client (Indonesian UI):
   (+1 to every attribute per level), manager LV.1-100.
 - Game sound and the EA Trax menu music. `tools/eatrax_song.py` puts your own song first in it,
   but the game then crashes after matches (see the known issue below).
-- Admin web page on http://127.0.0.1:8088/ (EP, players, packs, gifts, daily rewards, Shop, log)
+- Admin web page on http://127.0.0.1:8088/ (EP, players, packs, gifts, daily rewards, match rewards, Shop, log)
   with a language switch (issue #15): Bahasa Indonesia, English, 简体中文, ไทย, Tiếng Việt, 한국어;
   the browser remembers the choice.
 - Real club kits in matches (kit id = `teamid << 5 | type`; the old `<< 10` gave a checkerboard).

@@ -716,7 +716,6 @@ def new_iid():
 # EXPCOACH {level: {totalexp}} = exp to finish levels 1..level (TeamManagementCoachExpScreen),
 # max from STATICVALUES/max_coachlevel. The original tables were server data; curves made up.
 PLAYER_MAX_LEVEL, COACH_MAX_LEVEL = 23, 100
-EXP_WIN, EXP_DRAW, EXP_LOSS = (300, 150), (200, 100), (100, 60)  # (coach, each player who played)
 
 
 def player_need(level):
@@ -2110,15 +2109,33 @@ def match_cards(st, stats):
 # card 4 is the PC-bang one) and turns no request on a click: the pick is the server's. The
 # clicked card shows extra.availables[extra.selected.normal[0]] (RewardCardFront.setItemData:
 # staticdata name/unit/itemicon, count) and openRestCards shows the others on the rest; the
-# top-level selected {type: [index]} takes the picked ones out of that rest. Prizes as in
-# ITEMS' random boxes: (weight, ("ep", amount) | itemid).
-MATCH_CARDS = [(30, ("ep", 1_000)), (25, ("ep", 3_000)), (15, ("ep", 5_000)), (8, ("ep", 10_000)),
-               (10, 92000000), (7, 92000014), (5, 501)]  # Semua Pemain, '14 Top 200, Lucky EP
+# top-level selected {type: [index]} takes the picked ones out of that rest.
+# The admin page edits all of it (gamedata/match_rewards.json): EP and exp (coach, each of my
+# players) by result, and the cards [[weight, itemid | {"ep": amount}]] as in shop.json's boxes.
+MATCH_REWARD_FILE = os.path.join(HERE, "gamedata", "match_rewards.json")
+MATCH_REWARD_DEFAULT = {
+    "result": {"win": {"ep": 2000, "coach": 300, "player": 150}, "draw": {"ep": 1000, "coach": 200, "player": 100},
+               "loss": {"ep": 500, "coach": 100, "player": 60}},
+    "cards": [[30, {"ep": 1000}], [25, {"ep": 3000}], [15, {"ep": 5000}], [8, {"ep": 10000}],
+              [10, 92000000], [7, 92000014], [5, 501]]}  # Semua Pemain, '14 Top 200, Lucky EP
+
+
+def match_reward_cfg():
+    try:
+        with open(MATCH_REWARD_FILE, encoding="utf-8") as f:
+            return {**MATCH_REWARD_DEFAULT, **json.load(f)}
+    except (OSError, ValueError):
+        return MATCH_REWARD_DEFAULT
 
 
 def match_cards_reward(st):
-    """extra/selected of match.reward: three cards, the first is mine (credited here)."""
-    cards = random.choices([p for _, p in MATCH_CARDS], [w for w, _ in MATCH_CARDS], k=3)
+    """extra/selected of match.reward: three cards, the first is mine (credited here). A card
+    whose product is gone from the Shop is skipped (its staticdata would fail)."""
+    pool = [(w, ("ep", p["ep"]) if isinstance(p, dict) else p) for w, p in match_reward_cfg()["cards"]
+            if isinstance(p, dict) or p in ITEMS or p in PACKS]
+    if not pool:
+        return {"extra": {"selected": {}, "availables": []}, "selected": {}}
+    cards = random.choices([p for _, p in pool], [w for w, _ in pool], k=3)
     if isinstance(cards[0], tuple):
         add_ep(st, cards[0][1])
     else:
@@ -2135,8 +2152,8 @@ def match_reward(st, stats):
     me, opp = stats.get("myTeam", "home"), stats.get("opponentTeam", "away")
     g = lambda s: int((stats.get(s) or {}).get("score") or 0)
     won, drew = g(me) > g(opp), g(me) == g(opp)
-    ep = 2000 if won else 1000 if drew else 500
-    cexp, pexp = EXP_WIN if won else EXP_DRAW if drew else EXP_LOSS
+    r = match_reward_cfg()["result"]["win" if won else "draw" if drew else "loss"]
+    ep, cexp, pexp = r["ep"], r["coach"], r["player"]
     reward = lambda n: {"total": n, "detail": {"base": n, "extra": 0}}
     prev, cur = gain_exp(my_coach(st), cexp, coach_need, COACH_MAX_LEVEL)
     players = []
