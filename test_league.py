@@ -71,7 +71,13 @@ def main():
         # the reply carries the saved options: AccountCommand.saveGameOption reads resources[0].body
         # (OptionManager's backup for every zone change; none = login options back in a match, issue #21)
         opt = r["resources"][0]["body"]
-        assert opt == body(hc.ENDPOINTS["/account"]("", b""))["option"] and opt["controlOption"] == mine and opt["cameraOption"] == cam
+        assert opt == body(hc.ENDPOINTS["/account"]("", b""))["option"] and opt["controlOption"] == mine
+        assert opt["cameraOption"] == {**hc.CAMERA_DEFAULTS, **cam}
+        # Opsi > Kamera: every gauge has a value (none = empty, could not be stepped, issue #24); a
+        # null saved while one was NaN gets the default
+        save_opt({"cameraOption": {"Camera": 1, "CamDetail": 1, "CamHeight": None, "CamZoom": 14}})
+        assert body(hc.ENDPOINTS["/account"]("", b""))["option"]["cameraOption"] == dict(
+            hc.CAMERA_DEFAULTS, Camera=1, CamDetail=1, CamHeight=10, CamZoom=14)
         save_opt({"soundOption": {"BGM": 4}, "controlOption": {}})  # e.g. leaving a match
         assert acc_ctl() == mine and body(hc.ENDPOINTS["/account"]("", b""))["option"]["soundOption"]["BGM"] == 4
         save_opt({"soundOption": {"BGM": 10}, "controlOption": hc.CONTROL_DEFAULTS})
@@ -140,6 +146,17 @@ def main():
         assert city["teamid"] == 10 == city["summary"]["id"] and len(city["team"]["squad"]["positions"]) == 11
         assert city["team"]["captain"] in {p["id"] for p in city["team"]["players"]}
         assert hc.roster(243)["summary"]["teamgrade"] == 5.0 and hc.roster(243)["summary"]["id"] == 243
+        # national teams = their players' nationalteamid (most are at clubs): Italy (1343) is in the
+        # International league with Italians only (issue #24); that nation stays last in the picker
+        intl = clubs[str(hc.gen_teams.NATIONAL_LEAGUE)]
+        assert 1343 in intl and len(intl) >= 40 and -1 not in intl
+        assert str(hc.gen_teams.NATIONAL_LEAGUE) in {str(lg) for lg in leagues[str(nations[-1])]}
+        ita = hc.roster(1343)
+        assert ita["summary"]["league"]["id"] == 78 and ita["summary"]["nation"]["id"] == 27
+        with hc.closing(hc._db()) as c:
+            ita_nat = {r[0] for r in c.execute(f"SELECT nationality FROM players WHERE spid IN ({','.join(str(p['spid']) for p in ita['team']['players'])})")}
+        assert ita_nat == {27} and len(ita["team"]["players"]) >= 18
+        assert not hc.roster(-1)["team"]["players"] and not hc.roster(0)["team"]["players"]  # nationalteamid -1 = none
 
         assert "league" not in body(hc.ep_l2_me("", b""))  # -> creation screen
         offer = body(hc.route("/league2/sponsor/12")("", b"{}"))

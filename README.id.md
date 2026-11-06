@@ -147,6 +147,12 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   liga, rival, stadion, tahun dibangun, dan kapasitas, serta pemainmu dengan seragam klub baru beserta
   tanggal lahir, tinggi, dan berat. Info klub dari server dulu tidak memuat semua itu, dan tanpa
   seragam pemain 3D tidak pernah digambar.
+- **Tinggi dan zoom kamera bisa diatur** (issue #24): di Opsi > Kamera setting, gauge Customise (tinggi dan
+  zoom; zoom, kecepatan, dan ayunan untuk kamera Pro) dulu kosong dan tidak bisa diubah karena
+  server mengirim setelan kamera kosong. Sekarang mulai dari 10 (dari 20).
+- **Semua timnas ada di Tim lain** (issue #24): liga Internasional (negara terakhir di daftar) berisi
+  40 timnas, termasuk Italia, Inggris, Jerman, Spanyol, dan Prancis. Skuad timnas diambil dari
+  tautan timnas tiap pemain; dulu hanya timnas yang pemainnya tanpa klub berlisensi yang muncul.
 - **Kotak acak bisa dibuka** (Kotak Platinum dan lainnya, issue #12): layar kotak menampilkan
   hadiahnya dari `staticdata.availables`, yang belum ada, jadi tiap kotak gagal saat "Gunakan".
 - **Kartu baru masuk Tim Cadangan**: kartu dari pak, trade, Market, Bag, atau halaman admin tampil

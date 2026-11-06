@@ -138,6 +138,13 @@ Added, passing the tests but not yet checked in the client:
   league, rival, stadium, year built and capacity, and your player in the new club's kit with
   birth date, height and weight. The server's club info had none of these, and without the kit
   the 3D player was never drawn.
+- **Camera height and zoom can be changed** (issue #24): in Opsi > Kamera setting the Customise gauges
+  (height and zoom; zoom, speed and swing for the Pro camera) had no value and could not be
+  changed, because the server sent an empty camera setting. They now start at 10 (of 20).
+- **Every national team in Tim lain** (issue #24): the International league (the last nation in
+  the list) has 40 national teams, Italy, England, Germany, Spain and France among them. A
+  national team's squad comes from each player's national-team link; before, only teams whose
+  players had no licensed club were listed.
 - **Random boxes open** (Kotak Platinum and the rest, issue #12): the box screen lists its prizes
   from `staticdata.availables`, which was missing, so every box failed at "Gunakan".
 - **New cards join Tim Cadangan**: a card from a pack, a trade, the Market, the Bag or the admin

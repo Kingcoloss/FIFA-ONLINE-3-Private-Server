@@ -264,6 +264,15 @@ POS_SUB = 28  # Enums.PLAYERPOSITION: 0..27 pitch positions, 28 SUB, 29.. RESERV
 # PAVolume, PlayerCalls, SFX, Crowd and BGM; a missing key is NaN = silent (no music).
 SOUND_DEFAULTS = {"Master": 10, "Commentary": 10, "PAVolume": 10, "PlayerCalls": 10, "SFX": 10, "Crowd": 10, "BGM": 10}
 
+# Opsi > Kamera setting (OptionCameraSettingScreen) shows and steps OptionManager.cameraOption
+# as-is: Camera 0..6 (F3..F9: TELE_BROADCAST, TELE, COOP, DYNAMIC, ENDTOEND, PRO, BROADCAST),
+# CamDetail (Customise off/on), CamHeight/CamZoom (0..20, the custom gauges of every camera but Pro) and
+# CamProZoom/CamProSpeed/CamProSwing (0..20, Pro only). OptionManager fills none of them: a
+# missing key showed no value and could not be stepped (NaN + 1, issue #24). Defaults are
+# OptionManager.OPTION_DEFAULT_CAM_* (10); Camera 0 = what native got from the missing key.
+CAMERA_DEFAULTS = {"Camera": 0, "CamDetail": 0, "CamHeight": 10, "CamZoom": 10,
+                   "CamProZoom": 10, "CamProSpeed": 10, "CamProSwing": 10}
+
 # Opsi > Kontrol (OptionControlSettingScreen) edits OptionManager.controlOption in place and
 # Konfirmasi applies it (applyControlSetting -> native onOptionControlSettingChanged) and sends it
 # back. With no controlOption it edits a throwaway copy, so key changes were never applied or
@@ -302,6 +311,9 @@ def account_option():
         opt = json.load(f)["option"]
     opt.update(_state().get("option", {}))
     opt["soundOption"] = {**SOUND_DEFAULTS, **(opt.get("soundOption") or {})}
+    # a gauge stepped while it was NaN came back as null/NaN: such a value gets the default
+    opt["cameraOption"] = {**CAMERA_DEFAULTS, **{k: v for k, v in (opt.get("cameraOption") or {}).items()
+                                                 if isinstance(v, (int, float)) and math.isfinite(v)}}
     if not control_option_ok(opt.get("controlOption")):
         opt["controlOption"] = CONTROL_DEFAULTS
     return opt
@@ -1651,17 +1663,20 @@ _CLUBS = []
 
 def club_index():
     """[(nationid, [(leagueid, [teamid])])] of clubs with a full 2017 squad, strongest first (by
-    their best eleven); a league's nation is its players' most common nationality."""
+    their best eleven); a league's nation is its players' most common nationality. National
+    teams are league 78 with their players' nationalteamid as the squad (gen_teams.team)."""
     if not _CLUBS:
         with closing(_db()) as c:
-            rows = c.execute(f"""SELECT p.leagueid, p.teamid, p.nationality, {POSOVR} FROM players p
-                                 JOIN permid m ON m.spid = p.spid AND m.licensed = 1 WHERE p.spid / 1000000 = ?""",
-                             (gen_teams.CURRENT_SEASON,)).fetchall()
+            rows = c.execute(f"""SELECT p.spid, p.leagueid, p.teamid, p.nationalteamid, p.nationality, {POSOVR}
+                                 FROM players p JOIN permid m ON m.spid = p.spid AND m.licensed = 1
+                                 WHERE p.spid / 1000000 = ?""", (gen_teams.CURRENT_SEASON,)).fetchall()
         squads, nats = {}, {}
-        for lid, tid, nat, ovr in rows:
-            squads.setdefault((lid, tid), []).append(ovr)
+        for spid, lid, tid, ntid, nat, ovr in rows:
+            squads.setdefault((lid, tid), {})[spid] = ovr
+            if ntid > 0:  # -1 / 0 = none
+                squads.setdefault((gen_teams.NATIONAL_LEAGUE, ntid), {})[spid] = ovr
             nats.setdefault(lid, collections.Counter())[nat] += 1
-        power = {k: sum(sorted(v)[-11:]) / 11 for k, v in squads.items() if len(v) >= CLUB_MIN_PLAYERS}
+        power = {k: sum(sorted(v.values())[-11:]) / 11 for k, v in squads.items() if len(v) >= CLUB_MIN_PLAYERS}
         leagues = {}
         for (lid, tid), p in power.items():
             leagues.setdefault(lid, []).append((p, tid))
@@ -1669,8 +1684,10 @@ def club_index():
         for lid, teams in leagues.items():
             teams.sort(reverse=True)
             by_nation.setdefault(nats[lid].most_common(1)[0][0], []).append((teams[0][0], lid, [t for _, t in teams]))
+        # the national teams' nation last (they made it the strongest; the picker opens on the first)
         _CLUBS.extend((n, [(lid, ts) for _, lid, ts in sorted(ls, reverse=True)])
-                      for n, ls in sorted(by_nation.items(), key=lambda kv: -max(l[0] for l in kv[1])))
+                      for n, ls in sorted(by_nation.items(), key=lambda kv: (
+                          any(l[1] == gen_teams.NATIONAL_LEAGUE for l in kv[1]), -max(l[0] for l in kv[1]))))
     return _CLUBS
 
 

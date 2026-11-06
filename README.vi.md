@@ -136,6 +136,13 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   giờ hiện giải đấu, đối thủ derby, sân nhà, năm xây và sức chứa, cùng cầu thủ của bạn trong áo đấu của câu lạc bộ
   mới với ngày sinh, chiều cao và cân nặng. Trước đây thông tin câu lạc bộ từ máy chủ không có những thứ này, và
   không có áo đấu thì cầu thủ 3D không bao giờ được vẽ.
+- **Chỉnh được độ cao và zoom camera** (issue #24): trong Opsi > Kamera setting, các thanh Customise (độ cao
+  và zoom; với camera Pro là zoom, tốc độ và độ lắc) trước đây không có giá trị và không chỉnh được,
+  vì máy chủ gửi thiết lập camera rỗng. Giờ chúng bắt đầu ở 10 (trên 20).
+- **Có đủ đội tuyển quốc gia trong Tim lain** (issue #24): giải International (quốc gia cuối cùng
+  trong danh sách) có 40 đội tuyển, trong đó có Ý, Anh, Đức, Tây Ban Nha và Pháp. Đội hình đội tuyển
+  lấy từ liên kết đội tuyển của từng cầu thủ; trước đây chỉ có các đội mà cầu thủ không thuộc câu lạc
+  bộ có bản quyền.
 - **Mở được hộp ngẫu nhiên** (Kotak Platinum và các hộp khác, issue #12): màn hình hộp liệt kê phần thưởng
   từ `staticdata.availables`, trước đây bị thiếu, nên mọi hộp đều lỗi khi bấm "Gunakan" (dùng).
 - **Thẻ mới vào Tim Cadangan**: thẻ từ gói, giao dịch, Market, Bag hoặc trang quản trị hiện "-" ở cột Tim

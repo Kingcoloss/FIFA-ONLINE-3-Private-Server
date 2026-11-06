@@ -8,7 +8,7 @@ and calls PlayerListUtil.createPlayerList(item.team, false). Players are sent as
 keys, which JSON cannot express). squad.positions = [{spid, pos}] with pos an index into
 Enums.PLAYERPOSITION; players not in positions become reserves. The detail button reads
 /static/info/authentic/team/all/<teamid> as {summary, team}. Rosters are the real teamid
-links in fifadb (base cards preferred).
+links in fifadb (base cards preferred); a national team's are its players' nationalteamid.
 
 Usage: python gen_teams.py [teamid ...]   (default: clubs whose crest is in the game cache)
 """
@@ -54,6 +54,10 @@ def jersey_name(c, playerid):
 
 
 CURRENT_SEASON = 88  # spid // 1e6 of the "2017" cards (fifaaddict season badge y2088)
+# fifadb leagueid of the national teams ("International"). A national team's squad is its
+# players' nationalteamid: most of them are at clubs (teamid = the club), so building it from
+# teamid alone left out Italy, England, Germany, Spain, ... (GitHub issue #24).
+NATIONAL_LEAGUE = 78
 
 
 def team_grade(avg):
@@ -71,9 +75,13 @@ def _hc():
 
 def team(c, teamid):
     hc = _hc()
+    if teamid <= 0:  # no card has one; nationalteamid -1 = none (would match 53k cards)
+        return None
     rows = c.execute("""SELECT p.* FROM players p JOIN permid m ON m.spid = p.spid AND m.licensed = 1
-                        WHERE p.teamid = ? ORDER BY (p.spid / 1000000 != ?), (p.spid < 1000000), p.spid""",
+                        WHERE ? IN (p.teamid, p.nationalteamid)
+                        ORDER BY (p.spid / 1000000 != ?), (p.spid < 1000000), p.spid""",
                      (teamid, CURRENT_SEASON)).fetchall()
+    national = any(r["nationalteamid"] == teamid for r in rows)
     best = {}
     # the club's current-season cards (as on fifaaddict); older seasons (former players, e.g.
     # a 2006 Ronaldinho at Barcelona) and season 0 (engine template cards, ratings 120+, not on
@@ -109,7 +117,7 @@ def team(c, teamid):
     squad = {"positions": positions, "captain": rows[0]["spid"], "kickers": starters[-5:], "formation": FORMATION_ID}
     formations = [{"formationid": FORMATION_ID, "formationname": "4-4-2",
                    "positions": [f[0] for f in FORMATION], "offsets": [{"x": f[1], "y": f[2]} for f in FORMATION]}]
-    league = max(set(r["leagueid"] for r in rows), key=[r["leagueid"] for r in rows].count)
+    league = NATIONAL_LEAGUE if national else max(set(r["leagueid"] for r in rows), key=[r["leagueid"] for r in rows].count)
     nation = max(set(r["nationality"] for r in rows), key=[r["nationality"] for r in rows].count)
     name, rival = TEAM_INFO.get(teamid, ("", ""))
     # TeamInfoNew (club confirmation popup): TEAMNAME + crest by id, ovr.FW/MF/DF bars and
