@@ -200,6 +200,9 @@ def main():
                 for s, t in ((res["myTeam"], 0), (res["opponentTeam"], 1)):
                     assert len(res[s]["players"]) == 11 and sum(p["goals"] for p in res[s]["players"]) == res[s]["score"]
                     assert {p["spid"] for p in res[s]["players"]} == {x % 1000000 for x in xi[t]}
+                    # each at his squad position on the result screen's pitch, not all at the goal (issue #26)
+                    slots = [p["pos"] for p in sim[("left", "right")[t]]["team"]["squad"]["positions"] if p["pos"] < hc.POS_SUB]
+                    assert [p["role"] for p in res[s]["players"]] == slots and slots.count(0) == 1
                 assert res["motm"]["team"] in ("home", "away") and res["home"]["possession"]["total"] + res["away"]["possession"]["total"] == 100
                 # then the reward screen (PostMatchRewardDefaultScene) reads match.reward like after a
                 # played match: player EXP, manager EXP, EP (it was empty and the flow stopped there)

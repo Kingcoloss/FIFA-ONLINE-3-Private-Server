@@ -1829,7 +1829,8 @@ def sim_result(match, events, my_home, rng=random):
             saves, yellow = mine.count("SAVE_EVENT"), mine.count("YELLOW_CARD_EVENT")
             pid, start = int(p["spid"]) % 1000000, p.get("starting") or [1, 1, 0.5, 0.5]
             players.append({
-                "id": str(pid), "spid": pid, "dbid": pid, "role": 0, "x": start[2], "y": round(1 - start[3], 4),
+                # role = the squad position: 0 (keeper) put every player at the goal (issue #26)
+                "id": str(pid), "spid": pid, "dbid": pid, "role": p["pos"], "x": start[2], "y": round(1 - start[3], 4),
                 "rating": round(min(10.0, max(4.0, 6.0 + goals + 0.5 * assists + 0.3 * saves - 0.4 * yellow
                                                    + rng.uniform(-0.4, 0.9))), 1),
                 "goals": goals, "assists": assists, "saves": saves, "shotsOnGoal": goals + shots,
