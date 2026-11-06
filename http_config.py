@@ -87,11 +87,15 @@ OWN_ASSETS = os.path.join(HERE, "assets")
 
 
 def asset_path(rel):
-    """OWN_ASSETS/rel or ASSETS/rel, whichever exists, else None."""
-    for root in (OWN_ASSETS, ASSETS):
-        f = os.path.normpath(os.path.join(root, rel))
-        if f.startswith(os.path.normpath(root) + os.sep) and os.path.isfile(f):
-            return f
+    """OWN_ASSETS/rel or ASSETS/rel, whichever exists, else None. A club crest the cache lacks
+    in one size is its other size (issue #29: the cache has 190 small crests but 49 large ones,
+    and the cup screens ask for the large one: Napoli, Bayern, Man United showed none)."""
+    other = re.sub(r"crests/(large|small)/", lambda m: f"crests/{'small' if m[1] == 'large' else 'large'}/", rel)
+    for r in dict.fromkeys((rel, other)):
+        for root in (OWN_ASSETS, ASSETS):
+            f = os.path.normpath(os.path.join(root, r))
+            if f.startswith(os.path.normpath(root) + os.sep) and os.path.isfile(f):
+                return f
     return None
 
 
