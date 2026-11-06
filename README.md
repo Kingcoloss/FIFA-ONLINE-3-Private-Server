@@ -145,6 +145,12 @@ Added, passing the tests but not yet checked in the client:
   the list) has 40 national teams, Italy, England, Germany, Spain and France among them. A
   national team's squad comes from each player's national-team link; before, only teams whose
   players had no licensed club were listed.
+- **Player positions on the result screen** (issue #26): after a match the result screen's pitch
+  stacked every player at the goal, because the game reports all of them as goalkeepers. The
+  server now gives each player the position of their squad slot.
+- **Reward cards after a match** (issue #26): the reward screen's cards were empty. Now three
+  cards are dealt: the one you pick gives EP (1,000 to 10,000), a player pack (Semua Pemain or
+  '14 Top 200) or a Lucky EP item, and the other two show what you could have got.
 - **Random boxes open** (Kotak Platinum and the rest, issue #12): the box screen lists its prizes
   from `staticdata.availables`, which was missing, so every box failed at "Gunakan".
 - **New cards join Tim Cadangan**: a card from a pack, a trade, the Market, the Bag or the admin

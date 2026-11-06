@@ -153,6 +153,12 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
 - **Semua timnas ada di Tim lain** (issue #24): liga Internasional (negara terakhir di daftar) berisi
   40 timnas, termasuk Italia, Inggris, Jerman, Spanyol, dan Prancis. Skuad timnas diambil dari
   tautan timnas tiap pemain; dulu hanya timnas yang pemainnya tanpa klub berlisensi yang muncul.
+- **Posisi pemain di layar hasil** (issue #26): setelah match, lapangan di layar hasil menumpuk semua
+  pemain di gawang karena game melaporkan semua pemain sebagai kiper. Sekarang server memberi tiap
+  pemain posisi slot squad-nya.
+- **Kartu hadiah setelah match** (issue #26): kartu di layar hadiah dulu kosong. Sekarang ada tiga
+  kartu: kartu yang kamu pilih berisi EP (1.000 sampai 10.000), pack pemain (Semua Pemain atau
+  '14 Top 200) atau item Lucky EP, dan dua kartu lainnya menunjukkan hadiah yang bisa didapat.
 - **Kotak acak bisa dibuka** (Kotak Platinum dan lainnya, issue #12): layar kotak menampilkan
   hadiahnya dari `staticdata.availables`, yang belum ada, jadi tiap kotak gagal saat "Gunakan".
 - **Kartu baru masuk Tim Cadangan**: kartu dari pak, trade, Market, Bag, atau halaman admin tampil

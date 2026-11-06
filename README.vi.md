@@ -143,6 +143,12 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   trong danh sách) có 40 đội tuyển, trong đó có Ý, Anh, Đức, Tây Ban Nha và Pháp. Đội hình đội tuyển
   lấy từ liên kết đội tuyển của từng cầu thủ; trước đây chỉ có các đội mà cầu thủ không thuộc câu lạc
   bộ có bản quyền.
+- **Vị trí cầu thủ trên màn hình kết quả** (issue #26): sau trận, sân trên màn hình kết quả xếp chồng
+  mọi cầu thủ ở khung thành vì game báo mọi cầu thủ là thủ môn. Giờ máy chủ gán cho mỗi cầu thủ vị
+  trí theo ô của họ trong đội hình.
+- **Thẻ thưởng sau trận** (issue #26): các thẻ trên màn hình thưởng trước đây trống. Giờ có ba thẻ:
+  thẻ bạn chọn cho EP (1.000 đến 10.000), gói cầu thủ (Semua Pemain hoặc '14 Top 200) hoặc vật phẩm
+  Lucky EP, hai thẻ còn lại cho thấy phần thưởng có thể nhận.
 - **Mở được hộp ngẫu nhiên** (Kotak Platinum và các hộp khác, issue #12): màn hình hộp liệt kê phần thưởng
   từ `staticdata.availables`, trước đây bị thiếu, nên mọi hộp đều lỗi khi bấm "Gunakan" (dùng).
 - **Thẻ mới vào Tim Cadangan**: thẻ từ gói, giao dịch, Market, Bag hoặc trang quản trị hiện "-" ở cột Tim

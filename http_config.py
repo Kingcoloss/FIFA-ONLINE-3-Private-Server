@@ -2106,11 +2106,32 @@ def match_cards(st, stats):
     return out
 
 
+# Post-match reward cards (issue #26): PostMatchRewardDefaultScene deals cards 1-3 ("normal";
+# card 4 is the PC-bang one) and turns no request on a click: the pick is the server's. The
+# clicked card shows extra.availables[extra.selected.normal[0]] (RewardCardFront.setItemData:
+# staticdata name/unit/itemicon, count) and openRestCards shows the others on the rest; the
+# top-level selected {type: [index]} takes the picked ones out of that rest. Prizes as in
+# ITEMS' random boxes: (weight, ("ep", amount) | itemid).
+MATCH_CARDS = [(30, ("ep", 1_000)), (25, ("ep", 3_000)), (15, ("ep", 5_000)), (8, ("ep", 10_000)),
+               (10, 92000000), (7, 92000014), (5, 501)]  # Semua Pemain, '14 Top 200, Lucky EP
+
+
+def match_cards_reward(st):
+    """extra/selected of match.reward: three cards, the first is mine (credited here)."""
+    cards = random.choices([p for _, p in MATCH_CARDS], [w for w, _ in MATCH_CARDS], k=3)
+    if isinstance(cards[0], tuple):
+        add_ep(st, cards[0][1])
+    else:
+        inventory_add(my_coach(st), cards[0], 1)
+    pick = {"normal": [0]}
+    return {"extra": {"selected": pick, "availables": [prize_item(p) for p in cards]}, "selected": pick}
+
+
 def match_reward(st, stats):
     """match.reward for PostMatchRewardDefaultScene.onRewardReceived (paths it reads) and its
     player list (PlayerRewardListItemRenderer: id, spid, prev, current, reward.detail.extra).
     Credits EP, coach exp and exp for every player of mine in matchStats (in-match spid = the
-    card's player id, i.e. spid % 1e6). ponytail: flat exp by result + goals/assists."""
+    card's player id, i.e. spid % 1e6), plus a reward card. ponytail: flat exp by result + goals/assists."""
     me, opp = stats.get("myTeam", "home"), stats.get("opponentTeam", "away")
     g = lambda s: int((stats.get(s) or {}).get("score") or 0)
     won, drew = g(me) > g(opp), g(me) == g(opp)
@@ -2123,7 +2144,7 @@ def match_reward(st, stats):
         n = pexp + 20 * int(s.get("goals") or 0) + 10 * int(s.get("assists") or 0)
         pprev, pcur = gain_exp(p, n, player_need, PLAYER_MAX_LEVEL)
         players.append({"id": iid(p), "spid": p["spid"], "prev": pprev, "current": pcur, "reward": reward(n)})
-    return {"matchRewardBackType": 0, "extra": {"selected": {}, "availables": []}, "selected": [],
+    return {"matchRewardBackType": 0, **match_cards_reward(st),
             "coach": {"reward": reward(cexp), "prev": prev, "current": cur},
             "money": {"reward": reward(ep)},
             "players": players, "missions": [], "exptankinfo": {}}
@@ -2150,6 +2171,20 @@ def ep_match_gamesettings(mid, query, body):
     return _json({"result": True, "resources": [{"uri": f"/match/{mid}", "body": match}]})
 
 
+def fill_roles(match, stats):
+    """The game sends every matchStats player with role 0, though x/y are right. The result
+    screen's pitch (GameResultPlayerInfo) puts role 0 = GK at the goal, so all eleven were
+    stacked there (issue #26). players[i] is squad slot i: role = that slot's pos."""
+    sides = match.get("side") or {}
+    for key, default in (("home", "left"), ("away", "right")):
+        t = stats.get(key) or {}
+        hits = [s for s in sides if str(sides[s]["team"]["teamid"]) == str(t.get("id"))]
+        pos = sides[hits[0] if len(hits) == 1 else default]["squad"]["positions"] if sides else []
+        for p, slot in zip(t.get("players") or [], pos):
+            if not p.get("role"):
+                p["role"] = slot["pos"]
+
+
 def ep_match_end(mid, query, body):
     """PUT /match/<id>/end matchStats {home:{id, score, players...}, away:{...}, myTeam,
     opponentTeam, motm, ...}. It comes back as match.result (PostMatchResultDefaultScene
@@ -2159,6 +2194,7 @@ def ep_match_end(mid, query, body):
     match = st.get("match") if (st.get("match") or {}).get("id") == mid else None
     out = {"result": True}
     if match is not None and match.get("stage") != "closed":  # credit once
+        fill_roles(match, req)
         match["result"] = {k: v for k, v in req.items() if k != "_method"}
         match["reward"] = match_reward(st, req)
         add_ep(st, match["reward"]["money"]["reward"]["total"])
@@ -3606,10 +3642,15 @@ def use_item_def(itemid, prizes=True):
             # staticdata.availables to its panel as item tiles (GeneralInventoryTileItemRenderer);
             # none crashed every box at "Gunakan" (issue #12). A box among the prizes shows no prizes
             # of its own (no loop).
-            **({"availables": [{"itemid": EP_ITEM, "count": p[1], "staticdata": EP_ITEM_DEF} if isinstance(p, tuple)
-                               else {"itemid": p, "count": 1, "staticdata": use_item_def(p, False) if p in ITEMS else item_def(p)}
-                               for _, p in eff["prizes"]]} if prizes and "prizes" in eff else {}),
+            **({"availables": [prize_item(p) for _, p in eff["prizes"]]} if prizes and "prizes" in eff else {}),
             "bunches": [{"bunch": n, "price": product_price(itemid, n)} for n in PACK_BUNCHES]}
+
+
+def prize_item(p):
+    """A prize ("ep", amount) | itemid as an item entry {itemid, count, staticdata}."""
+    if isinstance(p, tuple):
+        return {"itemid": EP_ITEM, "count": p[1], "staticdata": EP_ITEM_DEF}
+    return {"itemid": p, "count": 1, "staticdata": use_item_def(p, False) if p in ITEMS else item_def(p)}
 
 
 def package_def(itemid):

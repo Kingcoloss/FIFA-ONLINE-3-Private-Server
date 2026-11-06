@@ -236,13 +236,26 @@ def main():
                 cm = hc.coach_me(hc._state(), hc._default_slot(hc._state()))
                 ep0, lv0 = cm["money"]["ep"], cm["levelinfo"]
                 xi = [p for p in cm["team"]["squad"]["positions"] if p["pos"] < hc.POS_SUB]
-                # in-match player ids are the card's player id (spid % 1e6)
+                # in-match player ids are the card's player id (spid % 1e6); the game sends role 0
+                # for everyone (issue #26), the server takes it from the squad slot
                 stats[stats["myTeam"]]["players"] = [{"spid": int(p["spid"]) % 1000000, "goals": int(i == 0), "rating": 7,
-                                                      "passes": [3, 4], "tackles": [1, 2], "role": p["pos"]} for i, p in enumerate(xi)]
+                                                      "passes": [3, 4], "tackles": [1, 2], "role": 0} for i, p in enumerate(xi)]
                 stats[stats["myTeam"]]["reserved"] = [{"id": "1", "rating": 0}]
+                items0 = {i["itemid"]: i["remains"] for i in hc.my_coach(hc._state()).get("items", [])}
                 r = body(hc.route(f"/match/{m['id']}/end")("", json.dumps(stats).encode()))
                 body(hc.route(f"/match/{m['id']}/end")("", json.dumps(stats).encode()))  # a resend credits nothing
-                assert hc.coach_me(hc._state(), hc._default_slot(hc._state()))["money"]["ep"] == ep0 + (2000 if home == me else 500)
+                roles = [p["role"] for p in r["resources"][0]["body"]["result"][stats["myTeam"]]["players"]]
+                assert roles == [p["pos"] for p in xi], roles
+                # reward card (issue #26): 3 cards, the first is mine and credited once
+                rw0 = r["resources"][0]["body"]["reward"]
+                cards = rw0["extra"]["availables"]
+                assert len(cards) == 3 and rw0["extra"]["selected"] == rw0["selected"] == {"normal": [0]}
+                assert all(c["staticdata"]["unit"] in ("EP", "COUNT") and c["count"] > 0 for c in cards)
+                card_ep = cards[0]["count"] if cards[0]["itemid"] == hc.EP_ITEM else 0
+                assert hc.coach_me(hc._state(), hc._default_slot(hc._state()))["money"]["ep"] == ep0 + (2000 if home == me else 500) + card_ep
+                if not card_ep:
+                    items = {i["itemid"]: i["remains"] for i in hc.my_coach(hc._state())["items"]}
+                    assert items[cards[0]["itemid"]] == items0.get(cards[0]["itemid"], 0) + 1
                 mine = next(x for x in r["leagueparam"]["leaguematches"] if me in (x["home"], x["away"]))
                 assert mine["goals"] == {"home": 2, "away": 1}, mine
                 got = body(hc.route(f"/match/{m['id']}")("", b""))
