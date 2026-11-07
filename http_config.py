@@ -348,11 +348,16 @@ def remember_control_type(st, ctl, prev):
     """ctl (a complete controlOption from the client) with this device's remembered preset when
     the screen reset it (see CONTROL_TYPE_MAX); prev = the controlOption saved before."""
     types = st.setdefault("controlType", {})
-    types.setdefault(str(prev["Controller"]), prev["Type"])
+    pc, pt = prev["Controller"], prev["Type"]
+    for d in (pc, 1 - pc):  # a Type out of prev's range is the other device's (a guide flip)
+        if 0 <= pt <= CONTROL_TYPE_MAX.get(d, 0):
+            types.setdefault(str(d), pt)
+            break
     c, t = ctl["Controller"], ctl["Type"]
     top = CONTROL_TYPE_MAX.get(c, 0)
     keys = lambda o: [o.get(f"{'Key' if c == 0 else 'Joy'}{k}Type1") for k in ("Att", "Def", "Mov")]
-    reset = c != prev["Controller"] and t == 0 and keys(ctl) == keys(prev)  # not a remap of preset 0
+    # not a remap of preset 0: its keys as before, or as Initialize sets them (it leaves Type alone)
+    reset = c != prev["Controller"] and t == 0 and keys(ctl) in (keys(prev), keys(CONTROL_DEFAULTS))
     if reset or not 0 <= t <= top:
         t = types.get(str(c), 0)
     t = t if 0 <= t <= top else 0
@@ -561,7 +566,7 @@ HALF_LENGTHS = (30, 40, 50, 60)  # 6, 8, 10, 12 minutes: the Rank stepper's list
 # (BALL_NAME_TYPE<id>) and a picture (externalAssets/balls/ball_<id>.png; 0 shows "not found")
 BALLS = (0, 6, 23, 34, 39, 40, 41, 45, 69)
 MATCH_PREFS = {"stadium": STADIUMS_SAFE + ("home", "random"), "tod": TODS + ("random",),
-               "weather": WEATHERS + ("random",), "halfLength": HALF_LENGTHS, "ball": BALLS}
+               "weather": WEATHERS + ("random",), "halfLength": tuple(sorted({*HALF_LENGTHS, HALF_LENGTH})), "ball": BALLS}
 
 
 def match_prefs(st):
@@ -587,7 +592,8 @@ def apply_prematch(st, match, rnd=random):
     gs.update(stadium=stadium if stadium in STADIUMS_SAFE else STADIUM_DEFAULT,
               tod=pick(p["tod"], TODS), weather=pick(p["weather"], WEATHERS_RANDOM), halfLength=p["halfLength"],
               ball={"id": p["ball"], "availables": list(BALLS)},  # ints: MatchProxy maps each to BALL_NAME_TYPE<id>
-              stadiumchange=True, timechange=True, weatherchange=True, matchtimechange=True)
+              # a FO3_HALF_LENGTH off the stepper's list keeps the length fixed
+              stadiumchange=True, timechange=True, weatherchange=True, matchtimechange=p["halfLength"] in HALF_LENGTHS)
 
 
 def ep_stadium_list(query, body):
@@ -607,39 +613,48 @@ def stadium_choices():
 
 
 def client_big(path, name):
-    """An entry of one of the client's BIg4 archives (tools/re/bigdir.py), or None."""
+    """An entry of one of the client's BIg4 archives (tools/re/bigdir.py), or None (also for a
+    damaged archive: bigdir asserts and unpacks)."""
     try:
         if os.path.join(HERE, "tools", "re") not in sys.path:
             sys.path.insert(0, os.path.join(HERE, "tools", "re"))
         import bigdir
         return bigdir.read(path, name)
-    except (OSError, KeyError, ValueError, ImportError) as e:
+    except Exception as e:
         print(f"client archive {name}: {e!r}", flush=True)
         return None
+
+
+def client_json(path, name):
+    """A JSON object entry of a client archive, {} when missing or unreadable."""
+    raw = client_big(path, name)
+    try:
+        d = json.loads(raw.decode("utf-8-sig")) if raw else {}
+    except ValueError:
+        return {}
+    return d if isinstance(d, dict) else {}
 
 
 @functools.lru_cache(maxsize=None)
 def ball_names():
     """{ball id: the client's name (BALL_NAME_TYPE<id> in its language pack)} of BALLS."""
     src = asset_path(LANG_PACK)
-    raw = client_big(src, LANG_ENTRY) if src else None
-    s = json.loads(raw.decode("utf-8-sig")) if raw else {}
+    s = client_json(src, LANG_ENTRY) if src else {}
     return {b: s.get(f"BALL_NAME_TYPE{b}") or f"Ball {b}" for b in BALLS}
 
 
 @functools.lru_cache(maxsize=None)
 def client_stadium_names():
     """{"<id>": name} of data/ui/localization/STADIUMNAMES_IND.json (Localization.STADIUMNAME)."""
-    raw = client_big(os.path.join(GAME, "data", "ui", "localization", "ind.big"), "data/ui/localization/STADIUMNAMES_IND.json")
-    return json.loads(raw.decode("utf-8-sig")) if raw else {}
+    return client_json(os.path.join(GAME, "data", "ui", "localization", "ind.big"), "data/ui/localization/STADIUMNAMES_IND.json")
 
 
 # The client's Indonesian strings come from the server at every start (externalAssets/
 # language_ind.big, one entry LANG_ENTRY). Two labels of the game setting screens are wrong there:
 # COMMON_TIME_DAY reads "Waktu" ("time") for day, and COMMON_WEATHER_DUSK reads "Malam" for weather
 # 3 (overcast by day, dusk by night). The server serves a copy with LANG_FIXES (built once, again
-# when the original changes; only those two keys use them). Liga/Cup's screen still shows weather 3
-# as "Salju": its code reuses the snow label.
+# when the original or LANG_FIXES change: LANG_FIXED + ".key"; only those two keys use them).
+# Liga/Cup's screen still shows weather 3 as "Salju": its code reuses the snow label.
 LANG_PACK, LANG_ENTRY = "externalAssets/language_ind.big", "data/ui/external/LANGUAGESTRING_IND.json"
 LANG_FIXES = {b'"COMMON_TIME_DAY": "Waktu"': b'"COMMON_TIME_DAY": "Siang"',
               b'"COMMON_WEATHER_DUSK": "Malam"': b'"COMMON_WEATHER_DUSK": "Mendung"'}
@@ -649,17 +664,21 @@ LANG_LOCK = threading.Lock()
 
 def language_pack(src):
     """The path to serve for the client's language pack at src: the fixed copy, or src itself
-    when it needs no fix (or the copy cannot be made)."""
-    with LANG_LOCK:
-        if os.path.isfile(LANG_FIXED) and os.path.getmtime(LANG_FIXED) >= os.path.getmtime(src):
-            return LANG_FIXED
-        raw = client_big(src, LANG_ENTRY)
-        fixed = raw
-        for old, new in LANG_FIXES.items():
-            fixed = fixed.replace(old, new) if fixed else fixed
-        if not raw or fixed == raw:
-            return src
-        try:
+    when it needs no fix (or the copy cannot be made: the client gets its own pack, never no reply)."""
+    try:
+        s = os.stat(src)
+        key = repr((os.path.abspath(src), s.st_size, s.st_mtime_ns, sorted(LANG_FIXES.items()))).encode()
+        with LANG_LOCK:
+            if os.path.isfile(LANG_FIXED) and os.path.isfile(LANG_FIXED + ".key"):
+                with open(LANG_FIXED + ".key", "rb") as f:
+                    if f.read() == key:
+                        return LANG_FIXED
+            raw = client_big(src, LANG_ENTRY)
+            fixed = raw or b""
+            for old, new in LANG_FIXES.items():
+                fixed = fixed.replace(old, new)
+            if not raw or fixed == raw:
+                return src
             import bigdir  # client_big put tools/re on the path
             tmp = LANG_FIXED + ".tmp"
             os.makedirs(os.path.dirname(LANG_FIXED), exist_ok=True)
@@ -667,10 +686,12 @@ def language_pack(src):
                 b.write(a.read())
             bigdir.patch(tmp, {LANG_ENTRY: fixed})  # stored (not RefPacked), appended
             os.replace(tmp, LANG_FIXED)
+            with open(LANG_FIXED + ".key", "wb") as f:
+                f.write(key)
             return LANG_FIXED
-        except (OSError, AssertionError) as e:
-            print(f"language pack fix: {e!r}", flush=True)
-            return src
+    except Exception as e:
+        print(f"language pack fix: {e!r}", flush=True)
+        return src
 
 
 def new_match(mtype, left, right, **extra):
@@ -1563,6 +1584,10 @@ START_EP = 1000000
 #   dynamic   the Market moves (market_value): a card's price drifts day by day, managers list
 #             bargains and you may ask up to MARKET_ASK_MAX of the price, so buying low and selling
 #             high pays; off = a fixed Market where nothing is gained by trading back and forth
+# With a Shop that costs EP (SHOP_FREE off: EP is scarce) nothing turns EP into more EP: the Shop
+# sells at worth, rounded up (product_price; packs at their cards' dearest swing: pack_worth), an
+# Upgrade costs at least what it adds (enhance_cost; a restore costs EP), a Tukar v2 or Scout
+# offer is worth at most the cards given (trade_cap).
 ECONOMY_FILE = os.path.join(HERE, "gamedata", "economy.json")
 ECONOMY_DEFAULT = {"players": 1.0, "packs": 1.0, "start_ep": START_EP, "dynamic": False}
 
@@ -1601,7 +1626,7 @@ def set_economy(cfg):
     with open(ECONOMY_FILE, "w", encoding="utf-8") as f:
         json.dump(new, f, indent=1)
     ECONOMY = new
-    pack_price.cache_clear()
+    pack_ev.cache_clear()
     trade2_pool.cache_clear()
     _T3_POOL.clear()
     return new
@@ -2304,12 +2329,25 @@ def season_leaders(st, me, rank, goals):
                   for p in starters if p["pos"] in r] for line, r in lines.items()}
     best = lambda line: max((p["spid"] for p in starters if p["pos"] in lines[line]),
                             key=lambda s: rating.get(s, 0), default=0)
-    played = 2 * (LEAGUE_SIZE - 1)
-    out.update(ratings=[entry(best("FW"), 7.5, 3000)], goals=[entry(best("FW"), max(1, goals // 2), 3000)],
-               assists=[entry(best("MF"), max(1, goals // 3), 2000)], tackles=[entry(best("DF"), played * 3, 2000)],
-               passes=[entry(best("MF"), 0.85, 1000)],  # pass success rate; the UI shows value*100 %
-               saves=[entry(best("GK"), played * 2, 1000)])
+    played, ep = 2 * (LEAGUE_SIZE - 1), LEADER_EP
+    out.update(ratings=[entry(best("FW"), 7.5, ep["ratings"])], goals=[entry(best("FW"), max(1, goals // 2), ep["goals"])],
+               assists=[entry(best("MF"), max(1, goals // 3), ep["assists"])], tackles=[entry(best("DF"), played * 3, ep["tackles"])],
+               passes=[entry(best("MF"), 0.85, ep["passes"])],  # pass success rate; the UI shows value*100 %
+               saves=[entry(best("GK"), played * 2, ep["saves"])])
     return out
+
+
+LEADER_EP = {"ratings": 3000, "goals": 3000, "assists": 2000, "tackles": 2000, "passes": 1000, "saves": 1000}
+PLACE_EP = 2000  # a season's EP per place above the bottom one (ep_l2_end)
+
+
+def season_top_ep():
+    """The most EP a League season's end pays (ep_l2_end): 1st place, the top sponsor reward and
+    every stat leader's."""
+    with open(os.path.join(RESPONSES, "static_db_LEAGUE2REWARD.json")) as f:
+        sponsor = max((v.get("count", 0) for m in json.load(f)["sponsor"].values() for v in m.values()
+                       if isinstance(v, dict)), default=0)
+    return LEAGUE_SIZE * PLACE_EP + sponsor + sum(LEADER_EP.values())
 
 
 def league_promote(difficulty):
@@ -2344,7 +2382,7 @@ def ep_l2_end(query, body):
     leaders = season_leaders(st, me, rank, stats["goals"])
     leader_ep = sum(e["reward"]["count"] for k in ("ratings", "goals", "assists", "tackles", "passes", "saves")
                     for e in leaders[k])
-    base_ep = (LEAGUE_SIZE - rank + 1) * 2000
+    base_ep = (LEAGUE_SIZE - rank + 1) * PLACE_EP
     season_exp = (LEAGUE_SIZE - rank + 1) * 100
     cprev, ccur = gain_exp(my_coach(st), season_exp, coach_need, COACH_MAX_LEVEL)
     out = {"result": True, "promotion": {"current": cur, "next": nxt},
@@ -2920,6 +2958,20 @@ def nice_price(x):
     return round(x, 3 - len(str(x))) if x >= 1000 else x
 
 
+def nice_floor(x):
+    """EP rounded down to 3 significant digits (a cap nice_price could round over)."""
+    x = int(x)
+    k = 10 ** max(0, len(str(x)) - 3)
+    return x // k * k
+
+
+def nice_ceil(x):
+    """EP rounded up to 3 significant digits (a price that must not fall short of x)."""
+    x = math.ceil(x)
+    k = 10 ** max(0, len(str(abs(x))) - 3)
+    return -(-x // k) * k
+
+
 def market_factor(spid, grade, day):
     """The virtual market's price of a card on crowd day `day`, as a share of its market value:
     a slow seeded wave between about 0.955 and 0.995 (the price graph, the managers' listings)."""
@@ -2933,10 +2985,13 @@ def market_factor(spid, grade, day):
 # "buy players at lower prices and resell them for a profit"): a player's price drifts day by day
 # (market_swing, the same for everyone), the managers' listings go from bargains to a little over
 # it (MARKET_BARGAIN), and a seller may ask up to MARKET_ASK_MAX of it, waiting longer for a buyer
-# (vm_buyer). Off, the Market stays as described above.
+# (vm_buyer). The fee (sale_net: 5% with the PC warnet and VIP discounts) takes that premium back,
+# so a card bought from the stock, which never runs out, cannot be resold at a profit: only a
+# bargain or a cheaper day can. Off, the Market stays as described above.
 MARKET_SWING = 0.12
+MARKET_SWING_MAX = 1 + MARKET_SWING + 0.01  # the most market_swing gives (both waves at their top, the noise too)
 MARKET_BARGAIN = (0.86, 1.02)
-MARKET_ASK_MAX = 1.1
+MARKET_ASK_MAX = 1.05
 
 
 def market_swing(spid, day):
@@ -2960,7 +3015,7 @@ def market_value(spid, grade, t=None):
 def sell_band(spid, grade):
     """(lower, upper, Market price) of what a listing of this card may ask now (Jual's band)."""
     v = market_value(spid, grade)
-    return v * 8 // 10, nice_price(v * MARKET_ASK_MAX) if ECONOMY["dynamic"] else v, v
+    return v * 8 // 10, nice_floor(v * MARKET_ASK_MAX) if ECONOMY["dynamic"] else v, v
 
 
 def market_rows(spid, t=None):
@@ -3082,11 +3137,11 @@ def ep_transfer_purchase(spid, grade, price, query, body):
 # minus SALE_FEE). The sale is pushed to the game: the list (the open tab redraws) and a
 # notification (toast "<card> terjual seharga <price> EP." and an entry naming the buyer); both
 # go out from market_loop, or from the next request that touches the offers. Batal takes a
-# waiting card back, Ulang lists it again at a new price. Asking more than the market price is
-# refused, so buying back is never cheaper than selling.
+# waiting card back, Ulang lists it again at a new price. Asking more than the market price (the
+# dynamic Market: than MARKET_ASK_MAX of it) is refused, so buying back is never cheaper than selling.
 SALE_FEE = 0.10
 VM_SALE = (20, 300)
-VM_SALE_SLOW = 48  # dynamic Market: 10% over the price waits 48 x 300 s = 4 h for a buyer
+VM_SALE_SLOW = 48  # dynamic Market: asking MARKET_ASK_MAX waits 48 x 300 s = 4 h for a buyer
 # listings a manager can hold (waiting + sold, not collected); more is the client's own
 # TRANSFERMARKET_MAX_REGISTERED ("Silahkan hapus daftar penjualan"). Keeps the pushed list (about
 # 270 bytes an offer) far under the 64 KB a messenger push can carry.
@@ -3132,11 +3187,13 @@ def ep_transfer_price(spid, grade, query, body):
 
 def vm_buyer(o, now):
     """Pick the manager who buys offer o and when (buyat, s): VM_SALE by its price against the
-    Market's; one asking more (the dynamic Market) waits VM_SALE_SLOW times longer per 10% over."""
+    Market's; one asking more (the dynamic Market) waits up to VM_SALE_SLOW times longer, at
+    MARKET_ASK_MAX."""
     r = random.Random(f"{o['_id']}/{o['price']}")
     share = o["price"] / max(1, market_value(o["spid"], o["grade"], now))
     lo, hi = VM_SALE
-    wait = lo + (hi - lo) * min(1, max(0, (share - 0.8) / 0.2)) ** 2 if share <= 1 else hi * VM_SALE_SLOW ** ((share - 1) / 0.1)
+    wait = (lo + (hi - lo) * min(1, max(0, (share - 0.8) / 0.2)) ** 2 if share <= 1
+            else hi * VM_SALE_SLOW ** ((share - 1) / (MARKET_ASK_MAX - 1)))
     o["buyat"] = now + wait * r.uniform(0.6, 1.4)
     o["buyer"] = r.choice(virtual_managers())["_id"]
 
@@ -3344,8 +3401,18 @@ def enhance_rate(target, material):
     return min(1.0, ENHANCE_RATE[tg] * bonus)
 
 
-def enhance_cost(target):
-    return max(1000, sig3(card_price(target["spid"], grade_of(target)) // 50))  # 2% of its value
+def enhance_cost(target, material, rate):
+    """EP for one try: 2% of the target's value (at least 1,000). When EP is scarce (a Shop that
+    costs EP: the Realistis and Sulit economies) at least what the try adds to the card's Market
+    value on average at its odds (rate, boosts included): else the +1..+3 stock, which never runs
+    out, made EP (a +3 tried with a cheap +1 at 74% doubled its money; free boosts did more)."""
+    g = grade_of(target)
+    base = max(1000, sig3(card_price(target["spid"], g) // 50))
+    if SHOP_FREE:
+        return base
+    v = lambda x: market_value(target["spid"], x)  # the material is the same player
+    fail = g - 1 if g >= ENHANCE_DROP_FROM else g
+    return max(base, nice_ceil(rate * v(enhance_grade(target, material)) + (1 - rate) * v(fail) - v(g) - v(grade_of(material))))
 
 
 def merge_into(team, keep, gone):
@@ -3370,10 +3437,10 @@ def ep_enhance_preview(a, b, query, body):
     pa, pb = enhance_pair(team, a, b)
     if pa is None:
         return _json({"result": False, "reason": "INVALID_PARAM"})
-    g = enhance_grade(pa, pb)
+    g, rate = enhance_grade(pa, pb), enhance_rate(pa, pb)
     return _json({"result": True, "grade": g, "levelinfo": pa.get("levelinfo", {"level": 1, "exp": 0}),
-                  "price": card_price(pa["spid"], g), "enhancepay": enhance_cost(pa),
-                  "probability": round(enhance_rate(pa, pb) * 100)})
+                  "price": card_price(pa["spid"], g), "enhancepay": enhance_cost(pa, pb, rate),
+                  "probability": round(rate * 100)})
 
 
 def ep_enhance(a, b, boost, guard, query, body):
@@ -3383,12 +3450,13 @@ def ep_enhance(a, b, boost, guard, query, body):
     pa, pb = enhance_pair(team, a, b)
     if pa is None:
         return _json({"result": False, "reason": "INVALID_PARAM"})
-    cost = enhance_cost(pa)
+    rate = enhance_rate(pa, pb)
+    cost = enhance_cost(pa, pb, rate)
     if coach_me(st, slot)["money"]["ep"] < cost:
         return _json({"result": False, "reason": "Invalid target ep price"})
     add_ep(st, -cost)
     before = grade_of(pa)
-    success = random.random() < enhance_rate(pa, pb)
+    success = random.random() < rate
     after = enhance_grade(pa, pb) if success else before - 1 if before >= ENHANCE_DROP_FROM else before
     pa["grade"] = after
     merge_into(team, pa, pb)
@@ -3407,7 +3475,8 @@ def ep_enhance(a, b, boost, guard, query, body):
 #     spends that many for +ES_BOOST chance (PE2STATICVALUES bonus.use = ES_BOOST in 1/100 %);
 #   boost items (coach items of type ENHANCEMENT_BOOST, sent by itemid): +their chance, one used;
 #   a failure that dropped a grade shows "Coba pengembalian lagi": PUT /player/enhance2.5/restore
-#     gives the grade back for usepoint.price points.
+#     gives the grade back for usepoint.price points; when EP is scarce for EP, the Market value it
+#     gives back (usepoint.currency "EP": the popup checks money.ep then; points are free in the Shop).
 # The original numbers were server data; these are ours.
 # --------------------------------------------------------------------------- #
 ES_BOOST = 0.10
@@ -3471,16 +3540,16 @@ def ep_enhance25_preview(a, b, use_point, itemid, event, query, body):
     g = enhance_grade(pa, pb)
     rate = enhance25_rate(pa, pb, use_point == "1", boost_stack(st, itemid), event)
     return _json({"result": True, "grade": g, "levelinfo": player_levelinfo(pa), "price": card_price(pa["spid"], g),
-                  "probability": round(rate * 100), "enhancepay": enhance_cost(pa), "needes": enhance_es(pa)})
+                  "probability": round(rate * 100), "enhancepay": enhance_cost(pa, pb, rate), "needes": enhance_es(pa)})
 
 
-def enhance25_result(st, slot, p, success, before, grant, price):
+def enhance25_result(st, slot, p, success, before, grant, usepoint):
     """Popup v2_5 reply: on a failure it shows the card broken, then restores it to rgrade
     (grade after a restore); grantes = points earned, usepoint = what a restore costs."""
     g = grade_of(p)
     return _json({"result": True, "success": success, "grade": g, "rgrade": g, "rprice": card_price(p["spid"], g),
                   "attribPlus": GRADE_BOOST[g] - GRADE_BOOST[before], "grantes": grant,
-                  "usepoint": {"currency": "ES", "price": price}, "getitems": [], "resources": coach_me_resources(st, slot)})
+                  "usepoint": usepoint, "getitems": [], "resources": coach_me_resources(st, slot)})
 
 
 def ep_enhance25(a, b, use_point, itemid, event, query, body):
@@ -3494,12 +3563,12 @@ def ep_enhance25(a, b, use_point, itemid, event, query, body):
     item = boost_stack(st, itemid) if boostable else None
     if boostable and itemid != "-1" and item is None:
         return _json({"result": False, "reason": "expired item"})  # popup: ENHANCEMENT_25_ERROR_ITEM01
-    cost, need = enhance_cost(pa), enhance_es(pa)
+    rate = enhance25_rate(pa, pb, use_point, item, event)
+    cost, need = enhance_cost(pa, pb, rate), enhance_es(pa)
     if coach_me(st, slot)["money"]["ep"] < cost:
         return _json({"result": False, "reason": "Invalid target ep price"})
     if use_point and my_coach(st).get("es", 0) < need:
         return _json({"result": False, "reason": "NOT_ENOUGH_ES"})
-    rate = enhance25_rate(pa, pb, use_point, item, event)
     add_ep(st, -cost)
     add_es(st, -need if use_point else 0)
     if item:
@@ -3513,10 +3582,13 @@ def ep_enhance25(a, b, use_point, itemid, event, query, body):
     grant = 0 if success else need
     add_es(st, grant)
     st.pop("enhance_restore", None)
+    usepoint = {"currency": "ES", "price": ES_RESTORE * need}
     if grade_of(pa) < before:
-        st["enhance_restore"] = {"id": iid(pa), "grade": before, "price": ES_RESTORE * need}
+        if not SHOP_FREE:
+            usepoint = {"currency": "EP", "price": nice_ceil(market_value(pa["spid"], before) - market_value(pa["spid"], grade_of(pa)))}
+        st["enhance_restore"] = {"id": iid(pa), "grade": before, **usepoint}
     _save(st)
-    return enhance25_result(st, slot, pa, success, before, grant, ES_RESTORE * need)
+    return enhance25_result(st, slot, pa, success, before, grant, usepoint)
 
 
 def ep_enhance25_restore(query, body):
@@ -3528,13 +3600,14 @@ def ep_enhance25_restore(query, body):
     p = next((x for x in team["players"] if r and iid(x) == r["id"]), None)
     if p is None:
         return _json({"result": False, "reason": "INVALID_PARAM"})
-    if my_coach(st).get("es", 0) < r["price"]:
-        return _json({"result": False, "reason": "NOT_ENOUGH_ES"})
-    add_es(st, -r["price"])
+    ep = r.get("currency") == "EP"
+    if (coach_me(st, slot)["money"]["ep"] if ep else my_coach(st).get("es", 0)) < r["price"]:
+        return _json({"result": False, "reason": "NOT_ENOUGH_EP" if ep else "NOT_ENOUGH_ES"})
+    (add_ep if ep else add_es)(st, -r["price"])
     before, p["grade"] = grade_of(p), r["grade"]
     del st["enhance_restore"]
     _save(st)
-    return enhance25_result(st, slot, p, False, before, 0, r["price"])
+    return enhance25_result(st, slot, p, False, before, 0, {"currency": "EP" if ep else "ES", "price": r["price"]})
 
 
 # --------------------------------------------------------------------------- #
@@ -3643,8 +3716,9 @@ def ep_trade_contract(query, body):
 # Tim > Manajemen pemain > Tukar #2 (trade3 "Scout": TeamManagementPlayerTrade3TabPage +
 # ScouterController). Pick a scout, give 2..10 reserves: offers are Market cards worth about
 # their total value (fifaaddict prices) times the scout's range. Scouts (coach/me `scouters`)
-# differ in range and cooldown; meeting a scout's quest shifts the range up. Same popup and
-# /trade3/contract as Tukar v1 (the shared popup runs in trade3 mode while the feature is on).
+# differ in range and cooldown; meeting a scout's quest shifts the range up (when EP is scarce,
+# up to the given cards' worth: trade_cap). Same popup and /trade3/contract as Tukar v1 (the
+# shared popup runs in trade3 mode while the feature is on).
 # --------------------------------------------------------------------------- #
 NO_LIMIT = 9_000_000_000_000_000  # "unlimited": below 2^53, so exact as an AS3 Number
 TRADE3_STATIC = {  # GET /trade3/staticvalues -> ScouterController.staticvalues
@@ -3715,22 +3789,47 @@ def trade3_pool():
     return _T3_POOL
 
 
+def trade_cap(give):
+    """When EP is scarce (a Shop that costs EP), the most a Tukar v2 or Scout offer may be worth,
+    (value, Market value): the given cards' own. Their bonuses and ranges gave back up to about
+    twice, and the best of the offers could be asked again without end. None = no cap."""
+    if SHOP_FREE:
+        return None
+    return (sum(card_price(p["spid"], grade_of(p)) for p in give), sum(market_value(p["spid"], grade_of(p)) for p in give))
+
+
+def trade_fit(pool, j, cap, ep=0):
+    """pool[j] (a trade pool row, cheapest first), or under a cap the dearest row up to it that
+    fits with ep EP on top. ponytail: none fits (a lot of the club's own +0 cards, worth 0): the
+    cheapest card still comes."""
+    if cap is None:
+        return pool[j]
+    j = min(j, bisect.bisect_right(pool, (min(cap) - ep, math.inf)) - 1)
+    while j > 0 and market_value(pool[j][1], pool[j][3]) + ep > cap[1]:
+        j -= 1
+    return pool[max(0, j)]
+
+
 def trade3_props(give, scout, rng):
-    """playertrade3_normal[n] cards worth total x the scout's range (capped at the reward max;
-    the last of them adds an EP top-up) + PC warnet and VIP extras."""
+    """playertrade3_normal[n] cards worth total x the scout's range (capped at the reward max and
+    trade_cap; the last of them adds an EP top-up) + PC warnet and VIP extras."""
     lo, hi = scout[3]
     if quest_met(scout[4], give):
         lo, hi = lo + QUEST_BONUS, hi + QUEST_BONUS
     total = sum(card_price(p["spid"], grade_of(p)) for p in give)
-    pool, normal = trade3_pool(), TRADE3_STATIC["playertrade3_normal"][str(len(give))]
+    pool, normal, cap = trade3_pool(), TRADE3_STATIC["playertrade3_normal"][str(len(give))], trade_cap(give)
     props = []
     for i, boost in enumerate([None] * normal + ["igr", "vip"]):
         target = min(TRADE3_STATIC["playertrade3_limit"]["max"], total * rng.uniform(lo, hi))
         k = bisect.bisect_left(pool, (target,))
-        price, s, t, gr = rng.choice(pool[max(0, k - 10):k + 10])  # one of the 20 cards nearest in value
+        j = rng.randrange(max(0, k - 10), min(len(pool), k + 10))  # one of the 20 cards nearest in value
+        ep = sig3(max(1000, total * rng.uniform(0.05, 0.15))) if i == normal - 1 and normal > 1 else 0
+        price, s, t, gr = trade_fit(pool, j, cap, ep)
+        if cap:  # the top-up shrinks to what the cap leaves
+            ep = max(0, min(ep, cap[0] - price, cap[1] - market_value(s, gr)))
         offer = {"spid": s, "grade": gr, "teamid": t, "price": price}
-        if i == normal - 1 and normal > 1:
-            offer["ep"] = sig3(max(1000, total * rng.uniform(0.05, 0.15)))
+        if ep:
+            offer["ep"] = ep
         if boost:
             offer["boost"] = boost
         props.append(offer)
@@ -3772,7 +3871,8 @@ def ep_trade3_proposal(query, body):
 # offers, and from GET /players/trade2/info what another manager got "yesterday" at that TP
 # (TRADE2_ESTIMATE "{0} merekrut {1} kemarin."). Special cards (/static/cache/
 # TRADE_SPECIALPLAYERS, {spid: 1}) are the legend seasons' cards. Offers are cards worth about
-# the TP, graded up to the level's maximum. No daily limit (usage maxcount 0) and no value cap.
+# the TP, graded up to the level's maximum. No daily limit (usage maxcount 0) and no value cap,
+# but when EP is scarce no offer is worth more than the given cards (trade_cap).
 # The original numbers were server data; these are ours.
 # --------------------------------------------------------------------------- #
 TRADE2_LEVELS = (0, 10 ** 6, 3 * 10 ** 6, 10 ** 7, 3 * 10 ** 7, 10 ** 8, 3 * 10 ** 8, 10 ** 9, 2 * 10 ** 9,
@@ -3811,21 +3911,22 @@ def trade2_pool(max_grade):
     return [r for r in trade3_pool() if r[3] <= max_grade]
 
 
-def trade2_pick(target, max_grade, rng):
+def trade2_pick(target, max_grade, rng, cap=None):
     """(price, spid, teamid, grade): a card of at most that grade worth within 25% of the
     target, else the nearest one (low values come in sparse steps, so "the 20 nearest in the
-    list" could be worth twice the target)."""
+    list" could be worth twice the target); within cap (trade_fit)."""
     pool = trade2_pool(max_grade)
     lo, hi = bisect.bisect_left(pool, (target / 1.25,)), bisect.bisect_right(pool, (target * 1.25, math.inf))
     k = bisect.bisect_left(pool, (target,))
-    return rng.choice(pool[lo:hi] or pool[max(0, k - 1):k + 1])
+    j = rng.randrange(lo, hi) if lo < hi else rng.randrange(max(0, k - 1), min(len(pool), k + 1))
+    return trade_fit(pool, j, cap)
 
 
 def trade2_props(give, rng):
-    tp = trade2_tp(give)
+    tp, cap = trade2_tp(give), trade_cap(give)
     props = []
     for boost in [None] * TRADE2_TABLE["playertrade2_normal"][str(len(give))] + ["igr", "vip"]:
-        price, s, t, g = trade2_pick(tp * rng.uniform(0.85, 1.15), trade2_max_grade(tp), rng)
+        price, s, t, g = trade2_pick(tp * rng.uniform(0.85, 1.15), trade2_max_grade(tp), rng, cap)
         props.append({"spid": s, "grade": g, "teamid": t, "price": price, **({"boost": boost} if boost else {})})
     return props
 
@@ -4100,7 +4201,7 @@ PACKS.update({
     200005: ("2017 Draft Pick 5", {"season": 88, "all": True, "draft": 5, "icon": 9900088}),
     97093: ("World Legend Draft Pick 3", {"season": 93, "all": True, "draft": 3, "icon": 9900093}),
 })
-PACK_BUNCHES = (1, 10)  # buy 1 or 10 (5% off)
+PACK_BUNCHES = (1, 10)  # buy 1 or 10 (10 packs at a fixed price 5% off: product_price)
 _PACK_POOL = {}
 
 
@@ -4149,26 +4250,43 @@ def pack_grade(itemid):
 
 
 @functools.lru_cache(maxsize=None)
-def pack_price(itemid):
+def pack_ev(itemid):
+    """The expected value of the card a pack gives, unrounded (cached; set_economy and a changed
+    pack drop it)."""
     draft = PACKS[itemid][1].get("draft")
-    if draft:  # worth the default picks (the n best cards) at the pack's grade
+    if draft:  # the default picks (the n best cards) at the pack's grade: it gives one of the n picked
         g = pack_grades(itemid)[0][0]
         top = draft_top(itemid, draft)
-        return sig3(sum(card_price(s, g) for s in top) / len(top) * ECONOMY["packs"]) if top else 0
+        return sum(card_price(s, g) for s in top) / len(top) if top else 0
     pool, grades = pack_pool(itemid), pack_grades(itemid)
     if not pool:
         return 0
     gw = sum(w for _, w in grades)
-    ev = sum(card_price(s, g) * w * gwt for s, w in pool for g, gwt in grades) / sum(w for _, w in pool) / gw
-    return sig3(ev * ECONOMY["packs"])  # the admin page's pack price setting on top of the cards' worth
+    return sum(card_price(s, g) * w * gwt for s, w in pool for g, gwt in grades) / sum(w for _, w in pool) / gw
+
+
+def pack_price(itemid):
+    return sig3(pack_ev(itemid) * ECONOMY["packs"])  # the admin page's pack price setting on top of the cards' worth
+
+
+def pack_worth(itemid):
+    """The most a pack fetches on the Market, unrounded (a paid Shop's price): its cards' worth
+    times the pack setting, with the dynamic Market at their dearest swing: a pack is kept until
+    opened, so at any lower price it made EP on its players' dear days (a one-player pack up to 11%,
+    91 of the 92 packs on some day)."""
+    return pack_ev(itemid) * ECONOMY["packs"] * (MARKET_SWING_MAX if ECONOMY["dynamic"] else 1)
 
 
 def warm_packs():
     """Build every pack pool and price and the trade pools once (~20 s) so the first Shop or
-    Tukar request does not stall the client."""
-    for itemid in PACKS:
-        pack_price(itemid)
-    trade3_pool()
+    Tukar request does not stall the client. Under STATE_LOCK, like a request: an economy save
+    (set_economy drops these caches) cannot land between a price and its caching."""
+    for itemid in list(PACKS):
+        with STATE_LOCK:
+            if itemid in PACKS:
+                pack_price(itemid)
+    with STATE_LOCK:
+        trade3_pool()
 
 
 SHOP_FREE = True  # user: "shop jadi 0 semua" -> every Shop product costs 0 EP (admin page: shop.json "free")
@@ -4189,7 +4307,7 @@ def item_def(itemid):
          "type": "LEAGUE" if "league" in f else "POSITION" if "pos" in f else "CUSTOM",
          "unit": "COUNT", "itemicon": f.get("icon", itemid), "currency": "ep",
          **({"bundleicon": f["icon"]} if "icon" in f else {}),  # several packs share one icon
-         "bunches": [{"bunch": n, "price": product_price(itemid, n, lambda: pack_price(itemid))} for n in PACK_BUNCHES],
+         "bunches": [{"bunch": n, "price": product_price(itemid, n)} for n in PACK_BUNCHES],
          **({"draw": {"year": 2017}} if f.get("season") == 88 else {})}
     if f.get("draft"):  # one season: the draft screen's name search filters on it
         d.update(category="DRAFTPACK", type="DRAFTPACK", draft={
@@ -4519,19 +4637,73 @@ def apply_shop(cfg=None):
     CHAINED = ({int(c[0]): tuple(int(i) for i in c) for c in lists["chained"] if c} if "chained" in lists
                else dict(_SHOP_BASE["chained"]))
     CHAIN_STEPS = {i: (first, k) for first, steps in CHAINED.items() for k, i in enumerate(steps)}
-    for k in set(before) | set(PACKS):  # rebuild only the pools of changed packs (all of them take ~7 s)
-        if before.get(k) != PACKS.get(k):
-            _PACK_POOL.pop(k, None)
+    changed = [k for k in set(before) | set(PACKS) if before.get(k) != PACKS.get(k)]
+    for k in changed:  # rebuild only the pools of changed packs (all of them take ~7 s)
+        _PACK_POOL.pop(k, None)
+    if changed:
+        pack_ev.cache_clear()  # a changed pack kept its old price (the others' are a quick sum again)
 
 
-def product_price(itemid, n, value=lambda: 0):
-    """EP for a bunch of n: the admin page's fixed price, else 0 while the Shop is free, else the
-    value (a pack's expected card value); 5% off for 10."""
+def product_price(itemid, n):
+    """EP for a bunch of n: the admin page's fixed price (10 packs 5% off), else 0 while the Shop
+    is free, else what it is worth (shop_worth) rounded up: a paid Shop sells nothing for less EP
+    than it gives or fetches (rounded to the nearest, or 5% off for 10, a pack made EP: its cards
+    sell for 99.75% of their price at best)."""
     fixed = (_SHOP.get("prices") or {}).get(str(itemid))
-    if fixed is None and SHOP_FREE:
+    if fixed is not None:
+        return sig3(int(fixed) * n * (0.95 if n > 1 and itemid in PACKS else 1))
+    return 0 if SHOP_FREE else nice_ceil(shop_worth(itemid) * n)
+
+
+# What holds no EP costs in a paid Shop, at player prices x1 (issue #30: "all Shop items should have
+# reasonable prices that scale according to the selected Economy difficulty"), so times the Ekonomi
+# tab's player price setting; the admin page's fixed price wins. A boost costs the upgrade points
+# "Gunakan poin" takes at +9 for the same chance (Silver +10% = 100 points).
+ES_EP = 1000  # an upgrade point
+EXP_EP = 10  # a point of a player's EXP (LV.1 -> LV.23 takes 25,300)
+CHANGE_EP = {"COACHNAME_CHANGE": 100_000, "TEAM_CHANGE": 300_000}
+
+
+def shop_worth(itemid, depth=0):
+    """EP worth of one itemid in a paid Shop: a pack its cards' (pack_worth), EP its amount, an EP
+    card its expected EP, a box its expected prize, a package or monthly pack all it gives, a
+    League Simulation coupon the most its round pays; upgrade points, boosts, EXP capsules and a
+    name or team change their set price (ES_EP, EXP_EP, CHANGE_EP)."""
+    if depth > 4:  # an admin-made box or package holding itself
         return 0
-    one = int(fixed) if fixed is not None else value()
-    return sig3(one * n * (0.95 if n > 1 else 1)) if one else 0
+    worth = lambda i: shop_worth(i, depth + 1)
+    if itemid == EP_ITEM:
+        return 1
+    if itemid == ES_ITEM:
+        return ES_EP * ECONOMY["players"]
+    if itemid in PACKS:
+        return pack_worth(itemid)
+    if itemid in ITEMS:
+        typ, eff = ITEMS[itemid][2:4]
+        if "ep" in eff:  # use_item: triangular(lo, hi, mode lo)
+            return (2 * eff["ep"][0] + eff["ep"][1]) / 3
+        if "boost" in eff:
+            return eff["boost"] / ES_BOOST * enhance_es({"grade": 9}) * ES_EP * ECONOMY["players"]
+        if "exp" in eff:
+            return eff["exp"] * EXP_EP * ECONOMY["players"]
+        if typ in CHANGE_EP:
+            return CHANGE_EP[typ] * ECONOMY["players"]
+        if typ == "LEAGUE_SIMULATION":  # a won match, its reward card, its share of the season's prizes
+            cfg = match_reward_cfg()
+            cards = [(w, p["ep"] if isinstance(p, dict) else worth(p)) for w, p in cfg["cards"]
+                     if isinstance(p, dict) or p in ITEMS or p in PACKS]  # as match_cards_reward draws
+            total = sum(w for w, _ in cards)
+            card = sum(w * v for w, v in cards) / total if total else 0
+            return cfg["result"]["win"]["ep"] + card + season_top_ep() / (2 * (LEAGUE_SIZE - 1))
+        prizes = eff.get("prizes") or ()
+        total = sum(w for w, _ in prizes)
+        return sum(w * (p[1] if isinstance(p, tuple) else worth(p)) for w, p in prizes) / total if total else 0
+    if itemid in MONTHLY:
+        _, _, days, now, daily, _ = MONTHLY[itemid]
+        return sum(n * worth(i) for i, n in now) + days * sum(n * worth(i) for i, n in daily)
+    if itemid in PACKAGES:
+        return sum(n * worth(i) for i, n in PACKAGES[itemid][2])
+    return 0
 
 
 apply_shop()

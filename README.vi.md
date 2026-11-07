@@ -186,10 +186,16 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
 - **Cài đặt kinh tế** (issue #30): tab Ekonomi (Kinh tế) mới trên trang quản trị cho bạn chỉnh độ khó của
   game tùy ý: hệ số nhân giá cầu thủ và giá gói, EP ban đầu của HLV mới, tùy chọn Shop miễn phí và Market
   biến động. Với Market biến động, giá mỗi cầu thủ lên xuống theo từng ngày (tăng hoặc giảm tối đa khoảng
-  13%), thỉnh thoảng HLV ảo đăng bán thẻ giá hời, và bạn có thể đặt giá bán đến 110% giá thị trường (nhưng
+  13%), thỉnh thoảng HLV ảo đăng bán thẻ giá hời, và bạn có thể đặt giá bán đến 105% giá thị trường (nhưng
   lâu có người mua hơn), nên mua rẻ bán đắt sẽ có lãi. Các mẫu có sẵn: Dễ (như trước: Shop miễn phí, giá cố
   định), Thực tế (Shop tính phí theo giá trị các thẻ trong gói, Market biến động, 300.000 EP ban đầu) và Khó
   (giá x2, 100.000 EP). EP nhận sau mỗi trận vẫn được chỉnh ở tab Thưởng sau trận.
+  Khi Shop tính phí, không có cách nào tạo EP từ hư không: phí Nâng cấp bằng giá trị trung bình nó thêm vào
+  (khôi phục trả bằng EP), đề nghị của Tukar và Scout không vượt quá giá trị các thẻ đã đưa, phiếu Mô phỏng
+  giải đấu có giá bằng phần thưởng của một vòng, và với Market biến động, giá gói bằng giá trị các thẻ lúc
+  đắt nhất (+13%), vì gói có thể để dành mở vào bất kỳ ngày nào.
+  Vật phẩm không chứa EP (tăng tỉ lệ nâng cấp, điểm nâng cấp, viên EXP, đổi tên hoặc đổi đội) có giá cơ bản
+  nhân hệ số giá cầu thủ, nên ở mức Khó giá gấp đôi.
 - **Cài đặt trước trận** (issue #31): các nút chọn trên màn hình cài đặt trận của Multiple > Rank đã dùng
   được cho sân (70 sân có đủ dữ liệu trong client), thời gian trong ngày (ban ngày hoặc ban đêm), thời
   tiết (quang đãng, mưa, tuyết, âm u: thành hoàng hôn nếu là ban đêm), thời lượng trận (6, 8, 10 hoặc 12

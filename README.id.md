@@ -201,10 +201,16 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   yang kamu mau: pengali harga pemain dan pak, EP awal manajer baru, opsi Shop gratis, dan pasar
   dinamis. Di pasar dinamis, harga tiap pemain di Market naik-turun dari hari ke hari (sampai
   sekitar 13%), manajer virtual sesekali menjual kartu dengan harga miring, dan kamu boleh memasang
-  harga sampai 110% dari harga pasar (kartunya lebih lama terjual), jadi beli murah lalu jual mahal
+  harga sampai 105% dari harga pasar (kartunya lebih lama terjual), jadi beli murah lalu jual mahal
   itu menguntungkan. Preset: Santai (seperti sebelumnya: Shop gratis, harga tetap), Realistis (Shop
   berbayar seharga nilai kartunya, pasar dinamis, EP awal 300.000), dan Sulit (harga x2,
   EP awal 100.000). EP dari match tetap diatur di tab Hadiah match.
+  Selama Shop berbayar, tidak ada cara mencetak EP: biaya Upgrade sebesar nilai yang rata-rata
+  ditambahkannya (restore dibayar EP), tawaran Tukar dan Scout paling tinggi senilai kartu yang
+  diserahkan, kupon Simulasi Liga seharga hadiah satu rondenya, dan dengan pasar dinamis pak seharga
+  nilai kartunya di harga tertinggi (+13%), karena pak bisa dibuka kapan saja.
+  Barang tanpa EP di dalamnya (boost, poin upgrade, kapsul EXP, ganti nama atau tim) punya harga
+  dasar dikali pengali harga pemain, jadi di Sulit harganya dua kali lipat.
 - **Pengaturan sebelum match** (issue #31): layar pengaturan game di Multiple > Rank punya stepper
   yang berfungsi untuk stadion (70 stadion yang datanya lengkap di client), waktu (siang atau
   malam), cuaca (cerah, hujan, salju, mendung: senja di malam hari), durasi match (6, 8, 10, atau

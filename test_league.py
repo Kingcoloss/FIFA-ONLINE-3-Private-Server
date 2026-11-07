@@ -94,8 +94,12 @@ def main():
         assert ctl_type(pad(5)) == 1  # the beginner's guide flips Controller with the keyboard's Type: the pad's own
         assert ctl_type(pad(0)) == 0  # preset 0 picked without switching: taken
         assert ctl_type(kb(0, KeyAttType1=[69, 65, 68, 83, 81, 90, 67, 87])) == 0  # switched and remapped preset 0: taken
-        st = hc._state(); st["option"]["controlOption"] = pad(5); hc._save(st)  # saved before the fix
-        assert acc_ctl()["Type"] == 0 and hc._state()["controlType"] == {"0": 0, "1": 0}
+        mapped = [3, 4, 2, 1, 5, 7, 6, 8]  # the pad's own keys, kept in every PUT (the client sends all lists)
+        assert ctl_type(pad(1, JoyAttType1=mapped)) == 1 and ctl_type(kb(5, JoyAttType1=mapped)) == 5
+        assert ctl_type(pad(0)) == 1  # switched to the pad, then Initialize (default keys; Type stays the switch's 0)
+        st = hc._state(); st["option"]["controlOption"] = pad(5); st.pop("controlType"); hc._save(st)  # saved before the fix
+        assert acc_ctl()["Type"] == 0  # shown as the pad's Default
+        assert ctl_type(kb(0)) == 5 and hc._state()["controlType"] == {"0": 5}  # the 5 was the keyboard's (a guide flip)
         save_opt({"controlOption": hc.CONTROL_DEFAULTS})
         assert "teamcolor" in body(hc.ENDPOINTS["/account"]("", b""))["features"]
         tc = body(hc.ENDPOINTS["/static/info/teamcolor"]("", b""))
@@ -1238,11 +1242,17 @@ def main():
         gs = hc._state()["match"]["gamesettings"]
         assert (gs["stadium"], gs["tod"], gs["weather"], gs["halfLength"], gs["kit"][0]) == (137, 3, 2, 50, "away")
         put(stadium=6, tod=5, weather=7, halfLength=45, ball={"id": 88})  # not offered: ignored (no crash-prone value reaches native)
-        assert (hc._state()["match"]["gamesettings"]["stadium"], hc._state()["match"]["gamesettings"]["tod"]) == (137, 3)
+        gs = hc._state()["match"]["gamesettings"]
+        assert (gs["stadium"], gs["tod"], gs["weather"], gs["halfLength"], gs["ball"]["id"]) == (137, 3, 2, 50, 0)
+        assert hc._state()["matchprefs"]["ball"] == 0
         put(ball={"id": 41})  # the ball stepper
         assert hc._state()["match"]["gamesettings"]["ball"]["id"] == 41
         assert A("prematch")["stadium"] == 137 and hc.match_prefs(hc._state()) == dict(stadium=137, tod=3, weather=2, halfLength=50, ball=41)
         st = hc._state(); st.pop("match"); st.pop("matchprefs"); hc._save(st)
+        hl, hc.HALF_LENGTH = hc.HALF_LENGTH, 20  # a FO3_HALF_LENGTH off the stepper's list: kept, the stepper off
+        m = mk(); hc.apply_prematch(hc._state(), m)
+        assert m["gamesettings"]["halfLength"] == 20 and not m["gamesettings"]["matchtimechange"]
+        hc.HALF_LENGTH = hl
         # issue #30's economy request: harder, configurable prices (admin Ekonomi tab). Easy = as it was
         assert A("economy") == dict(hc.ECONOMY_DEFAULT, shopfree=hc.SHOP_FREE) and hc.SHOP_FREE
         m88, p1, pk = 88158023, hc.card_price(88158023), next(iter(hc.PACKS))
@@ -1251,6 +1261,30 @@ def main():
         r = A("economy_set", players=2, packs=3, start_ep=5000, dynamic=False, shopfree=False)
         assert r == dict(players=2.0, packs=3.0, start_ep=5000, dynamic=False, shopfree=False) and not hc.SHOP_FREE
         assert hc.card_price(m88) == hc.sig3(p1 * 2) and abs(hc.pack_price(pk) - pp1 * 6) <= pp1 * 6 * 0.1  # caches dropped
+        # the paid Shop prices every product by what it gives (EP at face, packs at their cards'
+        # worth), rounded up and none off for 10: rounding down or 5% off made EP
+        assert hc.product_price(50021, 1) == 1_000_000 and hc.product_price(50021, 10) == 10_000_000
+        assert hc.product_price(119082304, 1) == hc.nice_ceil((2 * 100_000 + 100_000_000) / 3)  # its expected EP
+        box = hc.ITEMS[50121][3]["prizes"]
+        assert hc.shop_worth(50121) == sum(w * (p[1] if isinstance(p, tuple) else hc.pack_worth(p)) for w, p in box) / sum(w for w, _ in box)
+        assert hc.product_price(801, 1) == hc.nice_ceil(sum(n * hc.shop_worth(i) for i, n in hc.PACKAGES[801][2])) > 0
+        assert hc.product_price(81000001, 1) == 7_000_000  # a month of EP
+        # what holds no EP has a set price times the player price setting (x2 here): issue #30, "all
+        # Shop items should have reasonable prices that scale according to the selected Economy difficulty"
+        assert [hc.product_price(i, 1) for i in (1000054, 1000053, 1000052)] == [100_000, 200_000, 300_000]  # boosts
+        assert hc.product_price(81000100, 1) == 200_000 and hc.product_price(6003, 1) == 506_000  # 100 points; EXP Max
+        assert (hc.product_price(3002, 1), hc.product_price(3001, 1)) == (200_000, 600_000)  # name, team change
+        free = [(e["shopcategory"], e["product"]["itemid"]) for e in hc.shop_list(hc._state())
+                if any(b["price"] == 0 for b in e["product"]["staticdata"]["bunches"])]
+        assert not free, free
+        assert hc.product_price(pk, 10) == hc.nice_ceil(hc.pack_ev(pk) * 3 * 10) >= hc.pack_ev(pk) * 3 * 10
+        assert all(hc.product_price(i, 1) >= hc.pack_ev(i) * 3 for i in list(hc.PACKS)[:40])  # never under the cards' worth
+        # a League Simulation coupon costs the most its round pays: a won match, its reward card and
+        # a share of the season's top prizes (free coupons made EP without playing)
+        cfg = hc.match_reward_cfg()
+        card = sum(w * (p["ep"] if isinstance(p, dict) else hc.shop_worth(p)) for w, p in cfg["cards"]) / sum(w for w, _ in cfg["cards"])
+        assert hc.season_top_ep() >= hc.LEAGUE_SIZE * hc.PLACE_EP + sum(hc.LEADER_EP.values())
+        assert hc.product_price(hc.SIM_COUPON, 1) == hc.nice_ceil(cfg["result"]["win"]["ep"] + card + hc.season_top_ep() / (2 * (hc.LEAGUE_SIZE - 1)))
         assert json.load(open(hc.ECONOMY_FILE))["players"] == 2.0 and hc.load_economy() == hc.ECONOMY
         live = hc.STATE; hc.STATE = os.path.join(tmp, "eco_state.json")  # a new manager starts with start_ep
         hc._save({"coaches": [], "defaultcoachid": "", "teams": {}})
@@ -1258,20 +1292,87 @@ def main():
         assert hc._state()["coaches"][0]["ep"] == 5000
         hc.STATE = live
         # the dynamic Market: a player's price moves day by day (the same for every grade), the band
-        # goes to 110% (a slower buyer), the managers list bargains, the graph draws the real days
+        # goes to 105% (a slower buyer; the fee takes that back), the managers list bargains, the
+        # graph draws the real days
         A("economy_set", players=1, packs=1, start_ep=1000000, dynamic=True, shopfree=True)
         days = [hc.market_value(m88, 1, hc.VM_EPOCH + d * 86400 + 3600) for d in range(60)]
         assert all(0.86 * p1 <= v <= 1.14 * p1 for v in days) and max(days) / min(days) > 1.1  # room to trade
         lower, upper, v = hc.sell_band(m88, 1)
-        assert v == hc.market_value(m88, 1) and upper == hc.nice_price(v * hc.MARKET_ASK_MAX) and lower == v * 8 // 10
+        assert v == hc.market_value(m88, 1) and upper == hc.nice_floor(v * hc.MARKET_ASK_MAX) and lower == v * 8 // 10
+        # the stock never runs out, so its card must not resell at a profit at the top of the band
+        net = lambda s, g: hc.sale_net({"price": hc.sell_band(s, g)[1], "completefee": {"base": int(hc.sell_band(s, g)[1] * hc.SALE_FEE)}})
+        assert all(net(s, g) <= hc.market_value(s, g) for s in sorted(hc.market_spids())[:300] for g in (1, 2, 3))
         assert hc.market_rows(m88)[0]["price"] == v
         lows = [r["price"] / hc.market_value(s, r["grade"]) for s in sorted(hc.market_spids())[:400] for r in hc.market_rows(s)[3:]]
         assert lows and min(lows) < 0.95 and all(0.85 <= x <= 1.03 for x in lows)  # bargains now and then
         o = {"_id": "t", "spid": m88, "grade": 1, "price": upper}
         now = time.time(); hc.vm_buyer(o, now)
-        assert 300 * 48 * 0.6 * 0.9 <= o["buyat"] - now <= 300 * 48 * 1.4 * 1.1  # ~4 h at 110%
+        assert 300 * 48 * 0.6 * 0.9 <= o["buyat"] - now <= 300 * 48 * 1.4 * 1.1  # ~4 h at 105%
         hist = body(hc.route(f"/transfer/{m88}/1/detail")("", b""))["history"]
         assert hist["basePrice"] == v and hist["data"][-1][1] == hc.market_value(m88, 1, hc.VM_EPOCH + hc.vm_day() * 86400 + 43200)
+        # --- scarce EP (a Shop that costs EP with the dynamic Market: the Realistis preset): nothing
+        # turns EP into more EP. An Upgrade's fee takes what the try adds at its odds (boosts too), so
+        # buying both cards and selling the result at the band's top never pays (a +3 tried with a +1
+        # doubled its money); Easy keeps the 2% fee
+        A("economy_set", players=1, packs=1, start_ep=1000000, dynamic=True, shopfree=False)
+        for s in sorted(hc.market_spids())[::2000][:25]:
+            for tg in range(1, 10):
+                for mg in range(tg + 1):
+                    pa, pb = {"spid": s, "grade": tg}, {"spid": s, "grade": mg}
+                    for b in (0, 0.10, 0.35):  # none, the event, the event + Gold + points
+                        r = min(1.0, hc.enhance_rate(pa, pb) + (b if mg else 0))
+                        bad = tg - 1 if tg >= hc.ENHANCE_DROP_FROM else tg
+                        out = r * net(s, hc.enhance_grade(pa, pb)) + (1 - r) * net(s, bad)
+                        assert out <= hc.market_value(s, tg) + hc.market_value(s, mg) + hc.enhance_cost(pa, pb, r), (s, tg, mg, b)
+        hc.SHOP_FREE = True
+        assert hc.enhance_cost(pa, pb, 0.5) == max(1000, hc.sig3(hc.card_price(s, 9) // 50))
+        hc.SHOP_FREE = False
+        # the preview shows that fee; a failure that drops a grade offers the restore for EP, the
+        # Market value it gives back (upgrade points are free in the Shop)
+        st = hc._state(); t = st["teams"][str(hc._default_slot(st))]
+        s = next(x for x in sorted(hc.market_spids())[::997] if not copies(x))
+        t4, m1, tg, mt = (hc.add_player(t, s, g) for g in (4, 1, 6, 2))
+        ep0, es0 = ep(), es()
+        hc.add_ep(st, 10 ** 11); hc._save(st)
+        v1 = body(hc.route(f"/player/{hc.iid(t4)}/enhance/{hc.iid(m1)}/preview")("", b""))  # +4 with a +1: 50%
+        assert v1["enhancepay"] == hc.enhance_cost(t4, m1, 0.5) > max(1000, hc.sig3(hc.card_price(s, 4) // 50)), v1
+        pv = body(hc.route(f"/player/{hc.iid(tg)}/enhance2.5/{hc.iid(mt)}/preview/0/-1/-1")("", b""))
+        assert pv["enhancepay"] == hc.enhance_cost(tg, mt, hc.enhance25_rate(tg, mt, False, None, "-1"))
+        roll = hc.random.random
+        try:
+            hc.random.random = lambda: 0.999
+            e1 = ep(); up = body(hc.route(f"/player/{hc.iid(tg)}/enhance2.5/{hc.iid(mt)}/0/-1/-1")("", b"{}"))
+            gap = hc.nice_ceil(hc.market_value(s, 6) - hc.market_value(s, 5))
+            assert up["grade"] == 5 and up["usepoint"] == {"currency": "EP", "price": gap} and e1 - ep() == pv["enhancepay"], up
+            e2, es1 = ep(), es()
+            rs = body(hc.ENDPOINTS["/player/enhance2.5/restore"]("", b"{}"))
+            assert rs["result"] and rs["grade"] == 6 and e2 - ep() == gap and es() == es1 and rs["usepoint"]["currency"] == "EP", rs
+        finally:
+            hc.random.random = roll
+        st = hc._state(); t = st["teams"][str(hc._default_slot(st))]
+        for p in [p for p in t["players"] if p["spid"] == s]:
+            hc.remove_player(t, p)
+        hc.add_ep(st, ep0 - hc.coach_me(st, hc._default_slot(st))["money"]["ep"]); hc.add_es(st, es0 - hc.my_coach(st).get("es", 0)); hc._save(st)
+        # Tukar v2 and Scout: no offer is worth more than the cards given, by value or Market value
+        # (bonuses, scout ranges and asking again gave up to about twice back)
+        legend, rows = [int(x) for x in hc.trade2_special()][:20], [r for r in hc.trade3_pool() if r[3] == 1][::500]
+        for seed in range(60):
+            rng = hc.random.Random(seed)
+            give = [{"spid": rng.choice(legend) if rng.random() < 0.5 else rng.choice(rows)[1], "grade": rng.randint(1, 5)}
+                    for _ in range(rng.randint(2, 10))]
+            cap = hc.trade_cap(give)
+            for o in hc.trade2_props(give, hc.random.Random(seed)) + hc.trade3_props(give, rng.choice(hc.SCOUTS), hc.random.Random(seed)):
+                assert o["price"] + o.get("ep", 0) <= cap[0] and hc.market_value(o["spid"], o["grade"]) + o.get("ep", 0) <= cap[1], (give, o)
+        # packs at their cards' worth at the dearest swing: a pack waits in Item saya until opened, so
+        # no day makes one worth more than it cost (91 of 92 packs had such days; a one-player pack 11%)
+        sample = sorted(hc.market_spids())[::3000]
+        assert all(hc.market_swing(x, d) <= hc.MARKET_SWING_MAX for x in sample for d in range(400))
+        assert hc.product_price(pk, 1) == hc.nice_ceil(hc.pack_ev(pk) * hc.MARKET_SWING_MAX)
+        small = min((i for i in hc.PACKS if hc.pack_pool(i) and not hc.PACKS[i][1].get("draft")), key=lambda i: len(hc.pack_pool(i)))
+        pool, grades = hc.pack_pool(small), hc.pack_grades(small)
+        dear = max(sum(hc.market_value(x, g, hc.VM_EPOCH + d * 86400) * w * gw for x, w in pool for g, gw in grades)
+                   for d in range(120)) / sum(w for _, w in pool) / sum(gw for _, gw in grades)
+        assert dear > hc.pack_ev(small) * 1.0025 and dear * 0.9975 <= hc.product_price(small, 1), (small, dear)
         A("economy_set", players=1, packs=1, start_ep=1000000, dynamic=False, shopfree=True)
         assert hc.card_price(m88) == p1 and hc.pack_price(pk) == pp1 and hc.market_value(m88, 1) == p1 and hc.SHOP_FREE
         # the client's string pack is served with the setting screens' labels fixed: day "Siang" (was
@@ -1285,6 +1386,15 @@ def main():
             assert {k: v for k, v in fixed.items() if k not in ("COMMON_TIME_DAY", "COMMON_WEATHER_DUSK")} == \
                 {k: v for k, v in orig.items() if k not in ("COMMON_TIME_DAY", "COMMON_WEATHER_DUSK")}
             assert hc.language_pack(src) == out and hc.cdn_file(hc.LANG_PACK)[1] == open(out, "rb").read()
+            built = os.stat(out).st_mtime_ns
+            assert hc.language_pack(src) == out and os.stat(out).st_mtime_ns == built  # built once
+            fixes, hc.LANG_FIXES = hc.LANG_FIXES, {**hc.LANG_FIXES, b'"x": "y"': b'"x": "z"'}
+            assert hc.language_pack(src) == out and os.stat(out).st_mtime_ns != built  # new fixes: built again
+            hc.LANG_FIXES = fixes
+            junk = os.path.join(tmp, "junk.big")
+            with open(junk, "wb") as f:
+                f.write(b"<html>404</html>")  # a damaged pack: served as it is, never no reply
+            assert hc.client_big(junk, hc.LANG_ENTRY) is None and hc.language_pack(junk) == junk and hc.client_json(junk, "x") == {}
         assert A("summary")["coach"]["ep"] == 1500 and A("summary")["players"] == len(team()["players"])
         assert any(r["spid"] == 88158023 and r["ovr"] == 80 for r in A("search", q="Messi")["rows"])
         roster = lambda: {p["id"]: p for p in A("players")["players"]}

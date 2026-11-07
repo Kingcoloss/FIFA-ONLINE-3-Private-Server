@@ -854,7 +854,7 @@ $("#mrSave").addEventListener("click", () => act(async () => {
 const ECO_PRESETS = {
   easy: {shopfree: true, players: 1, packs: 1, start_ep: 1000000, dynamic: false},
   real: {shopfree: false, players: 1, packs: 1, start_ep: 300000, dynamic: true},
-  hard: {shopfree: false, players: 2, packs: 2, start_ep: 100000, dynamic: true},
+  hard: {shopfree: false, players: 2, packs: 1, start_ep: 100000, dynamic: true},  // packs: their cards x2 already
 };
 const ecoRead = () => ({shopfree: $("#ecoShopFree").checked, players: Number($("#ecoPlayers").value),
   packs: Number($("#ecoPacks").value), start_ep: Number($("#ecoStart").value), dynamic: $("#ecoDynamic").checked});
