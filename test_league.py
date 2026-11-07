@@ -4,7 +4,7 @@
 
 Runs a whole season through the handlers against a temporary copy of gamedata/state.json.
 """
-import copy, json, os, shutil, sys, tempfile, time
+import copy, json, os, re, shutil, sys, tempfile, time
 from collections import Counter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -143,6 +143,228 @@ def main():
         clubs = body(hc.ENDPOINTS["/static/db/SORTTEAM"]("", b""))
         assert nations and all(clubs[str(lg)] for n in nations for lg in leagues[str(n)])
         assert not any(hc.REST_OF_WORLD in ts for ts in clubs.values())  # not a club to pick
+        # issue #30: Multiple > Rank's virtual managers, in LadderMatchController's shapes
+        vms = hc.virtual_managers()
+        assert len({m["name"] for m in vms}) == len(vms) >= hc.VM_COUNT and {m["grade"] for m in vms} <= set(range(1, 7))
+        # stage 3, the crowd grows: newcomers from crowd day 1 (2026-11-02), each from his join hour,
+        # with a name nobody has; one from an earlier season starts the next with no games; VM_MAX caps it
+        assert len(hc.vm_crowd(202611, 1, 23)) == hc.VM_COUNT and len(hc.vm_newcomers(400)) == hc.VM_MAX - hc.VM_COUNT
+        nc = hc.vm_newcomers(60)
+        assert 30 <= len(nc) <= 180 and [m["_id"] for *_, m in nc] == [f"vm{hc.VM_COUNT + k:04d}" for k in range(len(nc))]
+        assert len({m["name"] for *_, m in nc} | {m["name"] for m in hc.vm_base()}) == len(nc) + hc.VM_COUNT
+        jd, jh, new = nc[0]
+        assert new["_id"] not in {m["_id"] for m in hc.vm_crowd(202611, jd + 1, jh - 1)}
+        assert new["_id"] in {m["_id"] for m in hc.vm_crowd(202611, jd + 1, jh)}
+        dec = {m["_id"]: m for m in hc.vm_crowd(202612, 1, 0)}
+        assert all(sum(dec[m["_id"]]["wins"] + dec[m["_id"]]["losses"]) == 0 for d, _, m in nc if d < 30)
+        # and lives: transfers, upgrade tries (+-1 by the Upgrade odds), levels; the same day, the same squad
+        s0, s90 = hc.vm_squad("vm0095", 0), hc.vm_squad("vm0095", 90)
+        assert {p["spid"] for p in s0["players"]} != {p["spid"] for p in s90["players"]} and hc.vm_squad("vm0095", 90) is s90
+        g = hc.vm_by_id("vm0095")["grade"]
+        assert all(1 <= p["grade"] <= g + 2 and 1 <= p["levelinfo"]["level"] <= hc.PLAYER_MAX_LEVEL for p in s90["players"])
+        assert [p["grade"] for p in s0["players"]] != [p["grade"] for p in s90["players"]]
+        hc.vm_squad.cache_clear()
+        assert hc.vm_squad("vm0095", 90) == s90 and len({p["levelinfo"]["level"] for p in s0["players"]}) > 1
+        # the crowd plays through the season: ratings and records move, the same hour gives the same crowd
+        early, late = hc.vm_crowd(202611, 1, 0), hc.vm_crowd(202611, 20, 23)
+        assert [{k: v for k, v in m.items() if k != "hours"} for m in early] == hc.vm_base()  # nothing played at 00
+        assert late == hc.vm_crowd(202611, 20, 23) and any(a["elo"] != b["elo"] for a, b in zip(early, late))
+        assert all(sum(b["wins"] + b["losses"]) > sum(a["wins"] + a["losses"]) for a, b in zip(early, late))
+        lb = body(hc.ENDPOINTS["/ladder/leaderboard"]("", b""))
+        assert len(lb) == hc.LADDER_COUNT and [e["rank"] for e in lb[3][:3]] == [1, 2, 3] and lb[3][0]["elo"] >= lb[3][1]["elo"]
+        squad = hc.vm_team(vms[0]["_id"])  # stage 2: a random-season squad per virtual manager
+        assert len(squad["squad"]["positions"]) == 11 and len(squad["players"]) == 18
+        assert len({p["spid"] // 1000000 for p in squad["players"]}) > 3 and hc.vm_team(vms[0]["_id"]) is squad
+        side = hc.vm_side(vms[0])  # each card at its own grade and level, in the match and the ratings
+        assert [(p["grade"], p["levelinfo"]["level"]) for p in side["team"]["players"]] == \
+            [(p["grade"], p["levelinfo"]["level"]) for p in squad["players"]]
+        assert hc.vm_ovr(vms[0]["_id"]) == {k: side["team"]["summary"]["ovr"][k] for k in ("FW", "MF", "DF")}
+        fr = body(hc.ENDPOINTS["/ladder/friends/info"]("", b""))
+        assert len(fr) == hc.VM_FRIENDS and set(fr[0]["ovr"]) == {"FW", "MF", "DF"} and len(fr[0]["elo"]) == hc.LADDER_COUNT
+        # playing styles: his style's tactic (radios 1|2) and formation; every style is someone's
+        for vm in vms[:20]:
+            side, name = hc.vm_side(vm), hc.vm_style(vm)
+            gk = next(str(p.get("id") or p["spid"]) for p in side["squad"]["positions"] if p["pos"] == 0)
+            assert gk not in side["squad"]["kickers"] and len(side["squad"]["kickers"]) == hc.KICKERS  # no GK corners
+            assert side["tactics"] == [hc.style_tactic(name)] and side["tactics"][0]["def"]["defenderline"] in (1, 2)
+            assert [p["pos"] for p in side["team"]["squad"]["positions"] if p["pos"] < hc.POS_SUB] == [s["pos"] for s in hc.style_slots(name)]
+        assert {hc.vm_style(vm) for vm in vms} == set(hc.VM_STYLES)
+        # my tactics: 1|2 radios; the in-match Reset (a GET) gets the tactic itself, DELETE resets
+        tac = hc.ENDPOINTS["/game/my/tactic/1"]
+        assert body(tac("", b""))["bus"]["positioning"] == 1 and body(tac("", b'{"_method": "DELETE"}'))["result"]
+        # presence: the Messenger friends are the Rank friends, each online / busy / offline
+        cl = body(hc.ENDPOINTS["/contact/list"]("", b""))
+        assert [f["_id"] for f in cl["friends"]] == [f["_id"] for f in fr] and cl["newfriends"] == []
+        assert {f["status"] for f in cl["friends"]} <= {"online", "busy", "offline"}
+        assert [hc.vm_status({"hours": [10]}, h) for h in (9, 10, 11, 12)] == ["online", "busy", "online", "offline"]
+        # the Messenger screen attaches once SystemMessageProxy is ready: onready feeds its notifications
+        res = body(hc.ENDPOINTS["/coach/me/onready"]("", b'{"_method": "PUT"}'))["resources"]
+        assert res[0]["uri"] == "/coach/me" and {"uri": "/inbox/my/notifications", "body": []} in res
+        # his profile (the friend Info button): summary, 1on1 rank, squad; an unknown one is refused
+        vid = fr[0]["_id"]
+        assert body(hc.route(f"/coach/{vid}/summary")("", b""))["coach"]["name"] == fr[0]["name"]
+        assert body(hc.route("/coach/vm9999/summary")("", b"")) == {"result": False, "reason": "invalid coach id"}
+        assert body(hc.route(f"/ladder/{vid}/info")("", b""))["ladder_pvp_1v1"]["rank"] >= 1
+        team = body(hc.route(f"/coach/{vid}")("path=team", b""))  # the squad tab: the team itself
+        assert sum(p["pos"] < hc.POS_SUB for p in team["squad"]["positions"]) == 11
+        coach = body(hc.route(f"/coach/{vid}")("", b""))  # its squad popup: a coach with teamsquadlist.preset
+        assert coach["name"] == fr[0]["name"] and coach["team"]["squad"] == team["squad"] and coach["teamsquadlist"]["preset"]
+        divs = json.load(open(os.path.join(hc.RESPONSES, "ladder_division_info.json")))
+        assert [d["rating"] for d in divs] == sorted((d["rating"] for d in divs), reverse=True)  # highest first
+        assert all(d["mingames"] > 0 for d in divs)  # the centre panel's "Match yg diperlukan x/<mingames>"
+        rewards = json.load(open(os.path.join(hc.RESPONSES, "ladder_reward_info.json")))
+        assert {f"DIVISION_{d['name']}" for d in divs} == {d["name"] for d in rewards["divs"]} and rewards["wins"]
+        # initializeBestRecord reads a division's items[0] and [1] and walks wins until from > totalwins
+        assert all(len(d["items"]) >= 2 for d in rewards["divs"])
+        assert [w["from"] for w in rewards["wins"]] == sorted(w["from"] for w in rewards["wins"])
+        # a Rank match: the PvP type, my user as the native session reads it, the opponent left
+        # out of that session (nameless, unready) until the squad stage gives him back
+        pushed = []  # ladder_found / ladder_squad push to the game over messenger.py: never to a running one
+        hc.messenger_push = lambda uri, b: pushed.append((uri, b))
+        st = hc._state(); hc.ladder_match(st, {"roomid": 1, "type": "pvp_ladder_mgr", "side": {"right": {}}}); hc._save(st)
+        m = st["match"]; user, him = (m["side"][s]["players"][0] for s in ("left", "right"))
+        assert m["type"] == "Ladder_MGR_PvP_1v1" and m["id"].isdigit() and user["ip"] and len(user["summary"]["ladderelo"]) == 5
+        assert "name" not in him and not m["side"]["right"]["ready"] and m["side"]["left"]["club"] == {"clubname": ""}
+        assert all(p["rankedcards"] is None for p in m["side"]["left"]["team"]["players"])  # "Pilihan terbaik"
+        hc.ladder_squad(m["id"])
+        m = hc._state()["match"]
+        assert m["stage"] == "squad" and m["side"]["right"]["players"][0]["name"] and m["side"]["right"]["ready"]
+        assert pushed == [(f"/match/{m['id']}", hc.push_match(m))]
+        # squad ready -> setting with my ready cleared (the client's sendReady skips a ready side), then playing
+        for stage, nxt in (("squad", "setting"), ("setting", "playing")):
+            ready = json.dumps({"stage": stage, "ready": True}).encode()
+            mb = body(hc.route(f"/match/{m['id']}/side/left/ready")("", ready))["resources"][0]["body"]
+            assert mb["stage"] == nxt and mb["side"]["left"]["ready"] == (nxt == "playing")
+        # the Rank screen's centre panel: "no record" until a Rank game, then the best rating and its mode
+        assert "ladder_total" not in body(hc.ENDPOINTS["/ladder/my/info"]("", b""))
+        # the result as matchStats sends it, his side first: I win 2-0
+        vm, mine = hc.vm_by_id(hc._state()["ladder_pending"]["opponent"]), m["side"]["left"]["team"]["teamid"]
+        assert vm["teamid"] != mine
+        stats = {"home": {"id": vm["teamid"], "score": 0}, "away": {"id": mine, "score": 2}}
+        body(hc.route(f"/match/{m['id']}/end")("", json.dumps(stats).encode()))
+        st = hc._state(); lad = hc.my_ladder(st)
+        assert lad["wins"][3] == lad["games"][3] == 1 and lad["elo"][3] > hc.LADDER_START and "ladder_pending" not in st
+        tot = body(hc.ENDPOINTS["/ladder/my/info"]("", b""))["ladder_total"]
+        assert tot == {"highelo": lad["high"][3], "hightype": "Ladder_MGR_PvP_1v1", "playedgames": 1, "totalwins": 1}
+        # "Poin peringkat" / record screen: setSeasonalRecord finds the season by season.sid === String(sid)
+        sid = body(hc.ENDPOINTS["/ladder/season/info"]("", b""))["sid"]
+        season = hc.coach_me(st, 0)["statistics"]["ladder"]["seasons"][0]
+        assert season["sid"] == str(sid) and season["elos"][3] == [{"elo": tot["highelo"], "dateymd": time.strftime("%Y%m%d", time.gmtime())}]
+        st.pop("match"); hc._save(st)
+        # the room flow: search, cancel (its timer firing late must not match), search again, found
+        timers, real_timer = [], hc.threading.Timer
+
+        class Timer:  # threading.Timer stand-in: the test fires the timers itself
+            def __init__(self, t, fn, args=()):
+                self.call = (fn, args)
+
+            def start(self):
+                timers.append(self.call)
+        hc.threading.Timer = Timer
+        try:
+            room = body(hc.ENDPOINTS["/room"]("", json.dumps({"type": "pvp_ladder_1v1", "slotsize": 1}).encode()))["resources"][0]["body"]
+            mm = hc.route(f"/room/{room['roomid']}/matchmaking")
+            mm("", b"{}"); mm("", json.dumps({"_method": "DELETE"}).encode())
+            fn, args = timers.pop(); fn(*args)
+            assert hc._state()["room"]["stage"] == "room" and "match" not in hc._state()
+            mm("", b"{}"); fn, args = timers.pop(); fn(*args)
+        finally:
+            hc.threading.Timer = real_timer
+        st = hc._state(); uri, sent = pushed[-1]
+        assert st["room"]["stage"] == "matched" and st["ladder_pending"]["index"] == 0 and uri == f"/room/{room['roomid']}"
+        assert len(sent["matchmaking"]["resources"][0]["body"]["side"]["left"]["team"]["players"]) <= 18
+        # a big club still fits a push (messenger.py frames carry at most 64 KB)
+        big = copy.deepcopy(st["match"]); team = big["side"]["left"]["team"]
+        team["players"] += [dict(team["players"][0], id=f"x{n}", _id=f"x{n}") for n in range(200)]
+        assert len(json.dumps(hc.push_match(big))) < 60000 < len(json.dumps(big))
+        # 5 placement wins: the placement popup goes from the start rating to the rating after them
+        vm = hc.vm_by_id(st["ladder_pending"]["opponent"])
+        for _ in range(hc.LADDER_DEPLOY):
+            hc.ladder_record(st, 0, vm, 1, 0)
+        hc._save(st)
+        my = body(hc.ENDPOINTS["/ladder/my/info"]("", b""))
+        fr = my["ladder_pvp_1v1"]["firstround"]
+        assert not fr["ongoing"] and fr["wins"] == [True] * 5 and fr["beforeelo"] == hc.LADDER_START < fr["afterelo"]
+        assert my["ladder_total"]["totalwins"] == my["ladder_total"]["playedgames"] == 6
+        # match history: the record screen's last 3 (streak, rating after) and Info Manager's list
+        season = hc.coach_me(st, 0)["statistics"]["ladder"]["seasons"][0]
+        rm = season["recentmatches"][0]
+        assert len(rm) == 3 and [r["streak"] for r in rm] == [3, 4, 5] and rm[-1]["elo"] == hc.my_ladder(st)["elo"][0]
+        assert rm[-1]["goals"] == 1 and rm[-1]["elodiff"] > 0 and season["recentmatches"][3][-1]["streak"] == 1  # the manager win
+        mp = hc.coach_me(st, 0)["multiplay"]
+        assert mp[-1]["opponent"]["coaches"][0]["coachid"] == vm["_id"] and mp[-1]["type"] == "Ladder_PvP_1v1"
+        assert mp[0]["type"] == "Ladder_MGR_PvP_1v1" and (mp[0]["team"]["score"], mp[0]["opponent"]["score"]) == (2, 0)
+        # a new season: the old one stays as the last season and in the best ratings; the week's wins stay
+        lad = hc.my_ladder(st); lad["sid"] -= 1; prev = copy.deepcopy(lad)
+        hc.my_ladder(st)
+        stats = hc.coach_me(st, 0)["statistics"]["ladder"]
+        assert [s["sid"] for s in stats["seasons"]] == [str(sid), str(prev["sid"])] and not any(hc.my_ladder(st)["games"])
+        # no season-end reward yet: an unrewarded past season makes the Rank front POST /ladder/reward and
+        # open the reward popup on the default reply (TypeError) at every visit
+        assert stats["seasons"][1]["rewarded"] is True and "rewarded" not in stats["seasons"][0]
+        assert stats["highrecords"]["elo"][0] == prev["high"][0] > hc.LADDER_START
+        assert hc.my_coach(st)["ladderweek"]["wins"] == 6
+        # issue #30 part 3: his chat (pushes recorded, timers fired here; odds 1, no gap between lines)
+        hc.VM_CHAT_FILE = os.path.join(tmp, "vm_chat.json")
+        hc.VM_CHAT_ODDS, hc.VM_CHAT_GAP = dict.fromkeys(hc.VM_CHAT_ODDS, 1), 0
+        timers.clear()  # the room flow's ladder_squad timer: match ids are per second, it could hit this match
+        hc.threading.Timer = Timer
+        try:
+            st = hc._state(); hc.ladder_match(st, {"roomid": 1, "type": "pvp_ladder_mgr", "side": {"right": {}}}); hc._save(st)
+            mid, vm = st["match"]["id"], hc.vm_by_id(st["ladder_pending"]["opponent"])
+            chat = json.load(open(os.path.join(hc.RESPONSES, "vm_chat.json"), encoding="utf-8"))
+            mine = lambda trig, lang="id": chat[lang][trig][hc.vm_personality(vm)]
+
+            def after(act):  # what goes out for act, its timers fired
+                n0 = len(pushed); act()
+                while timers:
+                    fn, args = timers.pop(0); fn(*args)
+                return [(u, b[0]) for u, b in pushed[n0:]]
+
+            def ev(n, **e):
+                return after(lambda: body(hc.route(f"/match/{mid}/gameplay/event/{n}")("", json.dumps(e).encode())))
+
+            def said(out, trig):
+                return [(u, m["coachname"], m["myside"], m["body"] in mine(trig)) for u, m in out] == [
+                    (f"/match/{mid}/messages/latest", vm["name"], False, True)]
+            assert said(ev(0, type="STARTHALF", halftype="FIRST_HALF"), "hello") and not ev(1, type="STARTHALF", halftype="SECOND_HALF")
+            hc.route(f"/match/{mid}/gameplay/event/2")("", json.dumps({"type": "SHOT", "teamid": 0}).encode())  # its timer waits...
+            assert said(ev(3, type="GOAL_TYPE_NORMAL", teamid=0), "conceded")  # ...and fires after the goal: no "save"
+            assert said(ev(4, type="SHOT", teamid=1), "miss") and said(ev(5, type="SHOT", teamid=0), "save")
+            assert said(ev(6, type="GOAL_TYPE_NORMAL", teamid=1), "goal") and not ev(7, type="FOUL_NO_BOOKING", teamid=0)
+            assert said(ev(8, type="GOAL_TYPE_OWN_GOAL", teamid=1), "conceded")  # into his own net: my goal
+            assert not after(lambda: hc.route("/match/123/gameplay/event/0")("", json.dumps({"type": "GOAL_TYPE_NORMAL", "teamid": 1}).encode()))
+            hc.VM_CHAT_GAP = 60  # within the gap only goals get a line
+            assert not ev(9, type="SHOT", teamid=1) and said(ev(10, type="GOAL_TYPE_NORMAL", teamid=1), "goal")
+            hc.VM_CHAT_GAP = 0
+            post = lambda m: after(lambda: body(hc.route(f"/match/{mid}/messages")("", json.dumps(m).encode())))
+            echo, answer = post({"message": "halo", "target": ""})
+            assert echo[1] == {"type": "chat", "target": "", "coachname": "Tester", "body": "halo", "myside": True}
+            assert answer[1]["body"] in mine("reply") and not answer[1]["myside"]
+            assert len(post({"message": "tim", "target": "team"})) == 1 and not post({"message": "<P>x</P>", "type": "chat"})
+            # the result: he wins 1-0; his word on it comes back as a banner on the Rank screen
+            stats = {"home": {"id": st["match"]["side"]["left"]["team"]["teamid"], "score": 0}, "away": {"id": vm["teamid"], "score": 1}}
+            body(hc.route(f"/match/{mid}/end")("", json.dumps(stats).encode()))
+            (uri, text), = after(lambda: hc.route("/room/1/back")("", b"{}"))
+            assert uri == "/alert/vm/latest" and any(text == f"<FONT COLOR='#ffcc00'>{vm['name']}</FONT>: {line}" for line in mine("win"))
+            assert not after(lambda: hc.route("/room/1/back")("", b"{}"))  # said once
+            hc.VM_CHAT_AFTER["last"] = {"vm": vm["_id"], "outcome": "win"}
+            st = hc._state(); hc.ladder_match(st, {"roomid": 1, "type": "pvp_ladder_mgr", "side": {"right": {}}}); hc._save(st)
+            assert not hc.VM_CHAT_AFTER  # a new Rank match drops a result that was never said
+            with open(hc.VM_CHAT_FILE, "w", encoding="utf-8") as f:
+                json.dump({"enabled": False, "lang": "vi"}, f)
+            hc.VM_CHAT_AFTER["last"] = {"vm": vm["_id"], "outcome": "win"}
+            assert not after(lambda: hc.route("/room/1/back")("", b"{}")) and not after(lambda: hc.vm_say(mid, vm, "goal", 0))
+            assert hc.vm_chat_line(vm, "goal") in mine("goal", "vi")
+            with open(hc.VM_CHAT_FILE, "w", encoding="utf-8") as f:
+                f.write("[1, 2]")  # valid JSON, not an object
+            assert hc.vm_chat_cfg() == hc.VM_CHAT_DEFAULT
+        finally:
+            hc.threading.Timer = real_timer
+        os.remove(hc.VM_CHAT_FILE)
+        for k in ("match", "ladder_pending", "room"):
+            st.pop(k, None)
+        hc._save(st)
         city = body(hc.route("/static/info/authentic/team/licensed/10")("", b""))
         assert city["teamid"] == 10 == city["summary"]["id"] and len(city["team"]["squad"]["positions"]) == 11
         assert city["team"]["captain"] in {p["id"] for p in city["team"]["players"]}
@@ -375,6 +597,22 @@ def main():
         ep0 = ep()
         assert buy(offer)["result"] and len(copies(spid)) == 1 and ep() == ep0 - offer["price"]
         assert buy(offer)["result"] and len(copies(spid)) == 2  # a second copy: an upgrade pair
+        # the virtual managers' listings beside the +1..+3 stock: other grades a little under the market
+        # price, Kuantitas per hour; buying takes from the row the path names, a row sold out (or never
+        # there) is NO_SUCH_OFFER ("Pemain tidak ada.")
+        rows = body(hc.route(f"/transfer/search/{spid}")("", b""))
+        assert [r["grade"] for r in rows[:3]] == [1, 2, 3] and all(r["count"] >= 1 for r in rows)
+        s, r = next((s, r) for s in sorted(hc.market_spids()) if hc.card_price(s) < 20000
+                    for r in hc.market_rows(s) if r["grade"] >= 4 and r["price"] < ep() // 4)
+        assert 0.955 * hc.card_price(s, r["grade"]) <= r["price"] <= hc.card_price(s, r["grade"])
+        ep2 = ep()
+        for _ in range(r["count"]):
+            assert buy(r)["result"]
+        assert ep() == ep2 - r["count"] * r["price"] and buy(r)["reason"] == "NO_SUCH_OFFER"  # sold out this hour
+        assert buy({**rows[0], "price": rows[0]["price"] - 1})["reason"] == "NO_SUCH_OFFER"
+        hist = body(hc.route(f"/transfer/{spid}/1/detail")("", b""))["history"]  # the price graph
+        assert hist["basePrice"] == hc.card_price(spid) and len(hist["data"]) == hc.PRICE_DAYS
+        assert all(0.9 * hist["basePrice"] < p <= hist["basePrice"] for _, p in hist["data"]) and hist["endat"] > hist["startat"]
         # --- upgrade (enhancement v1): +1 & +1 -> +2 at 100% (ENHANCE_RATE[1] = 1.0)
         a, b = (hc.iid(p) for p in copies(spid))
         pv = body(hc.route(f"/player/{a}/enhance/{b}/preview")("", b""))
@@ -569,23 +807,71 @@ def main():
             hc.random.random = roll
         st = hc._state(); t = st["teams"][str(hc._default_slot(st))]
         hc.remove_player(t, next(p for p in t["players"] if hc.iid(p) == tg)); hc._save(st)
-        # --- selling: a reserve at <= market price; the NPC buys at once, EP minus fee on collect
+        # --- selling: a reserve at <= market price waits ("waiting" = Dijual) until a virtual manager
+        # buys it (sooner when cheaper); then sold, pushed to the game; EP minus fee on collect
         band = body(hc.route(f"/transfer/price/{spid}/2")("", b""))
         assert band["upper"] == hc.card_price(spid, 2) and band["lower"] < band["upper"]
+        assert band["lowest"] == min(r["price"] for r in hc.market_rows(spid) if r["grade"] == 2)
         sell = lambda pid, price: body(hc.ep_transfer_offer("", json.dumps({"playerobjectid": str(pid), "price": price}).encode()))
+        mine = lambda: body(hc.ENDPOINTS["/transfer/my/offer/list"]("", b""))["offers"]
         squad = team()["squad"]
         starter = next(str(s.get("id") or s["spid"]) for s in squad["positions"] if s["pos"] < hc.POS_SUB)
         assert not sell(starter, 1000)["result"] and not sell(a, band["upper"] + 1)["result"]
         assert sell(a, band["upper"])["result"] and not copies(spid)
-        offers = body(hc.ENDPOINTS["/transfer/my/offer/list"]("", b""))["offers"]
-        assert len(offers) == 1 and offers[0]["status"] == "sold"
+        offers = mine()
+        assert len(offers) == 1 and offers[0]["status"] == "waiting" and not set(hc.OFFER_PRIVATE) & set(offers[0])
+        o = offers[0]  # Batal: the card comes back; a second Batal finds nothing
+        assert body(hc.route(f"/transfer/my/offer/waiting/{o['_id']}")("", b'{"_method": "DELETE"}'))["result"]
+        assert [hc.iid(p) for p in copies(spid)] == [a] and mine() == []
+        assert body(hc.route(f"/transfer/my/offer/waiting/{o['_id']}")("", b"{}"))["reason"] == "OFFER_NOT_EXIST_ERROR"
+        assert sell(a, band["upper"])["result"]  # Ulang at the lowest allowed price: a buyer comes sooner
+        o = hc._state()["offers"][0]
+        slow = o["buyat"] - time.time()
+        assert hc.VM_SALE[1] * 0.6 - 1 <= slow <= hc.VM_SALE[1] * 1.4 + 1 and o["buyer"].startswith("vm")
+        reoffer = lambda price: body(hc.route(f"/transfer/offer/from/{o['_id']}")("", json.dumps({"price": price}).encode()))
+        assert not reoffer(band["upper"] + 1)["result"] and reoffer(band["lower"])["result"]
+        o = hc._state()["offers"][0]
+        assert (o["status"], o["price"]) == ("waiting", band["lower"]) and o["buyat"] - time.time() < hc.VM_SALE[0] * 1.4 + 1
+        n0 = len(pushed)
+        st = hc._state(); st["offers"][0]["buyat"] = time.time() - 1; hc._save(st)  # his time has come
+        offers = mine()
+        assert len(offers) == 1 and (offers[0]["status"], offers[0]["price"]) == ("sold", band["lower"])
+        assert [u for u, _ in pushed[n0:]] == ["/transfer/my/offer/list", "/inbox/my/notifications/latest"]
+        alarm = pushed[-1][1]  # toast "<card> terjual seharga <price> EP."; the entry names the buyer
+        assert (alarm["category"], alarm["type"], alarm["details"]["price"]) == ("transfermarket", "sold", f"{band['lower']:,}")
+        assert hc.vm_by_id(o["buyer"])["name"] in alarm["details"]["title"] and alarm["details"]["expandme"] == "player"
+        assert body(hc.route(f"/transfer/my/offer/waiting/{o['_id']}")("", b"{}"))["reason"] == "OFFER_NOT_EXIST_ERROR"
+        assert mine() == offers and len(pushed) == n0 + 2  # told once
+        res = body(hc.ENDPOINTS["/coach/me/onready"]("", b'{"_method": "PUT"}'))["resources"]
+        assert [n["type"] for n in res[-1]["body"]] == ["list"]  # the login notice while it waits to be collected
         ep1 = ep()
         got = body(hc.route(f"/transfer/my/offer/completed/{offers[0]['_id']}")("", b"{}"))
         fee = offers[0]["completefee"]["base"]  # minus PC warnet 20% + VIP 30% fee discounts
-        assert got["result"] and ep() == ep1 + band["upper"] - fee + int(0.2 * fee) + int(0.3 * fee)
+        assert got["result"] and ep() == ep1 + band["lower"] - fee + int(0.2 * fee) + int(0.3 * fee)
         me = hc.coach_me(hc._state(), hc._default_slot(hc._state()))
         assert me["igr"] is True and me["vipDetail"] == 2 and me["vipExpireAt"] > time.time() * 1000
         assert body(hc.ENDPOINTS["/transfer/my/offer/list"]("", b""))["offers"] == []
+        # a sold toast also stays in the notification dropdown (stackable); offers are each manager's
+        # own (another slot's do not show, nor sell to this club); at most OFFERS_MAX listings; Batal
+        # refuses a full club ("Exceed plyer limit")
+        assert alarm["stackable"] is True
+        spare = [hc.iid(p) for p in team()["players"] if not hc.is_starter(team(), p) and hc.grade_of(p) > 0]
+        assert sell(spare[0], 1)["result"]
+        st = hc._state(); o = st["offers"][0]
+        assert o["slot"] == hc._default_slot(st) and not any("slot" in x for x in mine())
+        o["slot"] = 1 - o["slot"]; hc._save(st)
+        assert mine() == [] and body(hc.route(f"/transfer/my/offer/waiting/{o['_id']}")("", b"{}"))["reason"] == "OFFER_NOT_EXIST_ERROR"
+        o["slot"] = 1 - o["slot"]; st["offers"] += [dict(o, _id=f"x{k}") for k in range(hc.OFFERS_MAX - 1)]
+        extra = hc.iid(hc.add_player(st["teams"][str(hc._default_slot(st))], spid, 1)); hc._save(st)
+        assert sell(extra, 1)["reason"] == "TRANSFERMARKET_MAX_REGISTERED"
+        st = hc._state(); st["offers"] = st["offers"][:1]; t = st["teams"][str(hc._default_slot(st))]
+        filler = [dict(t["players"][-1], _id=f"fill{k}") for k in range(hc.MAX_PLAYERS - len(t["players"]))]
+        t["players"] += filler; hc._save(st)
+        assert body(hc.route(f"/transfer/my/offer/waiting/{o['_id']}")("", b"{}"))["reason"] == "Exceed plyer limit"
+        st = hc._state(); t = st["teams"][str(hc._default_slot(st))]
+        t["players"] = [p for p in t["players"] if not str(p.get("_id", "")).startswith("fill")]; hc._save(st)
+        assert body(hc.route(f"/transfer/my/offer/waiting/{o['_id']}")("", b"{}"))["result"] and mine() == []
+        assert not os.path.exists(hc.STATE + ".tmp")  # saves are whole: a temp file, then a rename
         # --- trade (Tukar v1): 2..10 reserves -> offers rated >= avg OVR + bonus, PC + VIP extra
         post = lambda path, req: body(hc.ENDPOINTS[path]("", json.dumps(req).encode()))
         with hc.closing(hc._db()) as c:
@@ -820,6 +1106,11 @@ def main():
         roster = {c for e in seasons for c in e["value"]}
         market = hc.market_spids()
         assert {s // 1000000 for s in market} <= roster, sorted({s // 1000000 for s in market} - roster)
+        # season 0 = the engine cards the AI clubs of Liga / Cup play with ('17 badge, Messi 125): not a
+        # Market season (user: "pemain ini harusnya tidak muncul di market karena khusus untuk main
+        # cup/liga"); "default" is the client's own DEFAULT_SEASON_ID 88 ('17 cards), listed once
+        assert 0 not in roster and [e["value"] for e in seasons if e["season"] == "default"] == [[88]]
+        assert sorted(c for e in seasons for c in e["value"]) == sorted(roster)  # no season twice
         # every card the client itself can trade (its Market search: permid.transferable = 1 and a
         # name) is on the Market, in the trades and in a pack (user: "jangan sampai ada pemain yang
         # tidak ada di pack, trade, dan market"); fifaaddict alone left out 6,599, 4,313 of them '17
@@ -892,6 +1183,9 @@ def main():
             except admin.AdminError:
                 return True
         assert A("ep", set=5000)["ep"] == 5000 and A("ep", add=-9000)["ep"] == 0 and A("ep", add=1500)["ep"] == ep() == 1500
+        # the Rank opponents' chat: on/off and language (gamedata/vm_chat.json)
+        assert A("vm_chat")["enabled"] and A("vm_chat")["lang"] == "id" and refused("vm_chat_set", enabled=True, lang="xx")
+        assert A("vm_chat_set", enabled=False, lang="vi") == hc.vm_chat_cfg() == {"enabled": False, "lang": "vi"}
         assert A("summary")["coach"]["ep"] == 1500 and A("summary")["players"] == len(team()["players"])
         assert any(r["spid"] == 88158023 and r["ovr"] == 80 for r in A("search", q="Messi")["rows"])
         roster = lambda: {p["id"]: p for p in A("players")["players"]}
@@ -1003,6 +1297,10 @@ def main():
                                          {"X-FO3-Admin": "1", "X-FO3-Lang": "en"}, method="POST")
             assert json.load(web.open(err)) == {"error": "player not found"}
             assert json.load(web.open(url + "/api/summary"))["coach"]["ep"] == ep()
+            # every API the page reads without a body (a GET) has to be read-only, or the tab fails to load
+            page = open(os.path.join(os.path.dirname(os.path.abspath(admin.__file__)), "admin", "index.html"), encoding="utf-8").read()
+            assert set(re.findall(r'api\("(\w+)"\)', page)) <= admin.READ_ONLY
+            assert json.load(web.open(url + "/api/vm_chat"))["lang"] in hc.VM_CHAT_LANGS
             for req in (urllib.request.Request(url + "/api/ep?add=5"),
                         urllib.request.Request(url + "/api/ep", b'{"add": 5}', method="POST")):
                 try:
@@ -1061,6 +1359,10 @@ def main():
         st = hc._state(); hc.my_coach(st)["deleteat"] = time.time() - 1; st["offers"] = []; hc._save(st)  # restore time over
         assert mine_c() is None and coaches()["defaultcoachid"] == ""
         st = hc._state(); assert str(slot) not in st["teams"] and "offers" not in st and "cups" not in st
+        # a purged manager takes only his own Market offers (one from before slots: the default's)
+        two = {"defaultcoachid": "b", "teams": {"0": {}, "1": {}}, "offers": [{"slot": 0}, {"slot": 1}, {"_id": "old"}],
+               "coaches": [{"_id": "a", "slot": 0, "state": "postpone", "deleteat": 0}, {"_id": "b", "slot": 1}]}
+        assert [c["_id"] for c in hc.purge_deleted_coaches(two)] == ["a"] and two["offers"] == [{"slot": 1}, {"_id": "old"}]
         assert postpone(cid, "DELETE") == {"result": False, "reason": "already removed"}
     finally:
         shutil.rmtree(tmp)

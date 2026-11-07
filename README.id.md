@@ -39,7 +39,7 @@ Diuji di client asli (UI bahasa Indonesia):
   per level), manager LV.1-100.
 - Suara game dan musik menu EA Trax. `tools/eatrax_song.py` menaruh lagumu sendiri di urutan
   pertama, tapi game lalu crash setelah pertandingan (lihat masalah yang diketahui di bawah).
-- Halaman admin web di http://127.0.0.1:8088/ (EP, pemain, pak, hadiah, hadiah harian, hadiah match, Shop, log)
+- Halaman admin web di http://127.0.0.1:8088/ (EP, pemain, pak, hadiah, hadiah harian, hadiah match, chat AI, Shop, log)
   dengan pilihan bahasa (issue #15): Bahasa Indonesia, English, 简体中文, ไทย, Tiếng Việt, 한국어;
   browser mengingat pilihannya.
 - Jersey klub asli di pertandingan (kit id = `teamid << 5 | type`; `<< 10` yang lama menghasilkan
@@ -170,6 +170,33 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   satu untuk kartu 2017): pilih pemain, dia dapat EXP-nya. Request layar draft
   (`/item/draftpack/<id>/players/<n>`, `/transfer/price/default/<grade>`) dan jenis item capsule belum
   ada. Admin page bisa membuat lagi keduanya (isian "Draft" di pak, jenis item "EXP Capsule").
+- **Multiple > Rank: manajer lain dan pertandingan sungguhan** (issue #30): layar rank sebelumnya
+  berhenti di error UI karena server tidak mengirim divisi, hadiah, dan rekor ladder. Sekarang
+  layarnya terbuka, dan manajer virtual mengisi peringkatnya: 3 teratas (VS Manager Top) dan
+  peringkat teman berisi 20 manajer, masing-masing dengan nama, klub, divisi, dan rekor yang berubah
+  sepanjang hari seiring mereka bermain. Awalnya ada 100, lalu tiap hari bergabung 0-3 manajer baru,
+  sampai 300. Tiap manajer punya gaya main sendiri (penguasaan bola, serangan balik, pressing tinggi,
+  umpan panjang, parkir bus, atau menyerang total: formasi, taktik, dan pergerakan pemain), memakai
+  kit klubnya dan kartu acak dari klub dan musim mana pun di sekitar ratingnya, tiap kartu dengan
+  grade (+1 untuk pemula sampai +6 ke atas) dan level masing-masing. Dari hari ke hari mereka membeli
+  dan menjual kartu, meng-upgrade-nya (upgrade yang gagal dari +5 ke atas turun satu grade), dan
+  menaikkan levelnya. Rank 1 on 1 dan VS Manager memainkan pertandingan sungguhan melawan salah satu
+  dari lima manajer dengan rating terdekat: layar skuad, pengaturan game, lalu pertandingan penuh
+  dengan AI game di pihak lawan, lalu hasil, hadiah, dan rating rank baru, yang tampil di panel layar
+  Rank, di jendela rekor (pertandingan terakhir, grafik musim), dan di daftar pertandingan
+  Info Manager. Selama match lawan ikut chat di chat match sesuai kepribadiannya (saat kick-off, gol
+  di kedua sisi, tembakan meleset, penyelamatan kiper, dan membalas saat kamu mengetik), lalu
+  berkomentar soal hasilnya saat kembali ke layar Rank; tab Chat AI di halaman admin bisa
+  mematikannya atau memilih bahasanya (Indonesia, Inggris, Vietnam). Messenger sekarang bisa dibuka
+  (dulu tertahan menunggu daftar notifikasi yang tidak pernah dikirim server) dan menampilkan status
+  ke-20 teman itu: online, sibuk (sedang main Rank), atau offline, sesuai jam main mereka
+  (08:00-02:00 WIB); tombol Info seorang teman menampilkan profil dan skuadnya.
+- **Market jadi hidup** (issue #30): manajer virtual membeli kartu yang kamu jual ("Dijual" berubah
+  jadi "Terjual" dengan sendirinya dalam beberapa menit, lebih cepat kalau harganya lebih murah,
+  dengan popup "terjual seharga" dan notifikasi yang menyebut nama pembelinya; Batal dan Ulang jalan)
+  dan ikut menjual kartu mereka sendiri di samping stok +1..+3, juga dengan grade lain, sedikit di
+  bawah harga pasar, dengan Kuantitas yang berubah tiap jam. Tab Market Price di jendela kartu
+  menampilkan grafik harga 30 hari terakhir.
 - **Kotak acak bisa dibuka** (Kotak Platinum dan lainnya, issue #12): layar kotak menampilkan
   hadiahnya dari `staticdata.availables`, yang belum ada, jadi tiap kotak gagal saat "Gunakan".
 - **Kartu baru masuk Tim Cadangan**: kartu dari pak, trade, Market, Bag, atau halaman admin tampil
@@ -181,6 +208,10 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   '14 TOTS, …), jadi mis. WL R. Gullit tidak pernah muncul. Daftar musim di filter Market jalan
   (issue #14: memilih musim memunculkan "cannot convert 39 to Array", karena `value` tiap musim
   harus berupa list) dan menampilkan nama musim dari client (World Legend, 02 Chinese Legend, …).
+  Pencarian Market tidak lagi menampilkan kartu engine yang dipakai klub AI Liga dan Cup (badge '17,
+  rating sampai 127, mis. L. Messi 125; lagi pula memang tidak bisa dibeli): musim 0 mereka
+  dikeluarkan dari `/static/roster`, yang entri "default"-nya sekarang musim '17 milik client sendiri
+  (88), jadi "2017" hanya muncul sekali di daftar musim.
 - **Semua kartu yang bisa diperdagangkan** ada di Market, di trade, dan di pak: kartu dihitung
   kalau fifaaddict mencantumkannya atau game sendiri menandainya bisa diperdagangkan
   (`permid.transferable`). fifaaddict saja melewatkan 6.599 kartu (4.313 di antaranya '17);
@@ -201,7 +232,7 @@ tidak. Crash yang sama terjadi dengan lagu sebagai PCM mentah (37,7 MB), sebagai
 TrackID 1 dengan bank musik lebih kecil dari aslinya, jadi ukuran musik bukan penyebabnya. Pakai
 musik bawaan game: `python -I tools/eatrax_song.py --restore` mengembalikannya.
 
-Belum dikerjakan: mode online (ranked, friendly, King of the Hill), Road to World, simulasi liga.
+Belum dikerjakan: main online melawan orang lain (ranked PvP, friendly, King of the Hill), Road to World, simulasi liga.
 
 ## Kebutuhan
 
@@ -252,7 +283,7 @@ Belum dikerjakan: mode online (ranked, friendly, King of the Hill), Road to Worl
 | `tools/fo4_season.py` | Menambahkan kartu 26 LIVE dan 25 LIVE FIFA Online 4 (data fifaaddict, stat dianggap +0) sebagai dua season baru dengan badge season FO4: `fetch`, `collect` + `import`, `build`, `install` (menulis ulang isi `data_0.big` di tempat, karena ukurannya tidak boleh berubah, dan menambahkan di akhir `Label.big`; `restore` mengembalikan keduanya). |
 | `tools/fa_faces.py` | Menambahkan wajah mini pemain yang tidak ada di cache client (fifaaddict menyajikan PNG 128x128 yang sama); `--crests` menambahkan logo klub yang tidak ada (kebanyakan klub tidak punya di cache, jadi game menampilkan logo bawaan). Bisa dilanjutkan, `--remove` membatalkannya. |
 | `tools/draft_icons.py` | Menggambar ikon Shop untuk pak draft (cache client tidak punya gambar draft) ke `assets/externalAssets/shop/`, yang dilayani server sebelum gambar milik client; `<icon> <tag> <picks>` menggambar satu lagi, untuk pak buatan halaman admin. Butuh Pillow. |
-| `tools/re/` | Alat bantu reverse engineering: `bigdir.py` (tabel arsip BIg4), `refpack.py` (codec RefPack), `eadb.py` (tabel database "DB" EA), `abc*.py` (parser / grep / penambang skema bytecode AS3), `gfxx.py` (SWF UI), `memgrab.py`, `gamectl.ps1` (mengendalikan jendela client untuk tes). |
+| `tools/re/` | Alat bantu reverse engineering: `bigdir.py` (tabel arsip BIg4), `refpack.py` (codec RefPack), `eadb.py` (tabel database "DB" EA), `abc*.py` (parser / grep / penambang skema bytecode AS3), `gfxx.py` (SWF UI), `memgrab.py`, `dbwin.py` (output debug client), `relay_emu.py` (codec paket relay PvP dan relay uji), `gamectl.ps1` (mengendalikan jendela client untuk tes). |
 | `blaze.py`, `server.py`, `test_client.py`, `analyze_capture.py` | Framing EA Blaze (Fire/TDF) dan server tes loopback dari fase pertama proyek; ternyata client memakai REST + messenger. |
 | `analysis/` | Script analisis client awal (string, section PE, endpoint jaringan). |
 | `FO3ID-private-server.md`, `reports/` | Temuan dan laporan progres (`reports/` dalam bahasa Indonesia). |

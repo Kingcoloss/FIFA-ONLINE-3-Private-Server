@@ -37,7 +37,7 @@ Tested in the real client (Indonesian UI):
   (+1 to every attribute per level), manager LV.1-100.
 - Game sound and the EA Trax menu music. `tools/eatrax_song.py` puts your own song first in it,
   but the game then crashes after matches (see the known issue below).
-- Admin web page on http://127.0.0.1:8088/ (EP, players, packs, gifts, daily rewards, match rewards, Shop, log)
+- Admin web page on http://127.0.0.1:8088/ (EP, players, packs, gifts, daily rewards, match rewards, AI chat, Shop, log)
   with a language switch (issue #15): Bahasa Indonesia, English, 简体中文, ไทย, Tiếng Việt, 한국어;
   the browser remembers the choice.
 - Real club kits in matches (kit id = `teamid << 5 | type`; the old `<< 10` gave a checkerboard).
@@ -162,6 +162,29 @@ Added, passing the tests but not yet checked in the client:
   and below, one for 2017 cards): pick a player and he gets the EXP. The draft screen's requests
   (`/item/draftpack/<id>/players/<n>`, `/transfer/price/default/<grade>`) and the capsule item type were
   missing. The admin page makes more of both (a pack's "Draft" field, item type "EXP Capsule").
+- **Multiple > Rank: other managers and real matches** (issue #30): the ranked screen stopped on a UI
+  error, as the server sent no divisions, rewards or ladder record. It now opens, and virtual managers
+  fill its rankings: the top 3 (VS Manager Top) and a friends ranking of 20, each with a name, a club,
+  a division and a record that moves through the day as they play. 100 start and 0-3 newcomers join
+  every day, up to 300. Each one plays his own style (possession, counter, high press, long ball, park
+  the bus or all-out attack: formation, tactics and runs) in his club's kit, with random cards of any
+  club and season around his rating, each card at its own grade (+1 for beginners up to +6 and more)
+  and level. From day to day they buy and sell cards, upgrade them (a failed upgrade from +5 drops a
+  grade) and level them up. Rank 1 on 1 and VS Manager play a real match against one of the five
+  managers nearest your rating: squad screen, game setting, then a full match with the game's AI on
+  his side, then the result, the rewards and your new rank rating, shown in the Rank screen's panels,
+  in the record window (last matches, the season graph) and in Info Manager's match list. During the
+  match he chats in the match chat in his own personality (kick-off, goals both ways, missed shots,
+  saves, and answers when you type) and has a word on the result back on the Rank screen; the admin
+  page's AI chat tab turns it off or picks its language (Indonesian, English, Vietnamese). The
+  Messenger opens (it waited for a notification list the server never sent) and shows the 20 friends
+  online, busy (in a Rank game) or offline by the hours they play (08:00-02:00 WIB); a friend's Info
+  button shows his profile and squad.
+- **The Market lives** (issue #30): virtual managers buy the cards you list ("Dijual" turns "Terjual"
+  on its own within a few minutes, sooner when cheaper, with a "terjual seharga" toast and a
+  notification naming the buyer; Batal and Ulang work) and list cards of their own beside the +1..+3
+  stock, other grades too, a little under the market price, with the Kuantitas changing every hour.
+  The card window's Market Price tab draws the last 30 days' price.
 - **Random boxes open** (Kotak Platinum and the rest, issue #12): the box screen lists its prizes
   from `staticdata.availables`, which was missing, so every box failed at "Gunakan".
 - **New cards join Tim Cadangan**: a card from a pack, a trade, the Market, the Bag or the admin
@@ -172,7 +195,10 @@ Added, passing the tests but not yet checked in the client:
   `/static/roster`, which lacked 29 seasons with Market cards (World Legend, World Best,
   '14 TOTS, …), so e.g. WL R. Gullit never showed up. The Market filter's season list works
   (issue #14: picking a season threw "cannot convert 39 to Array", as each season's `value` must
-  be a list) and shows the client's season names (World Legend, 02 Chinese Legend, …).
+  be a list) and shows the client's season names (World Legend, 02 Chinese Legend, …). It no
+  longer lists the engine cards the Liga and Cup AI clubs play with ('17 badge, rated up to 127,
+  e.g. L. Messi 125; they could not be bought anyway): their season 0 left `/static/roster`, whose
+  "default" entry is now the client's own '17 season (88), so "2017" shows once in the season list.
 - **Every tradeable card** is on the Market, in the trades and in a pack: a card counts when
   fifaaddict lists it or the game itself marks it tradeable (`permid.transferable`). fifaaddict
   alone left out 6,599 cards (4,313 of them '17); the Market now holds 44,703. The new
@@ -192,7 +218,7 @@ It crashed the same way with the song as raw PCM (37.7 MB), as EALayer3 (6.5 MB,
 bank smaller than the shipped one, so the size of the music is not the cause. Keep the game's own
 music: `python -I tools/eatrax_song.py --restore` puts it back.
 
-Not done: online modes (ranked, friendly, King of the Hill), Road to World, league simulation.
+Not done: online play against other people (ranked PvP, friendly, King of the Hill), Road to World, league simulation.
 
 ## Requirements
 
@@ -242,7 +268,7 @@ Not done: online modes (ranked, friendly, King of the Hill), Road to World, leag
 | `tools/fo4_season.py` | Adds FIFA Online 4's 26 LIVE and 25 LIVE cards (fifaaddict data, stats as +0) as two new seasons with FO4's season badges: `fetch`, `collect` + `import`, `build`, `install` (rewrites entries of `data_0.big` in place, as its size must not change, and appends to `Label.big`; `restore` puts both back). |
 | `tools/fa_faces.py` | Adds the player mini faces missing from the client's cache (fifaaddict serves the same 128x128 PNGs); `--crests` adds the missing club crests (most clubs have none in the cache, so the game shows a default one). Resumable, `--remove` undoes it. |
 | `tools/draft_icons.py` | Draws the draft packs' Shop icons (the client's cache has no draft pictures) into `assets/externalAssets/shop/`, which the server serves before the client's own images; `<icon> <tag> <picks>` draws one more, for a pack made on the admin page. Needs Pillow. |
-| `tools/re/` | Reverse-engineering helpers: `bigdir.py` (BIg4 archive tables), `refpack.py` (RefPack codec), `eadb.py` (EA "DB" database tables), `abc*.py` (AS3 bytecode parser / grep / schema miner), `gfxx.py` (UI SWFs), `memgrab.py`, `gamectl.ps1` (drive the client window for tests). |
+| `tools/re/` | Reverse-engineering helpers: `bigdir.py` (BIg4 archive tables), `refpack.py` (RefPack codec), `eadb.py` (EA "DB" database tables), `abc*.py` (AS3 bytecode parser / grep / schema miner), `gfxx.py` (UI SWFs), `memgrab.py`, `dbwin.py` (the client's debug output), `relay_emu.py` (PvP relay packet codec and test relay), `gamectl.ps1` (drive the client window for tests). |
 | `blaze.py`, `server.py`, `test_client.py`, `analyze_capture.py` | EA Blaze framing (Fire/TDF) and a loopback test server from the first phase of the project; the client turned out to use REST + the messenger instead. |
 | `analysis/` | Early client analysis scripts (strings, PE sections, network endpoints). |
 | `FO3ID-private-server.md`, `reports/` | Findings and progress reports (`reports/` is in Indonesian). |

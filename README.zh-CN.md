@@ -37,7 +37,7 @@
   每场比赛后获得 EXP，球员 LV.1-23（每级所有属性 +1），经理 LV.1-100。
 - 游戏音效和 EA Trax 菜单音乐。`tools/eatrax_song.py` 可以把你自己的歌放到第一首，但之后游戏会在
   比赛结束后崩溃（见下文的已知问题）。
-- 网页管理后台 http://127.0.0.1:8088/（EP、球员、卡包、礼物、每日奖励、比赛奖励、商城、日志），可切换语言
+- 网页管理后台 http://127.0.0.1:8088/（EP、球员、卡包、礼物、每日奖励、比赛奖励、AI 聊天、商城、日志），可切换语言
   （issue #15）：Bahasa Indonesia、English、简体中文、ไทย、Tiếng Việt、한국어；浏览器会记住你的选择。
 - 比赛中显示真实的俱乐部球衣（kit id = `teamid << 5 | type`；旧的 `<< 10` 会显示成棋盘格）。
 - 开启 **team color**（球队加成）时比赛可以踢完下半场（以前赛季加成会在中场时崩溃），之后显示 EXP 和
@@ -136,6 +136,23 @@
   Max = LV.23、一个限 LV.10 及以下、一个限 2017 卡）：选一名球员，他获得这些经验。选秀界面的请求
   （`/item/draftpack/<id>/players/<n>`、`/transfer/price/default/<grade>`）和胶囊道具类型之前都没有。
   管理页面可以再做更多（卡包的 "Draft" 栏位，道具类型 "EXP Capsule"）。
+- **Multiple > Rank：其他经理和真实比赛**（issue #30）：排位画面之前因服务器没有发送段位、
+  奖励和天梯记录而停在 UI 错误。现在可以打开，排行榜由虚拟经理填满：前 3 名（VS Manager Top）
+  和 20 人的好友排名，每人都有名字、俱乐部、段位和战绩，战绩会随着他们一天中的比赛不断变化。起初有 100 人，
+  之后每天有 0-3 名新人加入，最多 300 人。每人都有自己的打法（控球、反击、高位逼抢、长传冲吊、摆大巴或全力进攻，
+  各有不同的阵型、战术和跑位），穿着自己俱乐部的球衣，球员是与其评分相当的随机卡牌，可来自任何俱乐部和赛季，
+  每张卡都有各自的强化等级（从新手的 +1 到 +6 甚至更高）和等级。他们每天都会买卖卡牌、强化卡牌
+  （从 +5 起强化失败会掉一级）并提升等级。Rank 1 on 1 和 VS Manager 会与评分最接近你的 5 名经理之一
+  踢一场真实比赛：阵容画面、比赛设置，然后是对方由游戏 AI 控制的完整比赛，之后是结果、奖励和你新的排位评分，
+  并会出现在排位画面的面板、记录窗口（最近的比赛、赛季走势图）和 Info Manager 的比赛列表中。
+  比赛中对手会按自己的性格在比赛聊天里发言（开球时、双方进球时、射门偏出时、门将扑救时，以及你输入聊天时回复），
+  回到排位画面时还会评论比赛结果；管理后台的 AI 聊天标签页可以关闭它或选择语言（印尼语、英语、越南语）。
+  Messenger 现在也能打开了（之前它一直在等服务器从未发送过的通知列表），并根据好友的上线时段（08:00-02:00 WIB）
+  显示 20 名好友在线、忙碌（正在踢 Rank 比赛）或离线；点好友的 Info 按钮可以查看他的资料和阵容。
+- **Market 活起来了**（issue #30）：虚拟经理会买下你挂出的卡，"Dijual" 会在几分钟内自动变成
+  "Terjual"（已售出），价格越低卖得越快，同时弹出 "terjual seharga" 售出提示，并收到一条写明买家的通知；
+  Batal（取消）和 Ulang（重新上架）也都能用。除了 +1..+3 的库存，他们还会挂出自己的卡（也有其他强化等级），
+  价格略低于市场价，Kuantitas（数量）每小时都会变。球员卡窗口的 Market Price 标签页会画出最近 30 天的价格走势。
 - **随机箱可以打开**（Kotak Platinum 等，issue #12）：箱子界面从 `staticdata.availables` 列出奖品，
   之前缺少这个字段，所以每个箱子在 "Gunakan"（使用）时都会失败。
 - **新球员卡进入 Tim Cadangan**：从卡包、交易、Market、Bag 或管理后台得到的卡，在 Skuad 的 Tim 一栏显示
@@ -144,7 +161,10 @@
 - **Market 搜索**可以找到所有赛季的球员卡：游戏只搜索 `/static/roster` 中的赛季，而其中缺少 29 个有
   Market 球员卡的赛季（World Legend、World Best、'14 TOTS 等），所以例如 WL R. Gullit 从来搜不到。
   Market 筛选的赛季列表可以用了（issue #14：选择赛季时报错 "cannot convert 39 to Array"，因为每个赛季的
-  `value` 必须是列表），并显示客户端的赛季名称（World Legend、02 Chinese Legend 等）。
+  `value` 必须是列表），并显示客户端的赛季名称（World Legend、02 Chinese Legend 等）。搜索结果也不再列出
+  Liga 和 Cup 中 AI 俱乐部所用的引擎专用卡（带 '17 赛季徽章，评分最高 127，例如 L. Messi 125；
+  这些卡反正也买不到）：它们所在的赛季 0 已从 `/static/roster` 中移除，其中的 "default" 条目现在是
+  客户端自己的 '17 赛季（88），所以赛季列表中 "2017" 只出现一次。
 - **所有可交易的球员卡**都出现在 Market、交易和卡包中：只要 fifaaddict 收录或游戏自身标记为可交易
   （`permid.transferable`），就算在内。只用 fifaaddict 会漏掉 6,599 张卡（其中 4,313 张是 '17）；
   Market 现有 44,703 张。新的 **Semua Pemain**（所有球员）卡包可以开出其中任何一张。
@@ -160,7 +180,7 @@
 `tools/re/ealayer3.py`）、以及替换 TrackID 1 且音乐库比原版更小的 EALayer3，都会同样崩溃，所以原因不是
 音乐大小。请使用游戏自带的音乐：`python -I tools/eatrax_song.py --restore` 可以恢复。
 
-尚未实现：在线模式（排位、友谊赛、King of the Hill）、Road to World、联赛模拟。
+尚未实现：与其他玩家的在线对战（排位 PvP、友谊赛、King of the Hill）、Road to World、联赛模拟。
 
 ## 运行需求
 
@@ -209,7 +229,7 @@
 | `tools/fo4_season.py` | 把 FIFA Online 4 的 26 LIVE 和 25 LIVE 球员卡（fifaaddict 数据，属性按 +0 计）加为两个新赛季，使用 FO4 的赛季徽章：`fetch`、`collect` + `import`、`build`、`install`（就地改写 `data_0.big` 中的条目，因为它的大小不能改变；以追加方式修改 `Label.big`；`restore` 恢复这两个文件）。 |
 | `tools/fa_faces.py` | 补充客户端缓存中缺少的球员小头像（fifaaddict 提供同样的 128x128 PNG）；`--crests` 补充缺少的俱乐部队徽（大多数俱乐部在缓存中没有，游戏会显示默认队徽）。可断点续传，`--remove` 撤销。 |
 | `tools/draft_icons.py` | 绘制选秀卡包的商店图标（客户端缓存里没有选秀图片），保存到 `assets/externalAssets/shop/`，服务器优先提供这些图片；`<icon> <tag> <picks>` 可再画一个，用于管理页面创建的卡包。需要 Pillow。 |
-| `tools/re/` | 逆向工程辅助工具：`bigdir.py`（BIg4 归档表）、`refpack.py`（RefPack 编解码）、`eadb.py`（EA "DB" 数据库表）、`abc*.py`（AS3 字节码解析 / 搜索 / 结构挖掘）、`gfxx.py`（界面 SWF）、`memgrab.py`、`gamectl.ps1`（测试时操控客户端窗口）。 |
+| `tools/re/` | 逆向工程辅助工具：`bigdir.py`（BIg4 归档表）、`refpack.py`（RefPack 编解码）、`eadb.py`（EA "DB" 数据库表）、`abc*.py`（AS3 字节码解析 / 搜索 / 结构挖掘）、`gfxx.py`（界面 SWF）、`memgrab.py`、`dbwin.py`（客户端调试输出）、`relay_emu.py`（PvP 中继数据包编解码和测试中继）、`gamectl.ps1`（测试时操控客户端窗口）。 |
 | `blaze.py`、`server.py`、`test_client.py`、`analyze_capture.py` | 项目第一阶段的 EA Blaze 帧格式（Fire/TDF）和回环测试服务器；后来发现客户端用的是 REST + messenger。 |
 | `analysis/` | 早期的客户端分析脚本（字符串、PE 节、网络接口）。 |
 | `FO3ID-private-server.md`、`reports/` | 研究发现和进度报告（`reports/` 为印尼语）。 |

@@ -1,5 +1,5 @@
 {"curseason": "17", "seasons": [
- {"season": "default", "value": [0], "open": "2013-01-01T00:00:00.000Z", "close": "2099-12-31T00:00:00.000Z"},
+ {"season": "default", "value": [88], "open": "2013-01-01T00:00:00.000Z", "close": "2099-12-31T00:00:00.000Z"},
  {"season": "$TRANSFERMARKET_SEASON_06", "value": [6], "open": "2013-01-01T00:00:00.000Z", "close": "2099-12-31T00:00:00.000Z"},
  {"season": "$TRANSFERMARKET_SEASON_07", "value": [7], "open": "2013-01-01T00:00:00.000Z", "close": "2099-12-31T00:00:00.000Z"},
  {"season": "$TRANSFERMARKET_SEASON_08", "value": [8], "open": "2013-01-01T00:00:00.000Z", "close": "2099-12-31T00:00:00.000Z"},
@@ -47,7 +47,6 @@
  {"season": "$TRANSFERMARKET_SEASON_83", "value": [83], "open": "2013-01-01T00:00:00.000Z", "close": "2099-12-31T00:00:00.000Z"},
  {"season": "$TRANSFERMARKET_SEASON_85", "value": [85], "open": "2013-01-01T00:00:00.000Z", "close": "2099-12-31T00:00:00.000Z"},
  {"season": "$TRANSFERMARKET_SEASON_87", "value": [87], "open": "2013-01-01T00:00:00.000Z", "close": "2099-12-31T00:00:00.000Z"},
- {"season": "$TRANSFERMARKET_SEASON_88", "value": [88], "open": "2013-01-01T00:00:00.000Z", "close": "2099-12-31T00:00:00.000Z"},
  {"season": "CL", "value": [89], "open": "2013-01-01T00:00:00.000Z", "close": "2099-12-31T00:00:00.000Z"},
  {"season": "$TRANSFERMARKET_SEASON_91", "value": [91], "open": "2013-01-01T00:00:00.000Z", "close": "2099-12-31T00:00:00.000Z"},
  {"season": "$TRANSFERMARKET_SEASON_93", "value": [93], "open": "2013-01-01T00:00:00.000Z", "close": "2099-12-31T00:00:00.000Z"},

@@ -144,6 +144,7 @@
     <button role="tab" data-tab="shop" data-i18n="nav_shop"></button>
     <button role="tab" data-tab="harian" data-i18n="nav_harian"></button>
     <button role="tab" data-tab="match" data-i18n="nav_match"></button>
+    <button role="tab" data-tab="chat" data-i18n="nav_chat"></button>
     <button role="tab" data-tab="scout" data-i18n="nav_scout"></button>
     <button role="tab" data-tab="log" data-i18n="nav_log"></button>
   </nav>
@@ -282,6 +283,16 @@
       <div class="row">
         <button class="b" id="mrAdd" data-i18n="add_prize"></button>
         <button class="b primary" id="mrSave" data-i18n="save"></button>
+      </div>
+    </section>
+
+    <section id="chat" hidden>
+      <h2 data-i18n="chat_title"></h2>
+      <p class="lead" id="chatLead"></p>
+      <div class="row">
+        <label class="check"><input type="checkbox" id="chatOn"> <span data-i18n="chat_on"></span></label>
+        <label class="f"><span data-i18n="chat_lang"></span><select id="chatLang"></select></label>
+        <button class="b primary" id="chatSave" data-i18n="save"></button>
       </div>
     </section>
 
@@ -428,6 +439,12 @@ const loaders = {
       ${Object.keys(label).map(f => `<td><input type="number" min="0" step="${f === "ep" ? 100 : 10}" value="${d.result[k][f]}" data-f="${f}" aria-label="${esc(t("mr_" + k))} ${esc(label[f])}"></td>`).join("")}</tr>`).join("");
     $("#mrCards").innerHTML = d.cards.map(r => rowHtml("prizes", r)).join("");
     mrChances();
+  },
+  async chat() {
+    const d = await api("vm_chat");
+    $("#chatLead").textContent = t("chat_lead", d.file);
+    $("#chatOn").checked = d.enabled;
+    $("#chatLang").innerHTML = Object.entries(d.langs).map(([k, v]) => `<option value="${k}"${k === d.lang ? " selected" : ""}>${esc(v)}</option>`).join("");
   },
   async scout() {
     const s = await api("summary");
@@ -789,6 +806,10 @@ $("#mrSave").addEventListener("click", () => act(async () => {
   await api("match_rewards_set", {result, cards: readRows($("#mrCards"))});
   await loaders.match();
 }, t("mr_saved")));
+$("#chatSave").addEventListener("click", () => act(async () => {
+  await api("vm_chat_set", {enabled: $("#chatOn").checked, lang: $("#chatLang").value});
+  await loaders.chat();
+}, t("chat_saved")));
 $("#scoutReset").addEventListener("click", () => act(async () => { await api("scouts_reset", {}); await loaders.scout(); }, t("scouts_ready")));
 $("#logRefresh").addEventListener("click", () => loaders.log());
 setInterval(() => { if ($("#logAuto").checked && !$("#log").hidden) loaders.log(); }, 3000);

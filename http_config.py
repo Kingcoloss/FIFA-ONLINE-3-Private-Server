@@ -20,7 +20,7 @@ https://APSEODESK172 (port 443) for /info/server/locale etc. — no launch arg
 overrides it — so run `http_config.py 443 --tls` and map APSEODESK172 to
 127.0.0.1 in the hosts file.
 """
-import bisect, collections, copy, functools, gzip, http.server, math, os, random, re, sqlite3, ssl, statistics, sys, threading, time
+import bisect, calendar, collections, copy, functools, gzip, html, http.server, math, os, random, re, socket, sqlite3, ssl, statistics, sys, threading, time
 from contextlib import closing
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -163,9 +163,18 @@ def _state():
 
 
 def _save(st):
+    """Write state.json whole or not at all (a temp file, then a rename): background writers
+    (market_loop, the Rank timers) save while the user may close the server window."""
     os.makedirs(os.path.dirname(STATE), exist_ok=True)
-    with open(STATE, "w") as f:
+    tmp = STATE + ".tmp"
+    with open(tmp, "w") as f:
         json.dump(st, f)
+    for _ in range(40):  # Windows: someone reading state.json blocks the rename for a moment
+        try:
+            return os.replace(tmp, STATE)
+        except PermissionError:
+            time.sleep(0.05)
+    os.replace(tmp, STATE)
 
 
 def coach_id(slot):
@@ -246,13 +255,17 @@ def purge_deleted_coaches(st):
     """Drop managers whose restore time is over, with their club. The account-wide club data
     (league, cups, market offers, last match, trade) belongs to the default manager's club."""
     gone = [c for c in st["coaches"] if c.get("state") == "postpone" and c.get("deleteat", 0) <= time.time()]
+    ds = _default_slot(st) if gone else 0  # Market offers are each manager's own (slot_offers)
     for c in gone:
         st["coaches"].remove(c)
         st["teams"].pop(str(c["slot"]), None)
+        st["offers"] = [o for o in st.get("offers", []) if o.get("slot", ds) != c["slot"]]
         if c["_id"] == st["defaultcoachid"]:
             st["defaultcoachid"] = ""
-            for k in ("league2", "cups", "offers", "match", "trade"):
+            for k in ("league2", "cups", "match", "trade"):
                 st.pop(k, None)
+    if not st.get("offers"):
+        st.pop("offers", None)
     return gone
 
 
@@ -466,12 +479,17 @@ def match_side(raw, teamid, user=None, tactics=None):
     # team color for the user's side only: an AI side is a whole club (+4 for free)
     team["teamcolors"] = active_teamcolors(team) if user else []
     team.update(teamid=teamid, summary=team_summary(team, teamid), kit=team_kit(teamid))
+    for p in team["players"]:  # "Pilihan terbaik" in a Rank squad screen: SquadUtil's best-XI filter
+        p["rankedcards"] = None  # reads rankedcards.red/.yellow unless it is null (missing = TypeError)
     if user:  # the pre-match squad screen's formation list (side.<mine>.team.formations; was empty, issue #16)
         team["formations"] = team_formations(teamid)
     # ready: a user side starts unready -- MatchController.sendReady skips the PUT .../ready
     # (no kick-off) when isMySideReady is already true; AI sides are always ready.
     return {"team": team, "squad": team["squad"], "players": [user] if user else [],
-            "tactics": tactics or [default_tactic(0)], "ready": user is None, "kit": team_kit(teamid), "club": {}}
+            "tactics": tactics or [default_tactic(0)], "ready": user is None, "kit": team_kit(teamid),
+            # the multiplay game setting screen sends club ? club.clubname : "" to native
+            # PopulateGameSettings, which reads it back with asCString (a missing one crashes)
+            "club": {"clubname": ""}}
 
 
 # gamesettings.halfLength, in 1/10 minute per half (the game setting screen shows
@@ -1392,7 +1410,12 @@ def coach_me(st, slot):
         "igr": True, "vipDetail": VIP_DETAIL, "vipExpireAt": VIP_UNTIL, "vipStatus": {"VIP1": VIP_UNTIL},
         "sp": {"point": 0}, "gpdata": {"gp": 0}, "badges": [], "currentbadge": 0,
         # league.leagueid -> CoachProxy.leagueId: Single > Liga builds the league from it
-        "levelinfo": coach_levelinfo(coach), "statistics": {},
+        # statistics.ladder: Multiple > Rank's record tab (LadderMatchController.rebuildLadderRecordInfo
+        # reads seasons [{sid, ...}] and highrecords {elo [i], division [i]}, i = ladder index;
+        # without it the screen stopped on a UI error): my ladder record (ladder_statistics)
+        "levelinfo": coach_levelinfo(coach),
+        "statistics": {"ladder": ladder_statistics(st)[0] if slot == _default_slot(st) else
+                       {"seasons": [], "highrecords": {"elo": [LADDER_START] * LADDER_COUNT, "division": [None] * LADDER_COUNT}}},
         "league": {"leagueid": roster_summary(teamid).get("league", {}).get("id", 0)},
         # limits.cups -> CupProxy.playMax (cups you can run at once); limits.players/baseplayers
         # -> the market's player-slot check (TransferPurchaseTabPage._limitPlayerCount)
@@ -1401,6 +1424,8 @@ def coach_me(st, slot):
         "club": {}, "uimode": 0, "limits": {"cups": 3, "players": MAX_PLAYERS, "baseplayers": MAX_PLAYERS,
                                              "firstTeam": FIRST_TEAM_MAX},
         "transferfavorites": [], "currdivision": "",
+        # Manager > Info Manager > "Hasil tanding multiplayer": my Rank matches (ladder_record)
+        "multiplay": coach.get("multiplay", []),
         # playlimit {modeid: {playcount}}: Liga's Mulai/Simulasi buttons compare playcount with
         # PLAYLIMIT.maxplay; without the key playcount stays undefined and they stay disabled
         "playlimit": {},
@@ -1445,8 +1470,18 @@ def ep_coach_me(query, body):
 def ep_coach_onready(query, body):
     # POST /coach/me/onready comes right after CoachProxy.invalidate() -> reset() (which nulls
     # _squad); without /coach/me in this reply the menu is built with squad null (black FREEROAM).
+    # /inbox/my/notifications (an Array) readies SystemMessageProxy, its only feed: until then
+    # MenuScreenMediator.onReady never runs, so the Messenger screen is never attached and the
+    # Messenger button does nothing (issue #30, presence). It carries the login notice of the
+    # original game (CoachProxy.checkTransfermarketOfferList, unused in this build) while a sold
+    # offer waits to be collected: "Seorang pemain telah dijual di bursa transfer."
     st = _state()
-    return _json({"result": True, "resources": coach_me_resources(st, _default_slot(st))})
+    if settle_offers(st):  # sold while I was away
+        _save(st)
+    notes = [note("transfermarket", "list", {"title": "TRANSFERMARKET_LOGIN_ALARM"})
+             for _ in range(any(o["status"] == "sold" for o in slot_offers(st)))]
+    return _json({"result": True, "resources": coach_me_resources(st, _default_slot(st))
+                  + [{"uri": "/inbox/my/notifications", "body": notes}]})
 
 
 def ep_default_coach(slot, query, body):
@@ -1465,18 +1500,28 @@ TACTIC_SLOTS = 6
 
 
 def default_tactic(i):
-    # TacticsController.setCurrentTactics fields; sliders 1..100, positioning/defenderline are
-    # 0/1 radios, teammentality 1..5. name "" -> client fills the localized preset name.
+    # TacticsController.setCurrentTactics fields; sliders 1..100, teammentality 1..5,
+    # positioning (1 organised, 2 free form) / defenderline (1 cover, 2 offside trap) are 1|2
+    # radios (TwoRadioButton value = index + 1; native stores value - 1, so 0 was 0xFF).
+    # name "" -> client fills the localized preset name.
     return {"id": i, "name": "", "teammentality": 3,
-            "bus": {"buildupspeed": 50, "passing": 50, "positioning": 0},
-            "cc": {"passing": 50, "crossing": 50, "shooting": 50, "positioning": 0},
-            "def": {"mentality": 50, "aggression": 50, "teamwidth": 50, "defenderline": 0}}
+            "bus": {"buildupspeed": 50, "passing": 50, "positioning": 1},
+            "cc": {"passing": 50, "crossing": 50, "shooting": 50, "positioning": 1},
+            "def": {"mentality": 50, "aggression": 50, "teamwidth": 50, "defenderline": 1}}
+
+
+def fix_radios(t):
+    """A tactic with its 1|2 radios in range (ones saved before the fix hold 0)."""
+    for part, key in (("bus", "positioning"), ("cc", "positioning"), ("def", "defenderline")):
+        if isinstance(t.get(part), dict):
+            t[part][key] = min(2, max(1, int(t[part].get(key) or 1)))
+    return t
 
 
 def _tactics(st):
     slot = str(_default_slot(st))
     saved = st.setdefault("tactics", {}).setdefault(slot, {})
-    return saved, [saved.get(str(i)) or default_tactic(i) for i in range(TACTIC_SLOTS)]
+    return saved, [fix_radios(saved.get(str(i)) or default_tactic(i)) for i in range(TACTIC_SLOTS)]
 
 
 def ep_tactic_all(query, body):
@@ -1485,15 +1530,19 @@ def ep_tactic_all(query, body):
 
 
 def ep_tactic(i, query, body):
-    """Save (PUT, body = tactic) or reset (DELETE -> {result, resources:[{body: default}]})."""
+    """Save (PUT, body = tactic), reset (DELETE -> {result, resources:[{body: default}]}), or GET:
+    the in-match tactic manager's "Reset" takes the whole reply as the tactic to apply (it used to
+    land in the reset branch, wiping the saved slot and sending {result, resources})."""
     req = json.loads(body or b"{}")
-    st = _state(); saved, _ = _tactics(st)
+    st = _state(); saved, tactics = _tactics(st)
     if "bus" in req:
-        saved[str(i)] = dict({k: v for k, v in req.items() if k != "_method"}, id=i)
+        saved[str(i)] = fix_radios(dict({k: v for k, v in req.items() if k != "_method"}, id=i))
         _save(st)
         return _json({"result": True})
-    saved.pop(str(i), None); _save(st)
-    return _json({"result": True, "resources": [{"uri": f"/game/my/tactic/{i}", "body": default_tactic(i)}]})
+    if req.get("_method") == "DELETE":
+        saved.pop(str(i), None); _save(st)
+        return _json({"result": True, "resources": [{"uri": f"/game/my/tactic/{i}", "body": default_tactic(i)}]})
+    return _json(tactics[int(i)] if 0 <= int(i) < TACTIC_SLOTS else default_tactic(int(i)))
 
 
 # --------------------------------------------------------------------------- #
@@ -1705,10 +1754,11 @@ def club_index():
         for lid, teams in leagues.items():
             teams.sort(reverse=True)
             by_nation.setdefault(nats[lid].most_common(1)[0][0], []).append((teams[0][0], lid, [t for _, t in teams]))
-        # the national teams' nation last (they made it the strongest; the picker opens on the first)
-        _CLUBS.extend((n, [(lid, ts) for _, lid, ts in sorted(ls, reverse=True)])
-                      for n, ls in sorted(by_nation.items(), key=lambda kv: (
-                          any(l[1] == gen_teams.NATIONAL_LEAGUE for l in kv[1]), -max(l[0] for l in kv[1]))))
+        # the national teams' nation last (they made it the strongest; the picker opens on the first).
+        # One assignment: two first builds at once (a request and presence_loop) give the same list
+        _CLUBS[:] = [(n, [(lid, ts) for _, lid, ts in sorted(ls, reverse=True)])
+                     for n, ls in sorted(by_nation.items(), key=lambda kv: (
+                         any(l[1] == gen_teams.NATIONAL_LEAGUE for l in kv[1]), -max(l[0] for l in kv[1])))]
     return _CLUBS
 
 
@@ -2105,8 +2155,24 @@ def _side_ready(side):
 
 def ep_match_ready(mid, side, query, body):
     """PUT /match/<id>/side/<side>/ready {ready, stage}: single-player, so the match starts
-    (stage playing -> LeagueCupGameSettingScreen.onPlaying -> StartSingleMatch)."""
-    return match_step(mid, body, _side_ready(side))
+    (stage playing -> LeagueCupGameSettingScreen.onPlaying -> StartSingleMatch). A Rank match is
+    PvP: the multiplay game setting screen first (stage setting), then playing."""
+    ladder = (_state().get("ladder_pending") or {}).get("id") == mid
+    return match_step(mid, body, _pvp_side_ready(side) if ladder else _side_ready(side))
+
+
+def _pvp_side_ready(side):
+    """squad -> setting (my ready cleared: MatchController.sendReady skips a side already
+    ready, so the setting screen could not send its own), setting -> playing."""
+    def step(match, req):
+        ready = bool(req.get("ready", True))
+        match["side"][side]["ready"] = ready
+        if ready and match["stage"] == "squad":
+            match["stage"] = "setting"
+            match["side"][side]["ready"] = False
+        elif ready and match["stage"] == "setting":
+            match["stage"] = "playing"
+    return step
 
 
 NEXT_STAGE = {"created": "squad", "squad": "setting"}
@@ -2259,6 +2325,7 @@ def ep_match_end(mid, query, body):
         match["result"] = {k: v for k, v in req.items() if k != "_method"}
         match["reward"] = match_reward(st, req)
         add_ep(st, match["reward"]["money"]["reward"]["total"])
+        ladder_result(st, mid, req)
     cp = st.get("cup_pending") or {}
     if cp.get("id") == mid and cp.get("cupid") in (st.get("cups") or {}):
         h, a = req.get("home") or {}, req.get("away") or {}
@@ -2586,12 +2653,77 @@ def balance_first_team(team):
         p["team2"] = True
 
 
-def market_offer(spid, grade=1):
-    return {"spid": spid, "expandme": "player", "grade": grade, "price": card_price(spid, grade), "count": 1}
+# The virtual managers trade on it (issue #30, stage 3; user: "manajer market virtual berjalan").
+# Client shapes (TransferMarketProxy and the Transfer* screens): every element of a search / top
+# list is its own row (several prices and grades of one card are fine), "Kuantitas" = count, and a
+# purchase posts that row's spid / grade / price. Rows: the +1..+3 stock at the market price
+# (MARKET_STOCK an hour, never sold out), plus the managers' own listings of the hour
+# (VM_LIST_ROWS, grades VM_LIST_GRADES) a little under the market price (market_factor; never
+# below 0.96 of it, so buying there and selling back at the market price gains nothing after the
+# fee). What I buy comes off the hour's counts (MARKET_BOUGHT, kept in memory).
+MARKET_STOCK = (3, 30)
+VM_LIST_ROWS = (0, 0, 1, 1, 2, 3)  # one is drawn per card and hour
+VM_LIST_GRADES = (1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 7, 8)
+MARKET_BOUGHT = {}  # (spid, grade, price, hour key) -> cards bought from that row this hour
+
+
+def nice_price(x):
+    """EP rounded to 3 significant digits (46,300; 1,230,000)."""
+    x = int(x)
+    return round(x, 3 - len(str(x))) if x >= 1000 else x
+
+
+def market_factor(spid, grade, day):
+    """The virtual market's price of a card on crowd day `day`, as a share of its market value:
+    a slow seeded wave between about 0.955 and 0.995 (the price graph, the managers' listings)."""
+    r = random.Random(f"price/{spid}/{grade}")
+    p1, p2, a, b = r.uniform(9, 23), r.uniform(3, 7), r.uniform(0, 2 * math.pi), r.uniform(0, 2 * math.pi)
+    noise = random.Random(f"price/{spid}/{grade}/{day}").uniform(-0.003, 0.003)
+    return 0.975 + 0.012 * math.sin(2 * math.pi * day / p1 + a) + 0.006 * math.sin(2 * math.pi * day / p2 + b) + noise
+
+
+def market_rows(spid, t=None):
+    """The Market's rows of one card now: [{spid, expandme, grade, price, count}], the +1..+3
+    stock first; [] if it is not tradeable."""
+    if not on_market(spid):
+        return []
+    now = time.time() if t is None else t
+    day, key = vm_day(now), f"{vm_day(now)}/{time.gmtime(now).tm_hour}"
+    r = random.Random(f"market/{spid}/{key}")
+    rows = {(g, card_price(spid, g)): r.randint(*MARKET_STOCK) for g in (1, 2, 3)}
+    for _ in range(r.choice(VM_LIST_ROWS)):
+        g = r.choice(VM_LIST_GRADES)
+        p = card_price(spid, g)
+        price = min(p, max(nice_price(0.96 * p), nice_price(p * market_factor(spid, g, day) * r.uniform(0.99, 1.01))))
+        rows[g, price] = rows.get((g, price), 0) + r.choice((1, 1, 1, 2, 3))
+    out = []
+    for (g, price), n in rows.items():
+        n -= MARKET_BOUGHT.get((spid, g, price, key), 0)
+        stock = g <= 3 and price == card_price(spid, g)
+        if n > 0 or stock:
+            out.append({"spid": spid, "expandme": "player", "grade": g, "price": price, "count": max(1, n)})
+    return out
+
+
+def market_buy(spid, grade, price, t=None):
+    """The row I buy from: (price paid, row) or None when no such row is left this hour (a +1..+3
+    at the market price always is)."""
+    now = time.time() if t is None else t
+    key = f"{vm_day(now)}/{time.gmtime(now).tm_hour}"
+    row = next((r for r in market_rows(spid, now) if r["grade"] == grade and r["price"] == price), None)
+    if row is None and on_market(spid) and grade in (1, 2, 3) and price == card_price(spid, grade):
+        row = {"grade": grade, "price": price}  # the stock, seen in an older list (the client caches 30 s)
+    if row is None:
+        return None
+    for k in [k for k in MARKET_BOUGHT if k[3] != key]:
+        del MARKET_BOUGHT[k]  # past hours
+    MARKET_BOUGHT[spid, grade, price, key] = MARKET_BOUGHT.get((spid, grade, price, key), 0) + 1
+    return row["price"]
 
 
 def ep_transfer_top(position, query, body):
-    """GET /transfer/top/50[/position/<GK|DF|MF|FW>]: the 50 priciest tradeable cards."""
+    """GET /transfer/top/50[/position/<GK|DF|MF|FW>]: the 50 priciest tradeable cards (their +1
+    row)."""
     rng = LINES.get(str(position or "").upper())
     where = f"AND p.preferredposition1 BETWEEN {rng.start} AND {rng.stop - 1}" if rng else ""
     with closing(_db()) as c:
@@ -2600,12 +2732,12 @@ def ep_transfer_top(position, query, body):
     _OVR.update((s, (o, d)) for s, o, d in both)
     rows = [(s, o) for s, o, _ in both]
     spids = [s for s, ovr in sorted((r for r in rows if on_market(r[0])), key=lambda r: (-r[1], r[0]))[:50]]
-    return _json([market_offer(s) for s in spids])
+    return _json([market_rows(s)[0] for s in spids])
 
 
 def ep_transfer_search(spid, query, body):
-    """GET /transfer/search/<spid>: that card's offers (grades 1..3); none if not tradeable."""
-    return _json([market_offer(int(spid), g) for g in (1, 2, 3)] if on_market(spid) else [])
+    """GET /transfer/search/<spid>: that card's rows (market_rows); [] if not tradeable."""
+    return _json(market_rows(int(spid)))
 
 
 def add_player(team, spid, grade=1):
@@ -2642,27 +2774,39 @@ def in_squad(team, p):
 
 
 def ep_transfer_purchase(spid, grade, price, query, body):
-    """POST /transfer/purchase/<spid>/<grade>/<price>/purchase: pay the market price (not the
-    path's) and add a new instance of the card to my players (reserves)."""
-    spid, grade = int(spid), int(grade)
+    """POST /transfer/purchase/<spid>/<grade>/<price>/purchase: buy from the row the path names
+    (market_buy: its price) and add a new instance of the card to my players (reserves). A row
+    gone since the list was fetched is NO_SUCH_OFFER ("Pemain tidak ada."; the client refreshes)."""
+    spid, grade, price = int(spid), int(grade), int(price)
     st = _state(); slot = _default_slot(st); team = st["teams"][str(slot)]
-    if not on_market(spid):
-        return _json({"result": False, "reason": "NOT_EXIST_OFFER"})
     if len(team["players"]) >= MAX_PLAYERS:
         return _json({"result": False, "reason": "Exceed plyer limit"})
-    cost = card_price(spid, grade)
-    if coach_me(st, slot)["money"]["ep"] < cost:
+    if coach_me(st, slot)["money"]["ep"] < price:
         return _json({"result": False, "reason": "NOT_ENOUGH_EP"})
+    cost = market_buy(spid, grade, price)
+    if cost is None:
+        return _json({"result": False, "reason": "NO_SUCH_OFFER"})
     add_ep(st, -cost)
     add_player(team, spid, grade)
     _save(st)
     return _json({"result": True, "resources": coach_me_resources(st, slot)})
 
 
-# Selling: the NPC market buys at once. The offer shows as "sold" in Daftar jual saya until
-# its EP is collected (price minus SALE_FEE). Asking more than the market price is refused,
-# so buying back is never cheaper than selling.
+# Selling: a listing waits ("waiting" = Dijual; the client knows no other word for it) until a
+# virtual manager buys it, sooner the cheaper it is (VM_SALE: at 80% of the market price .. at
+# 100%), then shows as "sold" (Terjual) in Daftar jual saya until its EP is collected (price
+# minus SALE_FEE). The sale is pushed to the game: the list (the open tab redraws) and a
+# notification (toast "<card> terjual seharga <price> EP." and an entry naming the buyer); both
+# go out from market_loop, or from the next request that touches the offers. Batal takes a
+# waiting card back, Ulang lists it again at a new price. Asking more than the market price is
+# refused, so buying back is never cheaper than selling.
 SALE_FEE = 0.10
+VM_SALE = (20, 300)
+# listings a manager can hold (waiting + sold, not collected); more is the client's own
+# TRANSFERMARKET_MAX_REGISTERED ("Silahkan hapus daftar penjualan"). Keeps the pushed list (about
+# 270 bytes an offer) far under the 64 KB a messenger push can carry.
+OFFERS_MAX = 100
+OFFER_PRIVATE = ("card", "buyat", "buyer", "slot")  # the card, when and who buys it, whose club: not sent
 # transfer-fee discounts (TransferMarketProxy.modifyOffersFee: floor(factor * completefee.base)):
 # PC warnet (IGR) 20%, VIP 30% -- fifaaddict's FO3 tax calculator; both always active here
 NO_BOOST = {"igr": 0.2, "vip": 0.3, "event": 0, "item": 0, "discountlimit": 0}
@@ -2673,10 +2817,18 @@ def sale_net(o):
     return o["price"] - fee + int(NO_BOOST["igr"] * fee) + int(NO_BOOST["vip"] * fee)
 
 
+def slot_offers(st):
+    """The default manager's offers: each manager lists, sells and collects for his own club (an
+    offer from before slots were kept is his)."""
+    slot = _default_slot(st)
+    return [o for o in st.get("offers", []) if o.get("slot", slot) == slot]
+
+
 def offer_list(st):
     """/transfer/my/offer/list (TransferMarketProxy.fetch*): offers[] {_id, status
-    selling|sold|expired, issuedat, completefee.base (fee in EP), spid, grade, price}."""
-    return {"offerexpireoffset": 86400000, "boost": NO_BOOST, "offers": st.get("offers", [])}
+    waiting|sold|expired, issuedat (W3C), completefee.base (fee in EP), spid, grade, price}."""
+    return {"offerexpireoffset": 86400000, "boost": NO_BOOST,
+            "offers": [{k: v for k, v in o.items() if k not in OFFER_PRIVATE} for o in slot_offers(st)]}
 
 
 def offer_resources(st):
@@ -2684,13 +2836,97 @@ def offer_resources(st):
 
 
 def ep_transfer_price(spid, grade, query, body):
-    """GET /transfer/price/<spid>/<grade>: the Jual tab's price band and default."""
-    p = card_price(spid, int(grade))
-    return _json({"lower": p * 8 // 10, "upper": p, "default": p, "lowest": p, "registrationFee": 0})
+    """GET /transfer/price/<spid>/<grade>: the Jual tab's price band and default; lowest = the
+    cheapest row of that grade on the Market now ("Harga terendah di bursa transfer adalah ..."),
+    0 if none ("Tidak ada pemain yang dijual")."""
+    p, g = card_price(spid, int(grade)), int(grade)
+    lowest = min((r["price"] for r in market_rows(int(spid)) if r["grade"] == g), default=0)
+    return _json({"lower": p * 8 // 10, "upper": p, "default": p, "lowest": lowest, "registrationFee": 0})
+
+
+def vm_buyer(o, now):
+    """Pick the manager who buys offer o and when (buyat, s): VM_SALE by its price."""
+    r = random.Random(f"{o['_id']}/{o['price']}")
+    share = o["price"] / max(1, card_price(o["spid"], o["grade"]))
+    lo, hi = VM_SALE
+    o["buyat"] = now + (lo + (hi - lo) * min(1, max(0, (share - 0.8) / 0.2)) ** 2) * r.uniform(0.6, 1.4)
+    o["buyer"] = r.choice(virtual_managers())["_id"]
+
+
+def settle_offers(st, now=None):
+    """The waiting offers whose buyer has come are sold: [those offers]."""
+    now = time.time() if now is None else now
+    sold = [o for o in st.get("offers", []) if o["status"] == "waiting" and o.get("buyat", 0) <= now]
+    for o in sold:
+        o["status"], o["soldat"] = "sold", w3c(now)
+    return sold
+
+
+@functools.lru_cache(maxsize=4096)
+def card_name(spid):
+    """The card's short name (namesind), as the client shows it."""
+    with closing(_db()) as c:
+        r = c.execute("SELECT n.short FROM players p JOIN namesind n ON n.playerid = p.playerid WHERE p.spid = ?",
+                      (int(spid),)).fetchone()
+    return r[0] if r else str(spid)
+
+
+NOTE_MS = [0]  # the last notification's time: AlarmWindow drops one not later than the last
+
+
+def note(category, kind, details, now=None):
+    """A system notification (SystemMessageProxy: /inbox/my/notifications[/latest]); dates
+    strictly increase. details.title is the dropdown entry's text (a localization key or text)."""
+    ms = NOTE_MS[0] = max(int((time.time() if now is None else now) * 1000), NOTE_MS[0] + 1)
+    date = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(ms // 1000)) + f".{ms % 1000:03d}Z"
+    return {"_id": new_iid(), "category": category, "type": kind, "date": date, "details": details}
+
+
+def announce_sales(st, sold):
+    """Tell the game about the playing manager's offers just sold: the new list and one
+    notification each. stackable: SystemMessageProxy.appendNotification keeps any other category
+    than bag / boxingday in the dropdown only with it (else just the toast shows)."""
+    slot = _default_slot(st)
+    sold = [o for o in sold if o.get("slot", slot) == slot]
+    if not sold:
+        return
+    messenger_push("/transfer/my/offer/list", offer_list(st))
+    for o in sold:  # price as text: the toast prints it as given (TRANSFERMARKET_LIVE_ALARM)
+        vm = vm_by_id(o.get("buyer")) or {"name": "?"}
+        messenger_push("/inbox/my/notifications/latest", {**note("transfermarket", "sold", {
+            "spid": o["spid"], "expandme": "player", "grade": o["grade"], "price": f"{o['price']:,}",
+            "title": f"{card_name(o['spid'])} terjual ke {vm['name']}"}), "stackable": True})
+
+
+def my_offers(st):
+    """The playing manager's offers after the sales due by now (every manager's are settled;
+    state saved, his pushed to the game)."""
+    sold = settle_offers(st)
+    if sold:
+        _save(st)
+        announce_sales(st, sold)
+    return slot_offers(st)
+
+
+def market_loop():
+    """The server's thread: sells the waiting offers when their buyer comes (every 5 s)."""
+    while True:
+        time.sleep(5)
+        try:
+            with STATE_LOCK:
+                my_offers(_state())
+        except Exception as e:  # a bad state file must not end the market
+            print(f"market loop: {e!r}", flush=True)
+
+
+def ep_offer_list(query, body):
+    st = _state()
+    my_offers(st)
+    return _json(offer_list(st))
 
 
 def ep_transfer_offer(query, body):
-    """POST /transfer/offer {playerobjectid, price}: sell one of my players (not a starter)."""
+    """POST /transfer/offer {playerobjectid, price}: list one of my players (not a starter)."""
     req = json.loads(body or b"{}")
     st = _state(); team = st["teams"][str(_default_slot(st))]
     pid = str(req.get("playerobjectid"))
@@ -2700,25 +2936,81 @@ def ep_transfer_offer(query, body):
         return _json({"result": False, "reason": "TRANSFERMARKET_SELECT_SELLABLE_PLAYER"})
     if not 0 < price <= card_price(p["spid"], grade_of(p)):
         return _json({"result": False, "reason": "TRANSFERMARKET_LOWERLIMIT"})
+    if len(slot_offers(st)) >= OFFERS_MAX:
+        return _json({"result": False, "reason": "TRANSFERMARKET_MAX_REGISTERED"})
     remove_player(team, p)
-    now = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
-    st.setdefault("offers", []).append({
-        "_id": f"{int(time.time()):08x}{os.urandom(8).hex()}", "status": "sold", "issuedat": now, "soldat": now,
-        "spid": p["spid"], "expandme": "player", "grade": grade_of(p), "price": price,
-        "playerobjectid": pid, "completefee": {"base": int(price * SALE_FEE)}})
+    now = time.time()
+    o = {"_id": f"{int(now):08x}{os.urandom(8).hex()}", "status": "waiting", "issuedat": w3c(now),
+         "spid": p["spid"], "expandme": "player", "grade": grade_of(p), "price": price,
+         "playerobjectid": pid, "completefee": {"base": int(price * SALE_FEE)}, "card": p,
+         "slot": _default_slot(st)}
+    vm_buyer(o, now)
+    st.setdefault("offers", []).append(o)
     _save(st)
     return _json({"result": True, "resources": offer_resources(st)})
 
 
+def ep_offer_cancel(status, offerid, query, body):
+    """DELETE /transfer/my/offer/<waiting|expired>/<id> (Batal): the card comes back (Tim
+    Cadangan) unless the club is full ("Exceed plyer limit" = TRANSFERMARKET_FULLSLOT_DESC, as
+    for a purchase). Bought meanwhile: OFFER_NOT_EXIST_ERROR (the client reloads the list)."""
+    st = _state()
+    o = next((o for o in my_offers(st) if o["_id"] == offerid and o["status"] in ("waiting", "expired")), None)
+    if o is None:
+        return _json({"result": False, "reason": "OFFER_NOT_EXIST_ERROR"})
+    team = st["teams"][str(_default_slot(st))]
+    if len(team["players"]) >= MAX_PLAYERS:
+        return _json({"result": False, "reason": "Exceed plyer limit"})
+    if o.get("card"):
+        team["players"].append(o["card"])
+    else:
+        add_player(team, o["spid"], o["grade"])
+    st["offers"].remove(o)
+    _save(st)
+    return _json({"result": True, "resources": offer_resources(st)})
+
+
+def ep_offer_reoffer(offerid, query, body):
+    """POST /transfer/offer/from/<id> {price} (Ulang): the waiting card at a new price."""
+    req = json.loads(body or b"{}")
+    st = _state()
+    o = next((o for o in my_offers(st) if o["_id"] == offerid and o["status"] in ("waiting", "expired")), None)
+    if o is None:
+        return _json({"result": False, "reason": "OFFER_NOT_EXIST_ERROR"})
+    price = int(req.get("price") or 0)
+    if not 0 < price <= card_price(o["spid"], o["grade"]):
+        return _json({"result": False, "reason": "TRANSFERMARKET_LOWERLIMIT"})
+    now = time.time()
+    o.update(status="waiting", issuedat=w3c(now), price=price, completefee={"base": int(price * SALE_FEE)})
+    vm_buyer(o, now)
+    _save(st)
+    return _json({"result": True, "resources": offer_resources(st)})
+
+
+def ep_transfer_detail(spid, grade, query, body):
+    """GET /transfer/<spid>/<grade>/detail: the card window's Market price graph
+    (PlayerDetailPopup, features.transfermarket.playerpricegraph): {history {basePrice, startat,
+    endat, data [[time ms, price > 0]]}}, one point a day for PRICE_DAYS days (market_factor)."""
+    spid, grade = int(spid), max(1, int(grade))
+    p, today = card_price(spid, grade), vm_day()
+    days = range(today - PRICE_DAYS + 1, today + 1)
+    at = lambda d: VM_EPOCH + d * 86400
+    data = [[at(d) * 1000, max(1, nice_price(p * market_factor(spid, grade, d)))] for d in days]
+    return _json({"history": {"basePrice": p, "startat": w3c(at(days[0])), "endat": w3c(at(today)), "data": data}})
+
+
+PRICE_DAYS = 31  # the graph labels endat and every 5 days back to 30 days before it, startat first
+
+
 def ep_offer_collect(offerid, coupon, query, body):
     """DELETE /transfer/my/offer/completed/<id|all>[/<coupon>]: collect sold offers' EP."""
-    st = _state(); offers = st.get("offers", [])
+    st = _state(); offers = my_offers(st)
     done = [o for o in offers if o["status"] == "sold" and offerid in ("all", o["_id"])]
     if not done:
-        return _json({"result": False, "reason": "NOT_EXIST_OFFER"})
+        return _json({"result": False, "reason": "NO_SUCH_TRANSFERRED_OFFER_ERROR"})
     ep = sum(sale_net(o) for o in done)
     add_ep(st, ep)
-    st["offers"] = [o for o in offers if o not in done]
+    st["offers"] = [o for o in st["offers"] if o not in done]  # the other manager's stay
     _save(st)
     return _json({"result": True, "ep": ep, "resources": offer_resources(st)})
 
@@ -4314,6 +4606,901 @@ def ep_bag_unpackall(query, body):
     return bag_reply(st)
 
 
+# --------------------------------------------------------------------------- #
+# Virtual managers (issue #30, stage 1): a fixed crowd of generated managers for Multiple > Rank
+# (LadderMatchController in data/ui/libs/Module.big), which had no other players. Each one has a
+# name, a level, a club the club picker lists, a card grade by tier (+1 beginners, +2/+3
+# intermediate, +4..+6 advanced) and a ladder rating per mode; one seed, so the same crowd every
+# run. Matches against them are stage 2. Shapes:
+#   /ladder/leaderboard  [ladder index: [{name, elo, rank}]] (the front window shows the top 3)
+#   /ladder/friends/info [{_id, name, teamid, ovr {FW, MF, DF}, elo [i], wins [i], losses [i],
+#                         forfeits [i]}], i = ladder index (rebuildLadderRecordFriendsInfo)
+#   /ladder/my/info      {start, next, ladder_<mode> records, ladder_total}: this season (ladder_my_info)
+#   /ladder/season/info  {sid, prevsid}; /coach/me statistics.ladder {seasons}
+# The divisions (/ladder/division/info: {name, rating}, highest first; 1050 = Amateur B, +50 a step
+# to Legendary A at 1700) and rewards (/ladder/reward/info: divs [{name DIVISION_<div>, items
+# [main, sub]}], wins [{from, items}]) are responses/ files.
+# --------------------------------------------------------------------------- #
+VM_COUNT, VM_SEED, VM_FRIENDS = 100, 30, 20
+LADDER_COUNT = 6  # covers every ladder index (Enums.LADDER_MATCH_COUNT and 3vs3 roleplay)
+VM_TIERS = (  # (share, card grade range, level range, ladder rating range)
+    (0.50, (1, 1), (3, 30), (1000, 1250)),  # beginners: Amateur to Semi-Pro
+    (0.35, (2, 3), (25, 60), (1200, 1500)),  # intermediate: Semi-Pro to World class
+    (0.15, (4, 6), (50, 100), (1450, 1780)),  # advanced: World class and Legendary
+)
+VM_WORDS = ("Garuda", "Macan", "Rajawali", "Elang", "Badai", "Petir", "Naga", "Banteng", "Kopi", "Sambal",
+            "Bintang", "Komodo", "Tiger", "Wolf", "Shadow", "Ninja", "Samurai", "Falcon", "Viper", "Storm",
+            "Phoenix", "Rocket", "Panda", "Cobra", "Lotus", "Mango", "Pho", "Siam", "Mekong", "Saigon",
+            "Hanoi", "Bangkok", "Jakarta", "Bandung", "Medan", "Kancil", "Kucing", "Gajah", "Singa", "Hiu")
+VM_TAGS = ("FC", "10", "99", "07", "Gol", "Striker", "Juara", "Master", "Pro", "King", "77", "GG", "_x",
+           "88", "23", "Captain", "Keeper", "Boss", "Legend", "Jr")
+
+
+# The crowd lives on (issue #30, stage 3; user: "manajer virtual bisa bertambah, skuad bisa
+# berubah, bisa ada upgrade atau downgrade grade, random level pemain"). Its calendar starts at
+# VM_EPOCH (day 0 = the first crowd, vm_base); from day 1 newcomers join (vm_newcomers) and every
+# manager's squad changes day by day (vm_team). All of it is seeded by manager and day: nothing
+# is stored, every server run sees the same crowd on the same day.
+VM_EPOCH = calendar.timegm((2026, 11, 1, 0, 0, 0))
+VM_MAX = 300  # the crowd stops growing here (VM_WORDS x VM_TAGS make 800 names)
+VM_JOIN = (0, 1, 1, 2, 3)  # managers who join on one day (one is drawn)
+VM_JOIN_TIER = (0.7, 0.25, 0.05)  # a newcomer's tier odds: mostly beginners
+VM_LIFE = (0.12, 0.08, 0.03)  # a day's odds: a transfer, an upgrade try, a starter's level up
+
+
+def vm_day(t=None):
+    """The crowd's day number now (or at t): whole UTC days since VM_EPOCH."""
+    return (int(time.time() if t is None else t) - VM_EPOCH) // 86400
+
+
+def virtual_managers():
+    """The crowd now: [{_id, name, level, teamid, grade, elo [i], wins [i], losses [i],
+    forfeits [i]}], the first crowd strongest tier last, then the newcomers (vm_base and
+    vm_newcomers, then this season's games so far: vm_crowd). One clock read: a call across
+    midnight on the 1st must not pair next month with this month's last day."""
+    now = time.time()
+    t = time.gmtime(now)
+    return vm_crowd(ladder_season(now)[0], t.tm_mday, t.tm_hour)
+
+
+VM_GAMES = (0, 0, 1, 1, 2, 3)  # Rank games a manager plays on one ladder in a day (one is drawn)
+# the hours (UTC) a manager plays or joins, one drawn: 01..19 = 08:00..02:00 WIB, the evening
+# (16:00..23:00 WIB) twice as busy; nobody plays 03:00..07:00 WIB
+VM_HOURS = tuple(range(1, 20)) + tuple(range(9, 17))
+
+
+@functools.lru_cache(maxsize=2)
+def vm_crowd(sid, day, hour):
+    """The crowd at hour `hour` (UTC) of day `day` of season sid: every manager plays a few Rank
+    games a day on each ladder, at seeded hours, against players near his rating, and wins by the
+    Elo odds tilted by his own skill (+-60), so the ratings, the records and the rankings move
+    through the day. A newcomer is there from the hour he joined and plays from then on; one who
+    joined in an earlier season starts this one at his first rating with no games. Seeded by
+    manager, season and day: nothing is stored, the same hour always gives the same crowd."""
+    first = vm_day(calendar.timegm((sid // 100, sid % 100, 1, 0, 0, 0)))  # crowd day of the season's day 1
+    today = first + day - 1
+    joined = {m["_id"]: (jd, jh) for jd, jh, m in vm_newcomers(today) if (jd, jh) <= (today, hour)}
+    out = copy.deepcopy(vm_base() + [m for _, _, m in vm_newcomers(today) if m["_id"] in joined])
+    for vm in out:
+        jd, jh = joined.get(vm["_id"], (None, 0))
+        skill = random.Random(f"{vm['_id']}/skill").randint(-60, 60)
+        for d in range(1 if jd is None else max(1, jd - first + 1), day + 1):
+            rnd = random.Random(f"{vm['_id']}/{sid}/{d}")
+            for i in range(LADDER_COUNT):
+                for _ in range(rnd.choice(VM_GAMES)):
+                    at, opp = rnd.choice(VM_HOURS), vm["elo"][i] + rnd.randint(-80, 80)
+                    won = rnd.random() < 1 / (1 + 10 ** ((opp - vm["elo"][i] - skill) / 400))
+                    if first + d - 1 == jd and at < jh:  # before he joined
+                        continue
+                    if d == day and i in (0, 3):  # today's 1on1 / VS Manager hours: his presence (vm_status)
+                        vm.setdefault("hours", []).append(at)
+                    if d < day or at <= hour:  # today's later games are drawn but not played yet
+                        expect = 1 / (1 + 10 ** ((opp - vm["elo"][i]) / 400))
+                        vm["elo"][i] = max(LADDER_START, round(vm["elo"][i] + LADDER_K * (won - expect)))
+                        vm["wins" if won else "losses"][i] += 1
+    return out
+
+
+@functools.lru_cache(maxsize=None)
+def vm_thirds():
+    """Clubs by strength for a manager's club: a beginner gets one from the bottom third of a
+    league, intermediate the middle, advanced the top (club_index lists each league's clubs
+    strongest first)."""
+    thirds = ([], [], [])
+    for _, leagues in club_index():
+        for lid, teams in leagues:
+            if lid != gen_teams.NATIONAL_LEAGUE:
+                for k, t in enumerate(teams):
+                    thirds[2 - min(2, 3 * k // len(teams))].append(t)
+    return thirds
+
+
+def vm_make(rnd, n, name, tier, played=True):
+    """Manager n (id vm<n>) of tier `tier` (VM_TIERS), drawn from rnd. played: this season's
+    record so far (the first crowd's), else none (a newcomer)."""
+    _, grades, levels, ratings = VM_TIERS[tier]
+    thirds = vm_thirds()
+    base = rnd.randint(*ratings)
+    elo = [max(1000, base + rnd.randint(-40, 40)) for _ in range(LADDER_COUNT)]
+    games = [rnd.randint(10, 60) * (tier + 1) if played else 0 for _ in range(LADDER_COUNT)]
+    wins = [round(g * min(0.8, 0.35 + (e - 1000) / 2000)) for g, e in zip(games, elo)]
+    forfeits = [rnd.randint(0, g // 25) for g in games]
+    return {"_id": f"vm{n:04d}", "name": name, "level": rnd.randint(*levels),
+            "teamid": rnd.choice(thirds[tier] or thirds[0]), "grade": rnd.randint(*grades),
+            "elo": elo, "wins": wins, "forfeits": forfeits,
+            "losses": [g - w - f for g, w, f in zip(games, wins, forfeits)]}
+
+
+@functools.lru_cache(maxsize=None)
+def vm_base():
+    """The first crowd (VM_COUNT managers, VM_TIERS shares) at the start of a season."""
+    rnd = random.Random(VM_SEED)
+    names = rnd.sample([w + t for w in VM_WORDS for t in VM_TAGS], VM_COUNT)
+    out = []
+    for tier, (share, *_) in enumerate(VM_TIERS):
+        for _ in range(round(share * VM_COUNT) if tier < 2 else VM_COUNT - len(out)):
+            out.append(vm_make(rnd, len(out), names[len(out)], tier))
+    return out
+
+
+@functools.lru_cache(maxsize=4)
+def vm_newcomers(day):
+    """[(join day, join hour UTC, manager)] of the managers who joined on crowd days 1..day:
+    VM_JOIN a day, tiers by VM_JOIN_TIER, a name nobody has, ids after the first crowd's, until
+    the crowd holds VM_MAX."""
+    taken = {m["name"] for m in vm_base()}
+    free = sorted(w + t for w in VM_WORDS for t in VM_TAGS if w + t not in taken)
+    out = []
+    for d in range(1, day + 1):
+        rnd = random.Random(f"vmjoin/{d}")
+        for _ in range(rnd.choice(VM_JOIN)):
+            if VM_COUNT + len(out) >= VM_MAX:
+                return out
+            tier = rnd.choices(range(len(VM_TIERS)), VM_JOIN_TIER)[0]
+            name = free.pop(rnd.randrange(len(free)))
+            out.append((d, rnd.choice(VM_HOURS), vm_make(rnd, VM_COUNT + len(out), name, tier, played=False)))
+    return out
+
+
+@functools.lru_cache(maxsize=None)
+def vm_card_pool():
+    """{role (POS_ROLE of preferredposition1): [(client rating, spid, playerid)]} of every Market
+    card, any season: what a virtual manager's squad is drawn from."""
+    pool = {}
+    with closing(_db()) as c:
+        for spid, pid, pos, ovr in c.execute(f"SELECT p.spid, p.playerid, p.preferredposition1, {POSOVR} FROM players p"):
+            if 0 <= pos < POS_SUB and on_market(spid):
+                pool.setdefault(POS_ROLE[pos], []).append((ovr, spid, pid))
+    return pool
+
+
+# A virtual manager's playing style (issue #30). The match reads side.<x>.tactics[squad.tactic or 0]
+# (build-up, chance creation, defence) and side.team.squad (formation id, each slot's pos and
+# starting [attack participation, defence participation, x, y]) for the CPU side exactly as for
+# mine (fifazf 0x9480d0 -> 0x9c2310 at kick-off). teammentality is not applied to a CPU side.
+# Sliders 1..100 (<34 low, >=67 high); radios positioning 1 organised / 2 free form, defenderline
+# 1 cover / 2 offside trap; participation 0 medium, 1 low, 2 high. The first four are the engine's
+# own presets (fifazf 0x17742f8: Possession, Counter Attack, High Pressure, Long Ball).
+VM_STYLES = {  # (bus speed, pass, positioning, cc pass, cross, shoot, positioning, def pressure,
+               # aggression, width, defenderline), mentality, formation, (att, def) for DF / MF / FW
+    "possession": ((20, 20, 2, 25, 25, 25, 2, 50, 25, 50, 1), 3, "4-3-3(1)", ((0, 0), (0, 0), (2, 1))),
+    "counter": ((95, 50, 1, 50, 50, 50, 1, 10, 50, 60, 1), 2, "4-4-1-1(1)", ((1, 2), (0, 2), (2, 1))),
+    "press": ((50, 50, 1, 75, 50, 75, 1, 85, 75, 25, 2), 4, "4-2-3-1(1)", ((0, 2), (2, 2), (2, 2))),
+    "longball": ((90, 90, 1, 75, 75, 75, 1, 50, 75, 50, 1), 3, "4-4-2(1)", ((1, 2), (0, 0), (2, 1))),
+    "parkbus": ((30, 70, 1, 30, 40, 30, 1, 15, 40, 25, 1), 1, "5-4-1(2)", ((1, 2), (1, 2), (2, 1))),
+    "allout": ((80, 45, 2, 80, 70, 85, 2, 75, 70, 70, 2), 5, "4-2-4", ((2, 0), (2, 0), (2, 1))),
+}
+
+
+def vm_style(vm):
+    return random.Random(f"{vm['_id']}/style").choice(sorted(VM_STYLES))
+
+
+def style_tactic(name, i=0):
+    v, mentality = VM_STYLES[name][:2]
+    return {"id": i, "name": "", "teammentality": mentality,
+            "bus": {"buildupspeed": v[0], "passing": v[1], "positioning": v[2]},
+            "cc": {"passing": v[3], "crossing": v[4], "shooting": v[5], "positioning": v[6]},
+            "def": {"mentality": v[7], "aggression": v[8], "teamwidth": v[9], "defenderline": v[10]}}
+
+
+def style_slots(name):
+    """His style's formation as squad slots [{pos, starting}] (11), or None if the client's
+    formation table lacks it."""
+    _, _, formation, part = VM_STYLES[name]
+    form = next((f for f in formation_table()["common"] if f["formationname"] == formation), None)
+    line = lambda p: (0, 0) if p == 0 else part[0 if p <= 8 else 1 if p <= 19 else 2]  # GK / DF 1-8 / MF 9-19 / FW
+    return form and [{"pos": p, "starting": [*line(p), o["x"], o["y"]]} for p, o in zip(form["positions"], form["offsets"])]
+
+
+def vm_team(vid, day=None):
+    """A virtual manager's squad on crowd day `day` (today by default): vm_squad."""
+    return vm_squad(vid, vm_day() if day is None else day)
+
+
+def vm_origin(vid, day):
+    """(join day, record) of manager vid as he joined the crowd (vm_base: day 0), or None."""
+    return next(((jd, m) for jd, _, m in vm_newcomers(day) if m["_id"] == vid),
+                next(((0, m) for m in vm_base() if m["_id"] == vid), None))
+
+
+@functools.lru_cache(maxsize=512)
+def vm_squad(vid, day):
+    """His squad on crowd day `day` (user: "skuad lawan kurang random session"): his style's
+    formation (VM_STYLES; else his club's) and his club's kit, every position a random card of any
+    season in that role, rated by his first ladder rating (about 64 for a beginner to 82 at
+    Legendary, +-4), plus 7 on the bench. Each card has its own grade (his grade +-1) and level
+    (1..2 for a beginner up to 1..8, by his rating). Then every day since he joined lives
+    (VM_LIFE, seeded by his id and the day): a transfer swaps one of his 18 for another card of
+    that role, an upgrade try moves one card by the Upgrade odds (ENHANCE_RATE; a failed try from
+    +ENHANCE_DROP_FROM drops a grade; at most his grade + 2), and each starter may gain a level
+    (at most 3 over his range)."""
+    joined, vm = vm_origin(vid, day)
+    rnd, rc = random.Random(vid), random.Random(f"{vid}/cards")
+    club = roster_team(vm["teamid"])
+    slots = style_slots(vm_style(vm))
+    formation = next((f["formationid"] for f in formation_table()["common"]
+                      if slots and f["formationname"] == VM_STYLES[vm_style(vm)][2]), club["squad"].get("formation"))
+    centre = 64 + (max(vm["elo"]) - LADDER_START) * 18 // 780
+    top = 2 + (max(vm["elo"]) - LADDER_START) * 6 // 780  # his cards' levels: 1..top
+    gmax, lmax = min(10, vm["grade"] + 2), min(PLAYER_MAX_LEVEL, top + 3)
+    pool = vm_card_pool()
+
+    def card(slot, r, used):
+        """(slot, rating, spid, playerid, grade, level): a new card for slot near his rating."""
+        role = POS_ROLE[slot["pos"]] if slot["pos"] < POS_SUB else r.choice(("CB", "CM", "ST", "W", "FB"))
+        for width in (4, 8, 16, 99):
+            cand = [c for c in pool.get(role, ()) if abs(c[0] - centre) <= width and c[2] not in used]
+            if cand:
+                break
+        ovr, spid, pid = r.choice(cand)
+        grade = max(1, min(gmax, vm["grade"] + rc.choice((-1, 0, 0, 1))))
+        return [slot, ovr, spid, pid, grade, rc.randint(1, top)]
+
+    chosen = []
+    for slot in (slots or club["squad"]["positions"]) + [{"pos": POS_SUB}] * 7:
+        chosen.append(card(slot, rnd, {c[3] for c in chosen}))
+    for d in range(joined + 1, day + 1):
+        r = random.Random(f"{vid}/life/{d}")
+        if r.random() < VM_LIFE[0]:  # a transfer: one out, one in (the Market)
+            k = r.randrange(len(chosen))
+            chosen[k] = card(chosen[k][0], r, {c[3] for c in chosen})
+        if r.random() < VM_LIFE[1]:  # an upgrade try
+            c = chosen[r.randrange(len(chosen))]
+            if c[4] < gmax:
+                c[4] += 1 if r.random() < ENHANCE_RATE[c[4]] else -(c[4] >= ENHANCE_DROP_FROM)
+        for c in chosen:
+            if c[0]["pos"] < POS_SUB and r.random() < VM_LIFE[2]:
+                c[5] = min(lmax, c[5] + 1)
+    with closing(_db()) as c:
+        players = [{"spid": spid, "expandme": "player", "price": ovr, "jersey": n + 1, "grade": g,
+                    "levelinfo": {"level": lv, "exp": 0}, "jerseyname": gen_teams.jersey_name(c, pid)}
+                   for n, (_, ovr, spid, pid, g, lv) in enumerate(chosen)]
+    xi = [(slot, ovr, spid) for slot, ovr, spid, *_ in chosen if slot["pos"] < POS_SUB]
+    best = sorted(xi, key=lambda x: -x[1])  # the kickers: his best outfield players (never the GK)
+    squad = {"positions": [{**slot, "spid": spid} for slot, _, spid in xi], "captain": best[0][2],
+             "kickers": [spid for slot, _, spid in best if slot["pos"]][:KICKERS], "formation": formation}
+    return {"teamid": vm["teamid"], "squad": squad, "players": players, "formations": club.get("formations", [])}
+
+
+def vm_side(vm):
+    """match.side for a virtual manager: his squad (each card at its grade and level), his
+    style's tactic, his name on it (not "COM")."""
+    side = match_side(copy.deepcopy(vm_team(vm["_id"])), vm["teamid"], tactics=[style_tactic(vm_style(vm))])
+    side["players"] = [{"id": vm["_id"], "name": vm["name"], "levelinfo": {"level": vm["level"], "exp": 0}}]
+    return side
+
+
+def vm_ovr(vid, day=None):
+    """A virtual manager's FW / MF / DF ratings: team_summary of his squad (grades and levels
+    in)."""
+    return vm_ratings(vid, vm_day() if day is None else day)
+
+
+@functools.lru_cache(maxsize=512)
+def vm_ratings(vid, day):
+    team = vm_squad(vid, day)
+    ovr = team_summary(owned_team(copy.deepcopy(team)), team["teamid"]).get("ovr") or {}
+    return {k: ovr.get(k, 0) for k in ("FW", "MF", "DF")}
+
+
+def ladder_board(st, i):
+    """Ladder i's ranking, the virtual managers and me: [(elo, name, _id)], best first."""
+    me = my_coach(st)
+    mine = [(my_ladder(st)["elo"][i], me["name"], me["_id"])] if my_ladder(st)["games"][i] else []
+    return sorted([(m["elo"][i], m["name"], m["_id"]) for m in virtual_managers()] + mine, key=lambda e: -e[0])
+
+
+def ep_ladder_leaderboard(query, body):
+    st = _state()
+    return _json([[{"_id": i_, "name": n, "elo": e, "rank": r + 1} for r, (e, n, i_) in enumerate(ladder_board(st, i)[:10])]
+                  for i in range(LADDER_COUNT)])
+
+
+def vm_friends():
+    """Every fifth manager of the first crowd is a friend (a spread over the tiers): the Rank
+    friends ranking and the Messenger friends list are the same 20."""
+    return virtual_managers()[:VM_COUNT:VM_COUNT // VM_FRIENDS]
+
+
+def ep_ladder_friends(query, body):
+    return _json([{**{k: m[k] for k in ("_id", "name", "teamid", "elo", "wins", "losses", "forfeits")},
+                   "ovr": vm_ovr(m["_id"])} for m in vm_friends()])
+
+
+def vm_status(vm, hour=None):
+    """His Messenger presence now (issue #30, simulated online presence): "busy" in an hour he has
+    a Rank game today (vm_crowd), "online" the hour before or after one, else "offline". Game hours
+    are VM_HOURS (08:00..02:00 WIB)."""
+    h = time.gmtime().tm_hour if hour is None else hour
+    hours = set(vm.get("hours", ()))
+    return "busy" if h in hours else "online" if {(h - 1) % 24, (h + 1) % 24} & hours else "offline"
+
+
+def ep_contact_list(query, body):
+    """GET /contact/list (MessengerProxy): the friends list, the only place the client shows who
+    is online. The 20 friends with their presence; newfriends must be an Array once friends is not
+    empty (MessengerProxy.checkFriends throws and the messenger never gets ready). Left out on
+    purpose: group (null = "Teman"; an unknown name asserts), club, channelid (0 disables "go to
+    his channel")."""
+    return _json({"friends": [{"_id": m["_id"], "coachname": m["name"], "status": vm_status(m), "level": m["level"],
+                               "currdivision": f"DIVISION_{ladder_division(m['elo'][0])}"} for m in vm_friends()],
+                  "newfriends": [], "requesting": [], "requested": [], "groups": []})
+
+
+def presence_loop():
+    """The server's thread: a /presence/<id> push for every friend whose status changed (the
+    client repaints the friends list from these pushes, not from /contact/list again). The crowd
+    is read under STATE_LOCK like a request's (its caches are built on first use)."""
+    last = {}
+    while True:
+        try:
+            with STATE_LOCK:
+                now = {m["_id"]: vm_status(m) for m in vm_friends()}
+            for vid, s in now.items():
+                if last.get(vid) not in (None, s):
+                    messenger_push(f"/presence/{vid}", {"status": s})
+            last = now
+        except Exception as e:  # keep the presence going
+            print(f"presence loop: {e!r}", flush=True)
+        time.sleep(60)
+
+
+def ep_vm_summary(vid, query, body):
+    """GET /coach/<vm id>/summary[?view=true]: his profile (the Info button of a friend or of the
+    Rank friends ranking -> CoachUserPopupScreen; with {} it stayed invisible and kept the keys).
+    The popup reads the last season and its 1on1 index; coach.roster is left out (an old one
+    closes it)."""
+    vm = vm_by_id(vid)
+    if not vm:
+        return _json({"result": False, "reason": "invalid coach id"})  # "Manager tidak lagi tersedia"
+    now = time.time()
+    day = time.strftime("%Y%m%d", time.gmtime(now))
+    season = {"sid": str(ladder_season(now)[0]), "wins": vm["wins"], "losses": vm["losses"], "forfeits": vm["forfeits"],
+              "elos": [[{"elo": e, "dateymd": day}] for e in vm["elo"]]}
+    return _json({"coach": {"_id": vm["_id"], "id": vm["_id"], "name": vm["name"], "levelinfo": {"level": vm["level"], "exp": 0},
+                            "currentbadge": 0, "playtime": 0, "profile": {"description": "", "views": 0},
+                            "statistics": {"ladder": {"seasons": [season]}}}, "friends": VM_FRIENDS})
+
+
+def ep_vm_ladder_info(vid, query, body):
+    """GET /ladder/<vm id>/info (his profile): his 1on1 rating and rank."""
+    vm = vm_by_id(vid)
+    if not vm:
+        return _json({})
+    rank = next(r + 1 for r, e in enumerate(ladder_board(_state(), 0)) if e[2] == vid)
+    return _json({"sid": str(ladder_season()[0]), "ladder_pvp_1v1": {"rank": rank, "elo": vm["elo"][0]}})
+
+
+def ep_vm_coach(vid, query, body):
+    """GET /coach/<vm id>?path=team (his profile): the team object itself; GET /coach/<vm id>
+    (its squad popup, PlayerListUtil.generateCaptainFromCoachInfo): a coach like /coach/me, with
+    the team and teamsquadlist.preset."""
+    vm = vm_by_id(vid)
+    if not vm:
+        return _json({})
+    team = vm_side(vm)["team"]
+    if "path=team" in query:
+        return _json(team)
+    return _json({"id": vm["_id"], "_id": vm["_id"], "name": vm["name"], "teamid": vm["teamid"],
+                  "levelinfo": {"level": vm["level"], "exp": 0}, "team": team, "kit": team.get("kit"),
+                  "summary": team.get("summary"), "formations": team.get("formations", []),
+                  "teamsquadlist": {"preset": preset_squads(team)}})
+
+
+def ladder_season(t=None):
+    """(sid, start, next) of the ladder season: the calendar month (sid yyyymm)."""
+    y, mo = time.gmtime(t or time.time())[:2]
+    nxt = (y + mo // 12, mo % 12 + 1)
+    return y * 100 + mo, w3c(calendar.timegm((y, mo, 1, 0, 0, 0))), w3c(calendar.timegm((*nxt, 1, 0, 0, 0)))
+
+
+def ep_ladder_season_info(query, body):
+    sid, start, nxt = ladder_season()
+    prev = sid - 1 if sid % 100 > 1 else sid - 89  # 202601 -> 202512
+    return _json({"sid": sid, "prevsid": prev, "start": start, "end": nxt})
+
+
+# --------------------------------------------------------------------------- #
+# Matches against the virtual managers (issue #30, stage 2). The Rank buttons open a room and
+# search at once (RoomController: POST /room {slotsize, type pvp_ladder_mgr | ...} -> resources
+# [/room/<id>], RoomProxy base uri /room; quick match -> POST /matchmaking). The room's stage
+# drives the screen (room / searching / matched ...) and matchmaking.resources carries the match
+# (processRoomMatchmakingResource -> MatchProxy.registerByResource). The match is the real PvP
+# type (Ladder_MGR_PvP_1v1 / Ladder_PvP_1v1): squad screen, multiplay game setting screen,
+# then a match the client plays against its CPU, as the native session holds my user only
+# (ladder_match). The opponent is the virtual manager nearest my rating, his club with every
+# card at his grade; the result comes in by PUT /match/<id>/end. Enums: LADDER_IDX_1VS1 0,
+# 2VS2 1, 3VS3 2, MANAGER 3; feature names vs1 / mgr1 (getLadderNameByIdx). My record is per
+# season (the month) and goes out as /ladder/my/info ladder_<pvp_1v1 | mgr_pvp_1v1> and
+# /coach/me statistics.ladder {seasons [{sid, elos [i] [...], wins, losses, forfeits, rank,
+# division [i] {name, rank}, highrecord [i] {elo, rank}}], highrecords {elo [i], division [i]}}.
+# --------------------------------------------------------------------------- #
+LADDER_START, LADDER_K = 1000, 32
+LADDER_DEPLOY = 5  # Enums.LADDER_MAX_DEPLOY_MATCH: placement matches
+LADDER_MY_KEYS = {0: "ladder_pvp_1v1", 1: "ladder_pvp_2v2", 2: "ladder_pvp_3v3", 3: "ladder_mgr_pvp_1v1"}
+LADDER_TYPES = ("Ladder_PvP_1v1", "Ladder_PvP_2v2", "Ladder_PvP_3v3", "Ladder_MGR_PvP_1v1")  # LadderMatchController.matchTypes
+
+
+def ladder_index(room_type):
+    return 3 if "mgr" in str(room_type) else 0
+
+
+@functools.lru_cache(maxsize=None)
+def ladder_divisions():
+    with open(os.path.join(RESPONSES, "ladder_division_info.json"), encoding="utf-8") as f:
+        return json.load(f)  # highest first
+
+
+def ladder_division(elo):
+    return next((d["name"] for d in ladder_divisions() if elo >= d["rating"]), ladder_divisions()[-1]["name"])
+
+
+def my_ladder(st):
+    """This season's record: {sid, elo [i], high [i], wins, losses, draws, games,
+    elos [i] [[elo, yyyymmdd]] (the rating at the end of each day played)}."""
+    sid = ladder_season()[0]
+    coach = my_coach(st)
+    lad = coach.setdefault("ladder", {})
+    # ratings recorded before they carried a date go on their season's first day
+    lad["elos"] = [[e if isinstance(e, list) else [e, f"{lad['sid']}01"] for e in h] for h in lad.get("elos", [])]
+    if lad.get("sid") != sid:  # a new season starts from scratch
+        if any(lad.get("games") or ()):  # the finished one stays: the record screen's last season, best ratings
+            coach["ladderprev"] = copy.deepcopy(lad)
+            coach["ladderbest"] = [max(b, h) for b, h in zip(coach.get("ladderbest") or lad["high"], lad["high"])]
+        lad.clear()
+        lad.update(sid=sid, elo=[LADDER_START] * LADDER_COUNT, high=[LADDER_START] * LADDER_COUNT,
+                   **{k: [0] * LADDER_COUNT for k in ("wins", "losses", "draws", "games")},
+                   elos=[[] for _ in range(LADDER_COUNT)])
+    return lad
+
+
+def ladder_season_record(lad, rank):
+    """One statistics.ladder season. elos [i] = the rating history as [{elo, dateymd "YYYYMMDD"}]
+    (the friends ranking shows the last one's elo, none yet: "-"; the record screen's daily graph,
+    LadderMatchRecordSeasonTabPage.drawDailyMatchRecord, parses dateymd). sid as a string:
+    LadderMatchController.setSeasonalRecord(dest, sid:String, seasons) finds a season by
+    season.sid === sid with /ladder/season/info's sid / prevsid coerced to a String, so a number
+    never matched (my row in "Poin peringkat" stayed "- Poin", the record screen empty)."""
+    return {"sid": str(lad["sid"]), "elos": [[{"elo": e, "dateymd": d} for e, d in h] for h in lad["elos"]],
+            "wins": lad["wins"], "losses": lad["losses"], "forfeits": [0] * LADDER_COUNT, "rank": rank,
+            # the record screen's "last 3 matches" (oldest first; {date, goals, goalsconceded,
+            # shootout, shootoutconceded, streak +n win / -n loss, elodiff, elo, forfeits}) and
+            # its "(Penalti x Menang y Kalah)"
+            "recentmatches": lad.get("recent") or [[] for _ in range(LADDER_COUNT)],
+            "swins": lad.get("swins") or [0] * LADDER_COUNT, "slosses": lad.get("slosses") or [0] * LADDER_COUNT,
+            "division": [{"name": f"DIVISION_{ladder_division(e)}", "rank": r} for e, r in zip(lad["elo"], rank)],
+            "highrecord": [{"elo": h, "rank": r} for h, r in zip(lad["high"], rank)]}
+
+
+def ladder_statistics(st):
+    lad, coach = my_ladder(st), my_coach(st)
+    rank = [next(r + 1 for r, e in enumerate(ladder_board(st, i)) if e[2] == coach["_id"])
+            if lad["games"][i] else 0 for i in range(LADDER_COUNT)]
+    seasons = [ladder_season_record(lad, rank)]
+    prev = coach.get("ladderprev")
+    if prev:  # last season, ranked by its final ratings against the virtual managers. rewarded: no
+        # season-end reward yet; without it LadderMatchFrontScreen.checkSeasonReward POSTs /ladder/reward
+        # on every visit and opens the season reward popup on the default {result: true} (TypeError)
+        seasons.append({**ladder_season_record(prev, [1 + sum(m["elo"][i] > e for m in virtual_managers()) if g else 0
+                                                      for i, (e, g) in enumerate(zip(prev["elo"], prev["games"]))]),
+                        "rewarded": True})
+    # the best season (closure 46 of rebuildLadderRecordInfo): the best rating of any season, its division
+    best = [max(b, h) for b, h in zip(coach.get("ladderbest") or lad["high"], lad["high"])]
+    return {"seasons": seasons, "highrecords": {"elo": best, "division": [
+        {"name": f"DIVISION_{ladder_division(b)}", "rank": r} for b, r in zip(best, rank)]}}, rank
+
+
+def ep_ladder_my_info(query, body):
+    return _json(ladder_my_info(_state()))
+
+
+def ladder_my_info(st):
+    lad = my_ladder(st)
+    _, start, nxt = ladder_season()
+    stats, rank = ladder_statistics(st)
+    out = {"start": start, "next": nxt}
+    for i, key in LADDER_MY_KEYS.items():
+        if lad["games"][i]:
+            # firstround: the placement matches (LadderMatchFrontRecordWindow.setRankedMatchRecord
+            # shows "Placement match x/5" while it is missing or ongoing; wins = a flag per match).
+            # After the 5th, LadderMatchController.updateLadderResult pops the placement result
+            # from beforeelo to afterelo (missing: NaN, shown as Legendary A)
+            done = (lad.get("results") or [[]] * LADDER_COUNT)[i]
+            out[key] = {"elo": lad["elo"][i], "highelo": lad["high"][i], "rank": rank[i],
+                        "division": {"name": ladder_division(lad["elo"][i]), "rank": rank[i]},
+                        "wins": lad["wins"][i], "losses": lad["losses"][i], "forfeits": 0,
+                        "firstround": {"ongoing": lad["games"][i] < LADDER_DEPLOY, "wins": [r == 1 for r in done],
+                                       "beforeelo": LADDER_START,
+                                       "afterelo": (lad.get("placed") or [None] * LADDER_COUNT)[i] or lad["elo"][i]}}
+    played = [i for i in LADDER_MY_KEYS if lad["games"][i]]
+    if played:
+        # the Rank screen's centre panel ("Rekor rank terbaik musim ini", LadderMatchFrontRecordWindow
+        # .initializeBestRecord): the season's best rating and its mode (a matchTypes name), games
+        # played (against the division's mingames) and this week's wins (the weekly reward gauge).
+        # Without it the panel says "Tdk ada rekor".
+        best = max(played, key=lambda i: lad["high"][i])
+        week = my_coach(st).get("ladderweek") or {}
+        wins = week.get("wins", 0) if week.get("week") == time.strftime("%G%V", time.gmtime()) else 0
+        out["ladder_total"] = {"highelo": lad["high"][best], "hightype": LADDER_TYPES[best],
+                               "playedgames": sum(lad["games"]), "totalwins": wins}
+    return out
+
+
+def room_player(me):
+    return {"id": me["id"], "_id": me["id"], "name": me["name"], "levelinfo": me["levelinfo"], "teamid": me["teamid"],
+            "summary": me["summary"], "captain": True}
+
+
+def ladder_room_reply(room):
+    return _json({"result": True, "resources": [{"uri": f"/room/{room['roomid']}", "body": room}]})
+
+
+def ep_room(query, body):
+    """POST /room {slotsize, type, properties}: my room, in stage "room"."""
+    req = json.loads(body or b"{}")
+    st = _state(); me = coach_me(st, _default_slot(st))
+    i = ladder_index(req.get("type"))
+    room = {"roomid": int(time.time()) % 1000000, "type": req.get("type", "pvp_ladder_mgr"), "stage": "room",
+            "slotsize": int(req.get("slotsize") or 1), "option": {}, "publicset": True, "state": None,
+            "ladder": {"elo": my_ladder(st)["elo"][i]}, "matchmaking": None,
+            "side": {"left": {"players": [room_player(me)], "ready": False}, "center": {"players": []},
+                     "right": {"players": [], "ready": False}, "referee": {"players": []}}}
+    st["room"] = room
+    _save(st)
+    return ladder_room_reply(room)
+
+
+def ladder_opponent(st, i, rng=random):
+    """One of the five virtual managers nearest my rating on ladder i."""
+    elo = my_ladder(st)["elo"][i]
+    return rng.choice(sorted(virtual_managers(), key=lambda m: abs(m["elo"][i] - elo))[:5])
+
+
+MESSENGER_PUSH = ("127.0.0.1", 28003)  # messenger.py PUSH_PORT
+LADDER_SEARCH = (3, 7)  # seconds "searching" before the opponent is found
+
+
+def messenger_push(uri, body):
+    """Push a resource to the game over the messenger connection (best effort). One UDP datagram,
+    framed by messenger.py with a u16 length: at most 64 KB (see push_match)."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.sendto(json.dumps({"cmd": "push", "uri": uri, "body": body}, separators=(",", ":")).encode(), MESSENGER_PUSH)
+    except OSError as e:
+        print(f"messenger push {uri} failed: {e}", flush=True)
+
+
+def push_match(match):
+    """The match as pushed: every card of a big club (~165+) took it over the 64 KB a push can
+    carry, so the Rank search never ended. Each side keeps the cards of its 18; the HTTP replies
+    that follow (squad PUT, ready) carry the whole club."""
+    m = copy.deepcopy(match)
+    for side in m["side"].values():
+        team = side.get("team") or {}
+        squad = {str(p.get("id")) for p in (team.get("squad") or {}).get("positions", [])}
+        kept = [p for p in team.get("players", []) if str(p.get("id")) in squad]
+        if len(kept) >= len(squad):  # ids that do not match: keep them all
+            team["players"] = kept
+    return m
+
+
+def ep_matchmaking(query, body):
+    """POST /room/<id>/matchmaking: stage searching; a few seconds later the virtual opponent
+    is found (ladder_found pushes the room, stage matched, the match in matchmaking.resources:
+    the answer to this request is read before its callback starts the searching screen, so it
+    cannot carry the match). DELETE (POST {_method: DELETE}): back to the room."""
+    req = json.loads(body or b"{}")
+    st = _state(); room = st.get("room")
+    if room is None:
+        return _json({"result": False})
+    room["side"]["right"]["players"] = []
+    if req.get("_method") == "DELETE":
+        room.update(stage="room", matchmaking=None, search=None)
+    else:
+        room.update(stage="searching", matchmaking=None, search=os.urandom(4).hex())
+        threading.Timer(random.uniform(*LADDER_SEARCH), ladder_found, (room["search"],)).start()
+    _save(st)
+    return ladder_room_reply(room)
+
+
+def ep_room_back(query, body):
+    """PUT /room/<id>/back (the Rank screen after a match): the room, /coach/me so the EP and EXP
+    the match gave show at once, and /ladder/my/info (LadderMatchController's cached resource:
+    the record panel is rebuilt from it; it was not fetched again after a match)."""
+    st = _state(); room = st.get("room")
+    res = coach_me_resources(st, _default_slot(st)) + [{"uri": "/ladder/my/info", "body": ladder_my_info(st)}]
+    if room:
+        room.update(stage="room", matchmaking=None, search=None)
+        room["side"]["right"]["players"] = []
+        _save(st)
+        res.append({"uri": f"/room/{room['roomid']}", "body": room})
+    vm_say_result()
+    return _json({"result": True, "resources": res})
+
+
+def ladder_found(search):
+    """The opponent is found: the room goes matched (the versus intro), and 2 s later the match
+    goes to its squad stage (MatchController ON_SQUADING), as a PvP server does once both are in."""
+    with STATE_LOCK:
+        st = _state(); room = st.get("room")
+        if room and room.get("search") == search and room["stage"] == "searching":  # not cancelled
+            ladder_match(st, room)
+            _save(st)
+            mid = st["match"]["id"]
+            messenger_push(f"/room/{room['roomid']}", dict(room, matchmaking={"resources": [
+                {"uri": f"/match/{mid}", "body": push_match(st["match"])}]}))
+            threading.Timer(2, ladder_squad, (mid,)).start()
+
+
+def ladder_squad(mid):
+    with STATE_LOCK:
+        st = _state(); match = st.get("match")
+        # the one-user session connects at once and the client asks for squad itself
+        if match and match["id"] == mid and match["stage"] in ("created", "squad"):
+            match["stage"] = "squad"
+            vm = vm_by_id((st.get("ladder_pending") or {}).get("opponent"))  # his name and ready back (see ladder_match)
+            for p in match["side"]["right"]["players"]:
+                p["name"] = vm["name"] if vm else "COM"
+            match["side"]["right"]["ready"] = True
+            _save(st)
+            messenger_push(f"/match/{mid}", push_match(match))
+
+
+def ladder_match(st, room):
+    """The match against the virtual manager nearest my rating, into the room (stage matched)."""
+    i = ladder_index(room["type"])
+    me = coach_me(st, _default_slot(st)); teamid = me["teamid"]
+    vm = ladder_opponent(st, i)
+    user = {"id": me["id"], "name": me["name"], "levelinfo": me["levelinfo"]}
+    match = new_match("League_2_league_MGR" if i == 3 else "League_2_league",
+                      match_side(st["teams"][str(_default_slot(st))], teamid, user, _tactics(st)[1]), vm_side(vm))
+    match["gamesettings"]["difficulty"] = 10 + min(14, (vm["elo"][i] - LADDER_START) // 55)  # Liga levels 10..24
+    match["leagueparam"] = {"matchtype": "ladder", "round": 0, "home": teamid, "away": vm["teamid"], "leagueid": 0}
+    match["elo"] = {"left": {"rating": my_ladder(st)["elo"][i]}, "right": {"rating": vm["elo"][i]}}
+    # The PvP type: MatchController.connectToTheSession opens the native session
+    # (LobbyManager::ConnectSession), whose user reader (fifazf 0x93d200) takes "ip", "id",
+    # "name" as strings (jsoncpp asCString crashes on a missing one), "privateip" as a list and,
+    # for ladder types, summary.ladderelo as the 5 ratings (the manager one is ladderelo[len - 2]).
+    match["type"] = "Ladder_MGR_PvP_1v1" if i == 3 else "Ladder_PvP_1v1"
+    match["id"] = str(int(time.time()) % 1000000000)  # relaySessionInfo.matchid = parseInt(resourceId)
+    match["relayServer"] = {"address": "127.0.0.1:28010", "forceRelay": True}  # read, never contacted
+    for p in match["side"]["left"]["players"]:
+        p.update(ip="127.0.0.1", privateip=[], summary={"ladderelo": my_ladder(st)["elo"][:5]})
+    # The opponent stays a side user (generateCaptainFromMatchInfo, the game setting screen) but
+    # nameless while the match is "created": connectToTheSession leaves users whose name is
+    # undefined out of the native session, so it has one user and nobody to wait for (no relay
+    # traffic at all) and the client's CPU plays his side. Unready too, as
+    # processMatchSideReadyResource reads the captain's name; ladder_squad gives both back.
+    for p in match["side"]["right"]["players"]:
+        p.pop("name", None)
+    match["side"]["right"]["ready"] = False
+    st["match"] = match
+    st["ladder_pending"] = {"id": match["id"], "index": i, "opponent": vm["_id"]}
+    VM_CHAT_AFTER.clear()  # a result whose Rank screen never came back is not said on a later one
+    room["side"]["right"]["players"] = [{"id": vm["_id"], "_id": vm["_id"], "name": vm["name"], "teamid": vm["teamid"],
+                                         "levelinfo": {"level": vm["level"], "exp": 0}, "captain": True}]
+    room.update(stage="matched", search=None, matchmaking={"resources": [{"uri": f"/match/{match['id']}", "body": match}]})
+
+
+def ladder_result(st, mid, req):
+    """A finished ladder match: my rating moves (Elo, K 32) and my record counts it."""
+    p = st.get("ladder_pending") or {}
+    if p.get("id") != mid:
+        return
+    # an opponent this server version does not know (the crowd changed while a match was pending)
+    # plays at the start rating
+    vm = vm_by_id(p["opponent"]) or {"elo": [LADDER_START] * LADDER_COUNT, "teamid": None}
+    h, a = req.get("home") or {}, req.get("away") or {}
+    mine, theirs = int(h.get("score") or 0), int(a.get("score") or 0)
+    sh, sa = int(h.get("shootout") or 0), int(a.get("shootout") or 0)
+    if str(h.get("id")) == str(vm["teamid"]) and str(a.get("id")) != str(h.get("id")):
+        mine, theirs, sh, sa = theirs, mine, sa, sh
+    ladder_record(st, p["index"], vm, mine, theirs, sh, sa)
+    st.pop("ladder_pending")
+    VM_CHAT.pop(mid, None)
+    if "_id" in vm:  # his word on it once I am back on the Rank screen (vm_say_result)
+        VM_CHAT_AFTER["last"] = {"vm": vm["_id"], "outcome": "win" if theirs > mine else "loss" if mine > theirs else "draw"}
+    if st.get("room"):
+        st["room"].update(stage="room", matchmaking=None, ladder={"elo": my_ladder(st)["elo"][p["index"]]})
+
+
+def vm_by_id(vid):
+    return next((m for m in virtual_managers() if m["_id"] == vid), None)
+
+
+LADDER_RECENT, MULTIPLAY_MAX = 3, 20  # record screen's last matches (RANKEDMATCH_RECENT_MATCH_MAX); Info Manager's list
+
+
+def ladder_record(st, i, vm, mine, theirs, sh=0, sa=0):
+    """My ladder-i rating moves after a match against vm (Elo, K 32); the record counts it. A
+    shootout (sh:sa) decides a level score."""
+    lad = my_ladder(st)
+    score = 1 if (mine, sh) > (theirs, sa) else 0 if (mine, sh) < (theirs, sa) else 0.5
+    old = lad["elo"][i]
+    expect = 1 / (1 + 10 ** ((vm["elo"][i] - lad["elo"][i]) / 400))
+    lad["elo"][i] = max(LADDER_START, round(lad["elo"][i] + LADDER_K * (score - expect)))
+    lad["high"][i] = max(lad["high"][i], lad["elo"][i])
+    lad["games"][i] += 1
+    lad[{1: "wins", 0: "losses", 0.5: "draws"}[score]][i] += 1
+    day, hist = time.strftime("%Y%m%d", time.gmtime()), lad["elos"][i]  # one point a day for the graph
+    if hist and hist[-1][1] == day:
+        hist[-1][0] = lad["elo"][i]
+    else:
+        hist.append([lad["elo"][i], day])
+    results = lad.setdefault("results", [[] for _ in range(LADDER_COUNT)])
+    results[i] = (results[i] + [score])[:LADDER_DEPLOY]  # the placement matches' results
+    if lad["games"][i] == LADDER_DEPLOY:  # placement over: the result popup's "to" rating
+        lad.setdefault("placed", [None] * LADDER_COUNT)[i] = lad["elo"][i]
+    now = w3c(time.time())
+    if score != 0.5:  # the record screen's last matches (its streak has no draw; Info Manager shows it)
+        recent = lad.setdefault("recent", [[] for _ in range(LADDER_COUNT)])
+        prev = recent[i][-1]["streak"] if recent[i] else 0
+        streak = (prev + 1 if prev > 0 else 1) if score == 1 else (prev - 1 if prev < 0 else -1)
+        recent[i] = (recent[i] + [{"date": now, "goals": mine, "goalsconceded": theirs, "shootout": sh,
+                                   "shootoutconceded": sa, "streak": streak, "elodiff": lad["elo"][i] - old,
+                                   "elo": lad["elo"][i], "forfeits": 0}])[-LADDER_RECENT:]
+        if sh or sa:  # "(Penalti x Menang y Kalah)"
+            lad.setdefault("swins" if score == 1 else "slosses", [0] * LADDER_COUNT)[i] += 1
+    # Manager > Info Manager > "Hasil tanding multiplayer" (CoachMultiResultTabPage): his crest,
+    # club, score and the type (Ranking / Rank Manager); a coachid opens his profile
+    me = my_coach(st)
+    me["multiplay"] = (me.get("multiplay", []) + [{
+        "type": LADDER_TYPES[i] if i < len(LADDER_TYPES) else LADDER_TYPES[0], "date": now, "forfeits": 0,
+        "team": {"teamid": me["teamid"], "score": mine, "shootout": sh, "coaches": [{"coachid": me["_id"], "name": me["name"]}]},
+        "opponent": {"teamid": vm.get("teamid"), "score": theirs, "shootout": sa, "clubname": "",
+                     "coaches": [{"coachid": vm.get("_id", ""), "name": vm.get("name", "")}]}}])[-MULTIPLAY_MAX:]
+    # this ISO week's wins (ladder_my_info ladder_total), on the coach: a season can start mid-week
+    week, wk = time.strftime("%G%V", time.gmtime()), my_coach(st).setdefault("ladderweek", {})
+    if wk.get("week") != week:
+        wk.update(week=week, wins=0)
+    wk["wins"] += score == 1
+
+
+# --------------------------------------------------------------------------- #
+# Virtual managers' chat (issue #30, part 3): the Rank opponent chats during the match, in his
+# personality and in the language set on the admin page (gamedata/vm_chat.json). The match chat
+# overlay (OverlayChatScreen; MatchController's observer on /match/<id>/messages/latest) shows a
+# messenger push of [{type "chat", target, coachname, body, myside}] as "coachname: body", gray
+# when myside is false; it listens in session matches only (Rank, not Liga/Cup). One line per
+# push: every item of the array is shown again. Triggers come from the game's PUT
+# /match/<id>/gameplay/event/<n> {type STARTHALF | SHOT | GOAL_TYPE_* | FOUL_*, teamid 0 = home
+# = me, 1 = him}: there is no save event, so a SHOT with no GOAL of that team within
+# VM_CHAT_SHOT s is his miss or my shot saved. The result line waits for the Rank screen (the
+# result screen hides the overlay and the banners) and goes out as an /alert/<key>/latest banner.
+# The client shows a typed line only when it comes back: POST /match/<id>/messages
+# {message, target ""|"team"} is pushed back with myside true. The overlay masks every substring
+# found in FORBIDDENWORDS_CHAT_ENG.json (data/ui/localization/eng.big), so the lines in
+# responses/vm_chat.json avoid them ("masuk" has "asu", "cuma" "cum", "santai" "tai"...);
+# no emoji (the font has none).
+# --------------------------------------------------------------------------- #
+VM_CHAT_FILE = os.path.join(HERE, "gamedata", "vm_chat.json")
+VM_CHAT_DEFAULT = {"enabled": True, "lang": "id"}
+VM_CHAT_LANGS = {"id": "Bahasa Indonesia", "en": "English", "vi": "Tiếng Việt"}  # responses/vm_chat.json
+VM_PERSONALITIES = ("friendly", "competitive", "funny", "confident", "playful")
+VM_CHAT_ODDS = {"hello": 0.9, "goal": 1, "conceded": 0.85, "miss": 0.5, "save": 0.45, "reply": 0.6}
+VM_CHAT_GAP, VM_CHAT_SHOT = 6, 4  # s between his lines (goals excepted); s for a shot to become a goal
+VM_CHAT = {}  # match id -> {"last": monotonic time of his last line, "used": lines said, "shots": {teamid: sqid}}
+VM_CHAT_AFTER = {}  # "last": {vm, outcome} of the last Rank result, said back on the Rank screen
+
+
+def vm_chat_cfg():
+    try:
+        with open(VM_CHAT_FILE, encoding="utf-8") as f:
+            cfg = {**VM_CHAT_DEFAULT, **json.load(f)}
+        return cfg if cfg["lang"] in VM_CHAT_LANGS else {**cfg, "lang": VM_CHAT_DEFAULT["lang"]}
+    except (OSError, ValueError, TypeError):  # missing, broken, or not an object
+        return dict(VM_CHAT_DEFAULT)
+
+
+def vm_personality(vm):
+    return random.Random(vm["_id"]).choice(VM_PERSONALITIES)
+
+
+def vm_chat_line(vm, trigger, used=()):
+    """His line for trigger in the admin page's language and his personality; not one he said
+    this match while he has another."""
+    with open(os.path.join(RESPONSES, "vm_chat.json"), encoding="utf-8") as f:
+        lines = json.load(f)[vm_chat_cfg()["lang"]][trigger][vm_personality(vm)]
+    return random.choice([s for s in lines if s not in used] or lines)
+
+
+def vm_say(mid, vm, trigger, delay):
+    """His line for trigger into the match chat after delay s: by the trigger's odds, and not
+    within VM_CHAT_GAP s of his last one unless it is about a goal."""
+    if not vm_chat_cfg()["enabled"]:
+        return
+    s = VM_CHAT.setdefault(mid, {"last": 0, "used": set(), "shots": {}})
+    now = time.monotonic()
+    if random.random() >= VM_CHAT_ODDS[trigger] or (trigger not in ("goal", "conceded") and now - s["last"] < VM_CHAT_GAP):
+        return
+    s["last"] = now
+    line = vm_chat_line(vm, trigger, s["used"])
+    s["used"].add(line)
+    threading.Timer(delay, messenger_push, (f"/match/{mid}/messages/latest", [
+        {"type": "chat", "target": "", "coachname": vm["name"], "body": line, "myside": False}])).start()
+
+
+def ladder_opponent_of(st, mid):
+    """The virtual manager of Rank match mid, if that is the pending one."""
+    p = st.get("ladder_pending") or {}
+    return vm_by_id(p.get("opponent")) if p.get("id") == mid else None
+
+
+def ep_gameplay_event(mid, n, query, body):
+    """PUT /match/<id>/gameplay/event/<n> (the game's own request, during every local match;
+    only "result" of the reply is read): his chat triggers in a Rank match."""
+    ev = json.loads(body or b"{}")
+    vm = ladder_opponent_of(_state(), mid)
+    if vm:
+        kind, team = str(ev.get("type", "")), ev.get("teamid")
+        shots = VM_CHAT.setdefault(mid, {"last": 0, "used": set(), "shots": {}})["shots"]
+        if kind == "STARTHALF" and ev.get("halftype") == "FIRST_HALF":
+            vm_say(mid, vm, "hello", 3)
+        elif kind.startswith("GOAL_TYPE"):
+            # an own goal's teamid is the side that put it in its own net (fifazf 0xb43fb0 flips it)
+            side = 1 - team if kind == "GOAL_TYPE_OWN_GOAL" and team in (0, 1) else team
+            shots.pop(side, None)
+            vm_say(mid, vm, "goal" if side == 1 else "conceded", 4)
+        elif kind == "SHOT":
+            shots[team] = n
+            threading.Timer(VM_CHAT_SHOT, vm_shot_missed, (mid, vm, team, n)).start()
+    return _json({"result": True})
+
+
+def vm_shot_missed(mid, vm, team, n):
+    with STATE_LOCK:  # a timer: no goal came of that shot, and the match is still on
+        if ladder_opponent_of(_state(), mid) and VM_CHAT.get(mid, {}).get("shots", {}).get(team) == n:
+            vm_say(mid, vm, "miss" if team == 1 else "save", 0.5)
+
+
+def ep_match_messages(mid, query, body):
+    """POST /match/<id>/messages {message, target} from the match chat overlay and the squad
+    screen: the line comes back to me (myside true; the client shows nothing of its own), and in
+    a Rank match he may answer. A post with "type" comes from the game itself (HTML), not typed."""
+    req = json.loads(body or b"{}")
+    text, target = str(req.get("message") or "")[:200], req.get("target") or ""
+    st = _state()
+    if text and "type" not in req:
+        messenger_push(f"/match/{mid}/messages/latest", [
+            {"type": "chat", "target": target, "coachname": my_coach(st)["name"], "body": text, "myside": True}])
+        vm = ladder_opponent_of(st, mid)
+        if vm and target != "team":
+            vm_say(mid, vm, "reply", 2.5)
+    return _json({"result": True})
+
+
+def vm_say_result():
+    """After a Rank match, back on the Rank screen: his word on the result as a banner
+    (/alert/<key>/latest shows the last item as bold HTML for 10 s)."""
+    after = VM_CHAT_AFTER.pop("last", None)
+    vm = vm_by_id(after["vm"]) if after else None
+    if vm and vm_chat_cfg()["enabled"]:
+        line = vm_chat_line(vm, after["outcome"])
+        text = f"<FONT COLOR='#ffcc00'>{html.escape(vm['name'])}</FONT>: {html.escape(line, quote=False)}"
+        threading.Timer(1.5, messenger_push, ("/alert/vm/latest", [text])).start()
+
+
 # Path-pattern routes (ids in the path); checked after the exact ENDPOINTS.
 ROUTES = [
     (re.compile(r"/item/(\w+)/use"), ep_item_use),
@@ -4337,10 +5524,22 @@ ROUTES = [
     (re.compile(r"/transfer/purchase/(\d+)/(\d+)/(\d+)/purchase"), ep_transfer_purchase),
     (re.compile(r"/transfer/price/(\d+)/(\d+)"), ep_transfer_price),
     (re.compile(r"/transfer/my/offer/completed/(\w+)(?:/(\w+))?"), ep_offer_collect),
+    (re.compile(r"/transfer/my/offer/(waiting|expired)/(\w+)"), ep_offer_cancel),
+    (re.compile(r"/transfer/offer/from/(\w+)"), ep_offer_reoffer),
+    (re.compile(r"/transfer/(\d+)/(\d+)/detail"), ep_transfer_detail),
+    # a system notification clicked away (SystemMessageCommand.deleteNotification): not kept
+    (re.compile(r"/inbox/my/notifications/(\w+)"), lambda nid, q, b: _json({"result": True})),
     (re.compile(r"/match/([0-9a-f]+)/player/ready"), ep_match_player_ready),
     (re.compile(r"/match/([0-9a-f]+)/side/(\w+)/ready"), ep_match_ready),
     (re.compile(r"/match/([0-9a-f]+)/side/(\w+)/squad"), ep_match_squad),
     (re.compile(r"/match/([0-9a-f]+)/end"), ep_match_end),
+    (re.compile(r"/match/(\d+)/gameplay/event/(\d+)"), ep_gameplay_event),
+    (re.compile(r"/match/([0-9a-f]+)/messages"), ep_match_messages),
+    # a virtual manager's profile (CoachUserPopupScreen: summary, 1on1 rank, squad, achievements)
+    (re.compile(r"/coach/(vm\d{4})/summary"), ep_vm_summary),
+    (re.compile(r"/ladder/(vm\d{4})/info"), ep_vm_ladder_info),
+    (re.compile(r"/coach/(vm\d{4})"), ep_vm_coach),
+    (re.compile(r"/achievement/(vm\d{4})"), lambda vid, q, b: _json({"summary": {"done": 0}})),
     (re.compile(r"/match/([0-9a-f]+)/gamesettings"), ep_match_gamesettings),
     # StaticData bescripts go to native as-is (BeginnersGuideManager.startLeagueTutorial ->
     # ApplyCampaignScript); "{}" for an unknown GET crashed the script parser. Ones without a
@@ -4351,13 +5550,19 @@ ROUTES = [
     # old "{}") is a NULL string there -> crash on the manager select screen whenever the notice
     # popup opens. Garena's pages are gone: an empty page.
     (re.compile(r"/game/inweburl/(\w+)"), lambda name, q, b: _json({"result": True, "url": "about:blank"})),
-    (re.compile(r"/match/([0-9a-f]{24})"), ep_match_get),
+    (re.compile(r"/match/([0-9a-f]{9,24})"), ep_match_get),
     (re.compile(r"/league2/sponsor/(\d+)"), ep_l2_sponsor),
     (re.compile(r"/cup/([0-9a-f]{24})/match"), ep_cup_match),
     (re.compile(r"/cup/([0-9a-f]{24})/next"), ep_cup_next),
     (re.compile(r"/cup/([0-9a-f]{24})/(?:resume|test)"), ep_cup_resume),
     (re.compile(r"/cup/([0-9a-f]{24})/leave"), ep_cup_leave),
     (re.compile(r"/cup/([0-9a-f]{24})"), lambda cupid, q, b: _json((_state().get("cups") or {}).get(cupid, {}))),
+    # the ladder room (RoomController paths under /room/<id>) and its AI picker (RoomProxy
+    # StaticData.fetch "SORT" + NATION | LEAGUE | TEAM, id): one list of ids each
+    (re.compile(r"/room/\d+/matchmaking"), ep_matchmaking),
+    (re.compile(r"/room/\d+/back"), ep_room_back),
+    (re.compile(r"/static/db/SORTLEAGUE/(\d+)"), lambda n, q, b: _json(json.loads(ep_sortleague(q, b)[1]).get(n, []))),
+    (re.compile(r"/static/db/SORTTEAM/(\d+)"), lambda l, q, b: _json(json.loads(ep_sortteam(q, b)[1]).get(l, []))),
 ]
 
 
@@ -4379,6 +5584,10 @@ ENDPOINTS = {
     "/shop/cash/charge/url": ep_shop_url,
     "/shop/cash/history/url": ep_shop_url,
 }
+ENDPOINTS["/contact/list"] = ep_contact_list
+ENDPOINTS.update({"/ladder/leaderboard": ep_ladder_leaderboard, "/ladder/friends/info": ep_ladder_friends,
+                  "/ladder/my/info": ep_ladder_my_info, "/ladder/season/info": ep_ladder_season_info,
+                  "/room": ep_room, "/matchmaking": ep_matchmaking})
 ENDPOINTS["/coaches"] = ep_coaches
 ENDPOINTS["/coach/me"] = ep_coach_me
 ENDPOINTS["/coach/me/onready"] = ep_coach_onready
@@ -4410,7 +5619,7 @@ ENDPOINTS.update({
     "/league2/history/players/cup": lambda q, b: _json([]),
     "/league2/leader/cup": lambda q, b: _json({k: [] for k in (*LINES, "ratings", "goals", "assists", "tackles", "passes", "saves")}),
     "/cup/list": ep_cup_list, "/cup/record": ep_cup_record, "/cup/new": ep_cup_new,
-    "/transfer/offer": ep_transfer_offer, "/transfer/my/offer/list": lambda q, b: _json(offer_list(_state())),
+    "/transfer/offer": ep_transfer_offer, "/transfer/my/offer/list": ep_offer_list,
     "/transfer/my/boostfactor": lambda q, b: _json(NO_BOOST),
     "/players/trade/proposal": ep_trade_proposal, "/players/trade/contract": ep_trade_contract,
     "/players/trade2/proposal": lambda q, b: trade_proposal(b, trade2_props), "/players/trade2/contract": ep_trade_contract,
@@ -4526,4 +5735,6 @@ if __name__ == "__main__":
         admin.start(sys.modules[__name__], admin_port)
         print(f"admin page on http://127.0.0.1:{admin_port}/", flush=True)
     threading.Thread(target=warm_packs, daemon=True, name="packs").start()
+    threading.Thread(target=presence_loop, daemon=True, name="presence").start()
+    threading.Thread(target=market_loop, daemon=True, name="market").start()
     srv.serve_forever()

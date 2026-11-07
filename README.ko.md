@@ -39,7 +39,7 @@ Gudang 등은 게임에 표시되는 화면 이름이라, 게임에서 찾기 �
   감독 / 선수 레벨: 경기마다 EXP, 선수 LV.1-23(레벨당 모든 능력치 +1), 감독 LV.1-100.
 - 게임 사운드와 EA Trax 메뉴 음악. `tools/eatrax_song.py`로 내 노래를 맨 앞에 넣을 수 있지만, 그러면
   경기 후 게임이 튕깁니다(아래 알려진 문제 참고).
-- 웹 관리자 페이지 http://127.0.0.1:8088/ (EP, 선수, 팩, 선물, 출석 보상, 경기 보상, 상점, 로그), 언어 전환 가능
+- 웹 관리자 페이지 http://127.0.0.1:8088/ (EP, 선수, 팩, 선물, 출석 보상, 경기 보상, AI 채팅, 상점, 로그), 언어 전환 가능
   (issue #15): Bahasa Indonesia, English, 简体中文, ไทย, Tiếng Việt, 한국어. 브라우저가 선택을 기억합니다.
 - 경기에서 실제 구단 유니폼(kit id = `teamid << 5 | type`, 예전의 `<< 10`은 체크무늬로 나옴).
 - **team color**(팀 컬러)를 켠 상태로 후반전까지 경기가 진행되고(예전에는 시즌 컬러 때문에 하프타임에
@@ -147,6 +147,26 @@ Gudang 등은 게임에 표시되는 화면 이름이라, 게임에서 찾기 �
   판매: 선수를 고르면 그 경험치를 받음. 드래프트 화면의 요청(`/item/draftpack/<id>/players/<n>`,
   `/transfer/price/default/<grade>`)과 캡슐 아이템 종류가 없었음. 관리 페이지에서 둘 다 더 만들 수 있음
   (팩의 "Draft" 항목, 아이템 종류 "EXP Capsule").
+- **Multiple > Rank: 다른 감독과 실제 경기**(issue #30): 서버가 디비전, 보상, 래더 기록을 보내지 않아 랭크
+  화면이 UI 오류에서 멈췄음. 이제 화면이 열리고 가상 감독들이 순위를 채움: 상위 3명(VS Manager Top)과 친구
+  순위 20명. 감독마다 이름, 구단, 디비전, 전적이 있고, 전적은 하루 동안 경기를 치르면서 바뀜. 처음에는
+  100명이고 매일 0-3명이 새로 들어와 최대 300명까지 늘어남. 각 감독은 자기 스타일(점유율 축구, 역습, 전방
+  압박, 롱볼, 텐백, 총공격: 포메이션, 전술, 선수 움직임)로 자기 구단 유니폼을 입고 경기함. 스쿼드는
+  구단·시즌과 상관없이 자기 레이팅과 비슷한 카드를 무작위로 골라 채우고, 카드마다 강화 등급(초보는 +1,
+  고수는 +6 이상)과 레벨이 따로 있음. 날마다 카드를 사고팔고, 강화하고(+5 이상에서 실패하면 한 등급 내려감),
+  레벨을 올림. Rank 1 on 1과 VS Manager에서는 내 레이팅에 가장 가까운 감독 5명 중 한 명과 실제 경기를 함:
+  스쿼드 화면, 경기 설정, 상대 쪽을 게임 AI가 맡는 풀 경기, 그 뒤 결과, 보상, 새 랭크 레이팅. 결과와
+  레이팅은 랭크 화면의 패널, 기록 창(최근 경기, 시즌 그래프), Info Manager의 경기 목록에 표시됨. 경기 중
+  상대는 자기 성격대로 경기 채팅을 하고(킥오프, 양 팀의 골, 빗나간 슈팅, 선방, 내가 채팅하면 대답) 랭크
+  화면으로 돌아오면 결과에 한마디를 남김. 관리자 페이지의 AI 채팅 탭에서 채팅을 끄거나 언어(인도네시아어,
+  영어, 베트남어)를 고를 수 있음. Messenger(메신저)가 열리고(전에는 서버가 보낸 적 없는 알림 목록을
+  기다렸음) 친구 20명이 각자 플레이하는 시간대(08:00-02:00 WIB)에 따라 온라인, 바쁨(랭크 경기 중),
+  오프라인으로 표시됨. 친구의 Info 버튼을 누르면 프로필과 스쿼드가 나옴.
+- **Market이 살아 움직임**(issue #30): 내가 올린 카드를 가상 감독들이 구매함. "Dijual"(판매 중)이 몇 분 안에
+  저절로 "Terjual"(판매 완료)로 바뀌고(싸게 올릴수록 더 빨리), "terjual seharga" 팝업과 구매자 이름이 적힌
+  알림이 뜸. Batal(취소)과 Ulang(재등록)도 작동함. 가상 감독들도 자기 카드를 올림: +1..+3 기본 매물과 함께
+  다른 등급 카드까지 시세보다 조금 싸게 나오고, Kuantitas(수량)는 매시간 바뀜. 카드 창의 Market Price 탭에
+  최근 30일 가격 그래프가 나옴.
 - **랜덤 박스 열림**(Kotak Platinum 등, issue #12): 박스 화면은 `staticdata.availables`에서 보상 목록을
   가져오는데, 이게 없어서 모든 박스가 "Gunakan"(사용)에서 실패했음.
 - **새 카드는 Tim Cadangan으로**: 팩, 트레이드, Market, Bag, 관리자 페이지에서 얻은 카드는 Skuad의 Tim
@@ -157,7 +177,9 @@ Gudang 등은 게임에 표시되는 화면 이름이라, 게임에서 찾기 �
   Market 카드가 있는 시즌 29개(World Legend, World Best, '14 TOTS, …)가 빠져 있어서 예를 들어 WL R. Gullit이
   나오지 않았음. Market 필터의 시즌 목록이 작동하고(issue #14: 시즌을 고르면 "cannot convert 39 to Array"
   오류가 났음. 시즌마다 `value`가 리스트여야 함) 클라이언트의 시즌 이름(World Legend, 02 Chinese Legend, …)을
-  보여 줌.
+  보여 줌. Liga와 Cup의 AI 구단이 쓰는 엔진용 카드('17 시즌 아이콘, 능력치 최대 127, 예: L. Messi 125.
+  어차피 살 수도 없었음)는 더 이상 나오지 않음: 이 카드들의 시즌 0이 `/static/roster`에서 빠졌고, 여기의
+  "default" 항목은 이제 클라이언트 자체의 '17 시즌(88)이라 시즌 목록에 "2017"이 한 번만 나옴.
 - **거래 가능한 모든 카드**가 Market, 트레이드, 팩에 있음: fifaaddict에 있거나 게임 자체가 거래 가능으로
   표시한(`permid.transferable`) 카드를 포함. fifaaddict만 쓰면 6,599장(그중 4,313장이 '17)이 빠짐. Market에는
   이제 44,703장이 있음. 새 **Semua Pemain**(모든 선수) 팩은 그중 아무 카드나 줄 수 있음.
@@ -174,7 +196,7 @@ EALayer3(6.5 MB, `tools/re/ealayer3.py`)로 넣어도, 원본보다 작은 음�
 넣어도 똑같이 튕겼으므로 음악 크기가 원인은 아님. 게임 원래 음악을 쓰세요:
 `python -I tools/eatrax_song.py --restore`로 되돌릴 수 있습니다.
 
-아직 안 한 것: 온라인 모드(랭크, 친선전, King of the Hill), Road to World, 리그 시뮬레이션.
+아직 안 한 것: 다른 사람과의 온라인 대전(랭크 PvP, 친선전, King of the Hill), Road to World, 리그 시뮬레이션.
 
 ## 필요한 것
 
@@ -223,7 +245,7 @@ EALayer3(6.5 MB, `tools/re/ealayer3.py`)로 넣어도, 원본보다 작은 음�
 | `tools/fo4_season.py` | FIFA Online 4의 26 LIVE·25 LIVE 카드(fifaaddict 데이터, 능력치는 +0 기준)를 FO4 시즌 아이콘과 함께 새 시즌 두 개로 추가: `fetch`, `collect` + `import`, `build`, `install`(`data_0.big`은 크기가 바뀌면 안 되므로 그 자리에 다시 쓰고 `Label.big`은 끝에 덧붙여 수정, `restore`로 둘 다 원본 복구). |
 | `tools/fa_faces.py` | 클라이언트 캐시에 없는 선수 미니 얼굴 추가(fifaaddict가 같은 128x128 PNG 제공). `--crests`는 없는 구단 엠블럼 추가(대부분의 구단이 캐시에 없어 게임이 기본 엠블럼을 보여 줌). 중단 후 이어서 실행 가능, `--remove`로 되돌림. |
 | `tools/draft_icons.py` | 드래프트 팩의 상점 아이콘을 `assets/externalAssets/shop/`에 그림(클라이언트 캐시에 드래프트 이미지가 없음). 서버는 이 이미지를 클라이언트 이미지보다 먼저 제공. `<icon> <tag> <picks>`로 관리자 페이지에서 만든 팩용 아이콘을 하나 더 그림. Pillow 필요. |
-| `tools/re/` | 리버스 엔지니어링 도구: `bigdir.py`(BIg4 아카이브 표), `refpack.py`(RefPack 코덱), `eadb.py`(EA "DB" 데이터베이스 표), `abc*.py`(AS3 바이트코드 파서 / 검색 / 구조 추출), `gfxx.py`(UI SWF), `memgrab.py`, `gamectl.ps1`(테스트용 클라이언트 창 조작). |
+| `tools/re/` | 리버스 엔지니어링 도구: `bigdir.py`(BIg4 아카이브 표), `refpack.py`(RefPack 코덱), `eadb.py`(EA "DB" 데이터베이스 표), `abc*.py`(AS3 바이트코드 파서 / 검색 / 구조 추출), `gfxx.py`(UI SWF), `memgrab.py`, `dbwin.py`(클라이언트 디버그 출력), `relay_emu.py`(PvP 릴레이 패킷 코덱과 테스트 릴레이), `gamectl.ps1`(테스트용 클라이언트 창 조작). |
 | `blaze.py`, `server.py`, `test_client.py`, `analyze_capture.py` | 프로젝트 초기 단계의 EA Blaze 프레이밍(Fire/TDF)과 루프백 테스트 서버. 나중에 클라이언트가 REST + messenger를 쓰는 것으로 밝혀짐. |
 | `analysis/` | 초기 클라이언트 분석 스크립트(문자열, PE 섹션, 네트워크 엔드포인트). |
 | `FO3ID-private-server.md`, `reports/` | 조사 결과와 진행 보고서(`reports/`는 인도네시아어). |

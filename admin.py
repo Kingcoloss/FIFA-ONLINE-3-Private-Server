@@ -25,7 +25,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PAGE = os.path.join(HERE, "admin", "index.html")
 POS_NAMES = "GK SW RWB RB RCB CB LCB LB LWB RDM CDM LDM RM RCM CM LCM LM RAM CAM LAM RF CF LF RW RS ST LS LW".split()
 API = {}
-READ_ONLY = {"summary", "players", "search", "packs", "daily", "match_rewards", "log", "shop"}  # the rest must be POST + header
+READ_ONLY = {"summary", "players", "search", "packs", "daily", "match_rewards", "vm_chat", "log", "shop"}  # the rest must be POST + header
 hc = None  # the http_config module, set by start() (or by tests)
 
 
@@ -316,6 +316,23 @@ def match_rewards_set(p):
         raise AdminError("e_prizes")
     cfg = {"result": result, "cards": cards}
     with open(hc.MATCH_REWARD_FILE, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=1)
+    return cfg
+
+
+@api("vm_chat")
+def vm_chat(p):
+    return {**hc.vm_chat_cfg(), "langs": hc.VM_CHAT_LANGS, "file": rel(hc.VM_CHAT_FILE)}
+
+
+@api("vm_chat_set")
+def vm_chat_set(p):
+    """The Rank opponents' chat: on/off and language (gamedata/vm_chat.json, read at every line)."""
+    if p.get("lang") not in hc.VM_CHAT_LANGS:
+        raise AdminError("e_chat_lang")
+    cfg = {"enabled": bool(p.get("enabled")), "lang": p["lang"]}
+    os.makedirs(os.path.dirname(hc.VM_CHAT_FILE), exist_ok=True)
+    with open(hc.VM_CHAT_FILE, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=1)
     return cfg
 
@@ -751,6 +768,7 @@ I18N = {
         e_ep_range="EP minimal harus > 0 dan <= maksimal", e_unknown_prize="hadiah {0} tidak dikenal", e_prizes="hadiah harus 1..10",
         e_unknown_kind="jenis produk tidak dikenal", e_product_missing="produk tidak ditemukan", e_not_changed="produk ini tidak diubah",
         e_in_use="masih dipakai oleh {0}", e_list_item="{0}: item {1} tidak cocok di sini", e_chain_packages="paket berantai hanya berisi paket",
+        nav_chat="Chat AI", chat_title="Chat manajer virtual", chat_lead="Lawan Rank (manajer virtual) mengirim pesan di chat match: saat kick-off, saat ada gol di kedua sisi, tembakan meleset, penyelamatan kiper, dan saat kamu mengetik chat. Komentarnya tentang hasil akhir muncul sebagai banner saat kembali ke layar Rank. Tiap manajer punya kepribadian sendiri (ramah, kompetitif, lucu, percaya diri, usil). Tersimpan di {0}; berlaku mulai pesan berikutnya.", chat_on="Aktifkan chat AI", chat_lang="Bahasa pesan", chat_saved="Pengaturan chat AI disimpan.", e_chat_lang="bahasa chat tidak dikenal",
     ),
     "en": dict(
         ep_balance="EP balance", language="Language", menu="Admin menu",
@@ -829,6 +847,7 @@ I18N = {
         e_ep_range="EP min must be > 0 and <= max", e_unknown_prize="unknown prize {0}", e_prizes="prizes must be 1..10",
         e_unknown_kind="unknown product kind", e_product_missing="product not found", e_not_changed="this product was not changed",
         e_in_use="still used by {0}", e_list_item="{0}: item {1} does not fit here", e_chain_packages="a chained package holds packages only",
+        nav_chat="AI chat", chat_title="Virtual managers' chat", chat_lead="Rank opponents (virtual managers) post in the match chat: at kick-off, on goals both ways, missed shots, keeper saves, and when you type in chat. Their word on the result shows as a banner back on the Rank screen. Each manager has a personality (friendly, competitive, funny, confident, playful). Saved in {0}; used from the next message.", chat_on="AI chat on", chat_lang="Message language", chat_saved="AI chat settings saved.", e_chat_lang="unknown chat language",
     ),
     "zh": dict(
         lang_name="简体中文", locale="zh-CN",
@@ -908,6 +927,7 @@ I18N = {
         e_ep_range="最少 EP 必须 > 0 且 <= 最多 EP", e_unknown_prize="未知的奖品 {0}", e_prizes="奖品必须有 1..10 个",
         e_unknown_kind="未知的商品种类", e_product_missing="找不到该商品", e_not_changed="该商品没有被修改过",
         e_in_use="仍被 {0} 使用", e_list_item="{0}：物品 {1} 不能放在这里", e_chain_packages="连锁礼包只能包含礼包",
+        nav_chat="AI 聊天", chat_title="虚拟经理聊天", chat_lead="排位对手（虚拟经理）会在比赛聊天中发言：开球时、双方进球时、射门偏出时、门将扑救时，以及你输入聊天时。对比赛结果的评论会在回到排位画面时以横幅显示。每位经理都有自己的性格（友好、好胜、搞笑、自信、调皮）。保存在 {0}；从下一条消息开始生效。", chat_on="启用 AI 聊天", chat_lang="消息语言", chat_saved="AI 聊天设置已保存。", e_chat_lang="未知的聊天语言",
     ),
     "th": dict(
         lang_name="ไทย", locale="th-TH",
@@ -987,6 +1007,7 @@ I18N = {
         e_ep_range="EP ขั้นต่ำต้อง > 0 และ <= EP สูงสุด", e_unknown_prize="ไม่รู้จักรางวัล {0}", e_prizes="รางวัลต้องมี 1..10 รายการ",
         e_unknown_kind="ไม่รู้จักประเภทสินค้านี้", e_product_missing="ไม่พบสินค้า", e_not_changed="สินค้านี้ยังไม่เคยถูกแก้ไข",
         e_in_use="ยังถูกใช้โดย {0}", e_list_item="{0}: ใส่ไอเทม {1} ที่นี่ไม่ได้", e_chain_packages="แพ็กเกจต่อเนื่องใส่ได้เฉพาะแพ็กเกจ",
+        nav_chat="แชท AI", chat_title="แชทของผู้จัดการเสมือน", chat_lead="คู่แข่งแรงก์ (ผู้จัดการเสมือน) จะพิมพ์ในแชทระหว่างแมตช์: ตอนเริ่มเกม เมื่อมีการทำประตูของทั้งสองฝ่าย ยิงพลาด ผู้รักษาประตูเซฟ และเมื่อคุณพิมพ์แชท ความเห็นต่อผลการแข่งขันจะแสดงเป็นแบนเนอร์เมื่อกลับมาที่หน้าแรงก์ ผู้จัดการแต่ละคนมีนิสัยของตัวเอง (เป็นมิตร ชอบแข่งขัน ตลก มั่นใจ ขี้เล่น) บันทึกไว้ที่ {0} ใช้ตั้งแต่ข้อความถัดไป", chat_on="เปิดแชท AI", chat_lang="ภาษาของข้อความ", chat_saved="บันทึกการตั้งค่าแชท AI แล้ว", e_chat_lang="ไม่รู้จักภาษาแชทนี้",
     ),
     "vi": dict(
         lang_name="Tiếng Việt", locale="vi-VN",
@@ -1066,6 +1087,7 @@ I18N = {
         e_ep_range="EP tối thiểu phải > 0 và <= EP tối đa", e_unknown_prize="không rõ phần thưởng {0}", e_prizes="phần thưởng phải có 1..10",
         e_unknown_kind="không rõ loại sản phẩm", e_product_missing="không tìm thấy sản phẩm", e_not_changed="sản phẩm này chưa được sửa",
         e_in_use="vẫn đang được {0} dùng", e_list_item="{0}: không đặt được vật phẩm {1} ở đây", e_chain_packages="gói nối tiếp chỉ chứa gói quà",
+        nav_chat="Chat AI", chat_title="Chat của HLV ảo", chat_lead="Đối thủ Rank (HLV ảo) nhắn trong khung chat của trận: lúc giao bóng, khi có bàn thắng của hai bên, sút trượt, thủ môn cản phá và khi bạn gõ chat. Lời bình về kết quả hiện thành banner khi quay lại màn hình Rank. Mỗi HLV có tính cách riêng (thân thiện, hiếu thắng, hài hước, tự tin, tinh nghịch). Lưu trong {0}; áp dụng từ tin nhắn tiếp theo.", chat_on="Bật chat AI", chat_lang="Ngôn ngữ tin nhắn", chat_saved="Đã lưu cài đặt chat AI.", e_chat_lang="ngôn ngữ chat không hợp lệ",
     ),
     "ko": dict(
         lang_name="한국어", locale="ko-KR",
@@ -1145,6 +1167,7 @@ I18N = {
         e_ep_range="최소 EP는 0보다 크고 최대 EP 이하여야 합니다", e_unknown_prize="알 수 없는 보상 {0}", e_prizes="보상은 1..10개여야 합니다",
         e_unknown_kind="알 수 없는 상품 종류", e_product_missing="상품을 찾을 수 없습니다", e_not_changed="수정된 적 없는 상품입니다",
         e_in_use="아직 {0}에서 사용 중입니다", e_list_item="{0}: 아이템 {1}은(는) 여기에 넣을 수 없습니다", e_chain_packages="연속 패키지에는 패키지만 넣을 수 있습니다",
+        nav_chat="AI 채팅", chat_title="가상 감독 채팅", chat_lead="랭크 상대(가상 감독)가 경기 채팅에 메시지를 보냅니다: 킥오프, 양 팀의 골, 빗나간 슈팅, 골키퍼 선방, 그리고 당신이 채팅을 입력할 때. 결과에 대한 한마디는 랭크 화면으로 돌아오면 배너로 표시됩니다. 감독마다 성격이 있습니다(친절함, 승부욕, 유머, 자신감, 장난기). {0}에 저장되며 다음 메시지부터 적용됩니다.", chat_on="AI 채팅 켜기", chat_lang="메시지 언어", chat_saved="AI 채팅 설정을 저장했습니다.", e_chat_lang="알 수 없는 채팅 언어",
     ),
 }
 

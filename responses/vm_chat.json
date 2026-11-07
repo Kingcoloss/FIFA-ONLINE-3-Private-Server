@@ -1,0 +1,197 @@
+{
+ "id": {
+  "hello": {
+   "friendly": ["Halo bro, main yang seru ya! :)", "Selamat datang! Semoga kita sama-sama main bagus ^^"],
+   "competitive": ["Jangan harap gampang hari ini.", "Fokus. Aku datang buat menang."],
+   "funny": ["Halo! Kiperku baru bangun tidur, pelan-pelan ya wkwk", "Tadi pagi aku latihan... main game ini juga sih xD"],
+   "confident": ["Siap-siap kalah ya bos :P", "Rating-mu turun sedikit hari ini. Maaf ya B)"],
+   "playful": ["Tebak skor? Aku bilang 3-0 buat aku :D", "Halo halo! Siap aku kerjain? :P"]
+  },
+  "goal": {
+   "friendly": ["Gol! Beruntung banget tadi hehe", "Yes! Maaf ya, bolanya lagi berpihak ke aku ^^"],
+   "competitive": ["Gol. Masih ada lagi.", "Itu baru awal."],
+   "funny": ["GOOOL! Kamu lihat itu? wkwk", "Strikerku akhirnya ingat cara nendang xD"],
+   "confident": ["Terlalu gampang! Strikerku nggak bisa dihentikan B)", "Kan sudah kubilang :P"],
+   "playful": ["Ups, kiper kamu kaget ya? :P", "Gol! Mau kuajari caranya? hehe"]
+  },
+  "conceded": {
+   "friendly": ["Wah, gol yang bagus! Respect.", "Mantap golnya bro!"],
+   "competitive": ["Oke. Sekarang aku serius.", "Gol itu bakal kubalas."],
+   "funny": ["Tenang, aku lagi ngetes kamu kok wkwk", "Kiperku lagi lihat burung lewat :("],
+   "confident": ["Hoki doang itu. Lihat nanti.", "Gol doang nggak cukup buat ngalahin aku."],
+   "playful": ["Oke oke, sekarang aku mulai serius :P", "Eh kok bisa gol sih? Curang! xD"]
+  },
+  "miss": {
+   "friendly": ["Hampir aja! Lain kali pasti bisa.", "Aduh, sedikit lagi tadi."],
+   "competitive": ["Cih. Hampir.", "Tembakan berikutnya pasti gol."],
+   "funny": ["Strikerku lupa cara nendang wkwk", "Kayaknya aku butuh striker baru T_T"],
+   "confident": ["Itu baru latihan.", "Sengaja meleset, biar kamu nggak sedih :P"],
+   "playful": ["Itu hadiah buat penonton :D", "Bolanya malu-malu ke gawang hehe"]
+  },
+  "save": {
+   "friendly": ["Fiuh, untung nggak gol ^^", "Tembakan bagus, tapi belum gol hehe"],
+   "competitive": ["Nggak semudah itu.", "Pertahananku nggak bisa ditembus."],
+   "funny": ["Jantungku hampir copot wkwk", "Hampir aja, aku sampai tahan napas xD"],
+   "confident": ["Gawangku aman hari ini B)", "Coba lagi, bos :P"],
+   "playful": ["Hampir! Tapi hampir nggak dihitung :P", "Weee nggak gol :D"]
+  },
+  "win": {
+   "friendly": ["GG! Seru banget, main lagi yuk!", "GG bro, makasih udah main ^^"],
+   "competitive": ["GG. Latihan lagi, nanti kita ketemu lagi.", "Satu kemenangan lagi untukku."],
+   "funny": ["GG! Hadiahnya buat beli striker baru wkwk", "GG! Kiperku boleh naik gaji sekarang xD"],
+   "confident": ["GG. Sudah kuduga dari awal B)", "Terlalu mudah. GG :P"],
+   "playful": ["GG! Mau revans? Aku tunggu :D", "Hehe menang! GG ya ^^"]
+  },
+  "loss": {
+   "friendly": ["GG! Kamu main bagus banget.", "GG bro, selamat ya!"],
+   "competitive": ["GG. Lain kali aku balas.", "Oke, kali ini kamu menang. Ingat ini."],
+   "funny": ["Keyboard-ku rusak! wkwk", "Tadi aku main pakai satu tangan, sumpah xD"],
+   "confident": ["Hoki doang. Revans!", "Aku belum serius tadi."],
+   "playful": ["Revans! Tadi aku belum siap T_T", "Curang! Eh nggak deng, GG :P"]
+  },
+  "draw": {
+   "friendly": ["GG, seri yang adil ^^", "Seimbang banget tadi, GG!"],
+   "competitive": ["Seri. Belum puas.", "Lain kali harus ada pemenangnya."],
+   "funny": ["Seri! Nggak ada yang perlu traktir wkwk", "Seri, nggak ada yang nangis hari ini xD"],
+   "confident": ["Seri? Harusnya aku menang.", "Kamu beruntung dapat seri B)"],
+   "playful": ["Seri! Satu ronde lagi? :D", "Damai dulu, seri :P"]
+  },
+  "reply": {
+   "friendly": ["Hehe iya ^^", "Siap bro!"],
+   "competitive": ["Fokus ke pertandingan.", "Bicara doang nggak bikin gol."],
+   "funny": ["Wkwk iya iya", "Aku ketawa dulu xD"],
+   "confident": ["Iya, iya. Nanti juga kalah :P", "Banyak bicara ya B)"],
+   "playful": ["Hehe :P", "Hmm? :D"]
+  }
+ },
+ "en": {
+  "hello": {
+   "friendly": ["Hi! Have a fun game :)", "Welcome! Let's both play well ^^"],
+   "competitive": ["Don't expect an easy one today.", "Focus. I'm here to win."],
+   "funny": ["Hi! My keeper just woke up, go easy lol", "I trained this morning... on this game xD"],
+   "confident": ["Get ready to lose, boss :P", "Your rating's about to drop a bit. Sorry B)"],
+   "playful": ["Guess the score? I say 3-0 to me :D", "Hey hey! Ready to get tricked? :P"]
+  },
+  "goal": {
+   "friendly": ["Goal! Lucky that went in hehe", "Yes! Sorry, the ball likes me today ^^"],
+   "competitive": ["That's a goal. More coming.", "That's just the start."],
+   "funny": ["GOOOAL! Did you see that? lol", "My striker finally remembered how to shoot xD"],
+   "confident": ["Too easy! My striker is unstoppable B)", "Told you :P"],
+   "playful": ["Oops, did that scare your keeper? :P", "Goal! Want me to teach you? hehe"]
+  },
+  "conceded": {
+   "friendly": ["Nice goal! Respect.", "Great finish!"],
+   "competitive": ["Okay. Now I'm serious.", "I'll get that one back."],
+   "funny": ["Relax, I was just testing you lol", "My keeper was watching a bird :("],
+   "confident": ["Pure luck. Watch this.", "A goal won't beat me."],
+   "playful": ["Okay okay, now I'm getting serious :P", "Wait, how did that go in? Cheater! xD"]
+  },
+  "miss": {
+   "friendly": ["So close! Next time for sure.", "Ah, almost had it."],
+   "competitive": ["Tch. Close.", "The next one goes in."],
+   "funny": ["My striker forgot how to shoot lol", "I think I need a new striker T_T"],
+   "confident": ["Just warming up.", "Missed on purpose, so you don't feel bad :P"],
+   "playful": ["That one was for the fans :D", "The ball is too shy to go in hehe"]
+  },
+  "save": {
+   "friendly": ["Phew, not in ^^", "Good shot, but not good enough hehe"],
+   "competitive": ["Not that easy.", "You won't get through my defence."],
+   "funny": ["My heart almost stopped lol", "I held my breath on that one xD"],
+   "confident": ["My goal is safe today B)", "Try again, boss :P"],
+   "playful": ["Almost! But almost doesn't count :P", "Nope, not in :D"]
+  },
+  "win": {
+   "friendly": ["GG! That was fun, play again?", "GG, thanks for the game ^^"],
+   "competitive": ["GG. Train more, see you again.", "Winning is a habit."],
+   "funny": ["GG! The prize buys me a new striker lol", "GG! My keeper gets that pay rise now xD"],
+   "confident": ["GG. Saw that coming B)", "Too easy. GG :P"],
+   "playful": ["GG! Want a rematch? I'm waiting :D", "Hehe I won! GG ^^"]
+  },
+  "loss": {
+   "friendly": ["GG! You played really well.", "GG, congrats!"],
+   "competitive": ["GG. I'll get you next time.", "Fine, you win this one. Remember it."],
+   "funny": ["My keyboard was broken! lol", "I played one-handed, I swear xD"],
+   "confident": ["Just luck. Rematch!", "I wasn't even trying."],
+   "playful": ["Rematch! I wasn't ready T_T", "Cheater! Just kidding, GG :P"]
+  },
+  "draw": {
+   "friendly": ["GG, a fair draw ^^", "So even, GG!"],
+   "competitive": ["A draw. Not satisfied.", "Next time there's a winner."],
+   "funny": ["A draw! Nobody buys dinner lol", "Nobody wins, nobody cries xD"],
+   "confident": ["A draw? I should have won.", "You were lucky to get a draw B)"],
+   "playful": ["A draw! One more round? :D", "A draw. Truce for now :P"]
+  },
+  "reply": {
+   "friendly": ["Hehe yes ^^", "Sure thing!"],
+   "competitive": ["Focus on the game.", "Talking won't score goals."],
+   "funny": ["lol okay okay", "lol hang on, still laughing xD"],
+   "confident": ["Sure, sure. You'll still lose :P", "You talk a lot B)"],
+   "playful": ["Hehe :P", "Hmm? :D"]
+  }
+ },
+ "vi": {
+  "hello": {
+   "friendly": ["Chào bạn, chơi vui nhé! :)", "Chào mừng! Cùng đá thật hay nha ^^"],
+   "competitive": ["Hôm nay không dễ ăn đâu nhé.", "Tập trung. Tôi đến để thắng."],
+   "funny": ["Chào! Thủ môn tôi vừa ngủ dậy, nhẹ tay nha haha", "Sáng nay tôi tập luyện... bằng chính game này xD"],
+   "confident": ["Chuẩn bị thua đi nhé :P", "Hôm nay rating của bạn giảm chút xíu. Xin lỗi nha B)"],
+   "playful": ["Đoán tỷ số không? Tôi đoán 3-0 cho tôi :D", "Hế lô! Sẵn sàng bị troll chưa? :P"]
+  },
+  "goal": {
+   "friendly": ["Vào rồi! May quá hehe", "Yes! Xin lỗi nha, hôm nay bóng thương tôi ^^"],
+   "competitive": ["Vào rồi. Còn nữa đấy.", "Mới chỉ là khởi đầu."],
+   "funny": ["VÀOOO! Thấy chưa? haha", "Tiền đạo tôi cuối cùng cũng nhớ cách sút xD"],
+   "confident": ["Dễ quá! Tiền đạo tôi không ai cản nổi B)", "Đã bảo rồi mà :P"],
+   "playful": ["Ối, thủ môn bạn giật mình hả? :P", "Vào! Muốn tôi dạy cho không? hehe"]
+  },
+  "conceded": {
+   "friendly": ["Bàn thắng đẹp! Phục bạn.", "Dứt điểm hay lắm!"],
+   "competitive": ["Được. Giờ tôi nghiêm túc rồi.", "Bàn này tôi sẽ trả lại."],
+   "funny": ["Bình tĩnh, tôi chỉ thử bạn thôi haha", "Thủ môn tôi đang ngắm chim bay :("],
+   "confident": ["Ăn may thôi. Chờ đấy.", "Ghi bàn thôi chưa đủ thắng tôi đâu."],
+   "playful": ["Rồi rồi, giờ tôi chơi thật nè :P", "Ơ sao vào được vậy? Ăn gian! xD"]
+  },
+  "miss": {
+   "friendly": ["Suýt nữa! Lần sau nhé.", "Tiếc quá, chút xíu nữa thôi."],
+   "competitive": ["Chậc. Suýt.", "Cú sau chắc chắn vào."],
+   "funny": ["Tiền đạo tôi quên cách sút rồi haha", "Chắc tôi cần tiền đạo mới T_T"],
+   "confident": ["Khởi động thôi mà.", "Cố tình sút trượt cho bạn đỡ buồn đấy :P"],
+   "playful": ["Cú đó tặng khán giả :D", "Bóng ngại vào lưới hehe"]
+  },
+  "save": {
+   "friendly": ["Phù, may mà không vào ^^", "Sút hay đấy, nhưng chưa đủ hehe"],
+   "competitive": ["Không dễ vậy đâu.", "Hàng thủ tôi không thể xuyên thủng."],
+   "funny": ["Tim tôi suýt ngừng đập haha", "Tôi nín thở luôn đấy xD"],
+   "confident": ["Khung thành tôi hôm nay an toàn B)", "Thử lại đi bạn :P"],
+   "playful": ["Suýt! Nhưng suýt thì không tính :P", "Không vào nhé :D"]
+  },
+  "win": {
+   "friendly": ["GG! Vui quá, đá thêm trận nữa không?", "GG, cảm ơn bạn đã chơi ^^"],
+   "competitive": ["GG. Tập thêm đi, hẹn gặp lại.", "Chiến thắng là thói quen."],
+   "funny": ["GG! Tiền thưởng để mua tiền đạo mới haha", "GG! Giờ thủ môn tôi được tăng lương rồi xD"],
+   "confident": ["GG. Biết trước rồi B)", "Dễ quá. GG :P"],
+   "playful": ["GG! Muốn phục thù không? Tôi chờ :D", "Hehe thắng rồi! GG nha ^^"]
+  },
+  "loss": {
+   "friendly": ["GG! Bạn chơi hay thật.", "GG, chúc mừng bạn!"],
+   "competitive": ["GG. Lần sau tôi sẽ đòi lại.", "Được, lần này bạn thắng. Nhớ đấy."],
+   "funny": ["Bàn phím tôi bị hỏng! haha", "Tôi đá bằng một tay thôi, thề đấy xD"],
+   "confident": ["Ăn may thôi. Phục thù!", "Tôi còn chưa nghiêm túc mà."],
+   "playful": ["Phục thù! Lúc nãy tôi chưa sẵn sàng T_T", "Ăn gian! Đùa thôi, GG :P"]
+  },
+  "draw": {
+   "friendly": ["GG, hòa công bằng ^^", "Cân bằng thật, GG!"],
+   "competitive": ["Hòa. Chưa vừa lòng.", "Lần sau phải có người thắng."],
+   "funny": ["Hòa! Không ai phải khao haha", "Hòa rồi, không ai phải khóc xD"],
+   "confident": ["Hòa? Lẽ ra tôi phải thắng.", "Bạn may mắn mới hòa được đấy B)"],
+   "playful": ["Hòa rồi! Thêm trận nữa không? :D", "Tạm hòa nhé :P"]
+  },
+  "reply": {
+   "friendly": ["Hehe ok ^^", "Ok bạn!"],
+   "competitive": ["Tập trung vào trận đấu đi.", "Nói nhiều không ghi được bàn đâu."],
+   "funny": ["haha ok ok", "Để tôi cười cái đã xD"],
+   "confident": ["Ừ ừ. Rồi cũng thua thôi :P", "Nói nhiều ghê B)"],
+   "playful": ["Hehe :P", "Hả? :D"]
+  }
+ }
+}

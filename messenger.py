@@ -10,7 +10,7 @@ auth needs "result" truthy (no "reason") to reach NOTIFICATION_SERVER_CONNECTED.
 Needs the `cryptography` package (Blowfish).
 Usage: python messenger.py [port=28002]   |   python messenger.py --selftest
 """
-import json, os, socketserver, struct, sys, time, warnings
+import json, os, socket, socketserver, struct, sys, threading, time, warnings
 
 warnings.filterwarnings("ignore")  # Blowfish is "decrepit" in newer cryptography
 try:
@@ -23,6 +23,11 @@ _args = [a for a in sys.argv[1:] if not a.startswith("--")]
 PORT = int(_args[0]) if _args else 28002
 KEY = b"kueec"
 LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "captures", "messenger.log")
+# Server pushes: http_config sends {"cmd": "push", "uri", "body"} as one UDP datagram to this
+# localhost port and every connected client gets it (MessengerConnection.handlePacket "push" ->
+# ResourceController.feedResources), e.g. the ladder room once a virtual opponent is found.
+PUSH_PORT = PORT + 1
+CLIENTS, SEND_LOCK = set(), threading.Lock()
 
 
 def _cipher():
@@ -65,9 +70,37 @@ def log(line):
         f.write(line + "\n")
 
 
+def push_loop():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.bind(("127.0.0.1", PUSH_PORT))
+    while True:
+        data, _ = s.recvfrom(65535)
+        try:
+            frame = encode(json.loads(data))
+        except Exception as e:  # bad JSON, too long for the u16 frame...: drop it, keep the thread
+            log(f"push dropped: {e!r}")
+            continue
+        with SEND_LOCK:
+            for c in list(CLIENTS):
+                try:
+                    c.sendall(frame)
+                except OSError:
+                    CLIENTS.discard(c)
+            log(f"push -> {len(CLIENTS)} client(s): {data[:120]!r}")
+
+
 class H(socketserver.BaseRequestHandler):
     def handle(self):
         log(f"connect {self.client_address}")
+        with SEND_LOCK:
+            CLIENTS.add(self.request)
+        try:
+            self.serve()
+        finally:
+            with SEND_LOCK:
+                CLIENTS.discard(self.request)
+
+    def serve(self):
         buf = b""
         while True:
             data = self.request.recv(65536)
@@ -86,7 +119,8 @@ class H(socketserver.BaseRequestHandler):
                 if msg.get("cmd") != "ping":
                     log(f"<- {msg}")
                 for out in replies(msg):
-                    self.request.sendall(encode(out))
+                    with SEND_LOCK:
+                        self.request.sendall(encode(out))
                     if out["cmd"] != "ping":
                         log(f"-> {str(out)[:300]}")
         log(f"closed {self.client_address}")
@@ -109,6 +143,7 @@ if __name__ == "__main__":
         selftest()
     else:
         os.makedirs(os.path.dirname(LOG), exist_ok=True)
-        print(f"messenger on 0.0.0.0:{PORT}, log -> {LOG}", flush=True)
+        print(f"messenger on 0.0.0.0:{PORT} (pushes from 127.0.0.1:{PUSH_PORT}), log -> {LOG}", flush=True)
+        threading.Thread(target=push_loop, daemon=True).start()
         socketserver.ThreadingTCPServer.allow_reuse_address = os.name != "nt"  # no double bind on Windows
         socketserver.ThreadingTCPServer(("0.0.0.0", PORT), H).serve_forever()

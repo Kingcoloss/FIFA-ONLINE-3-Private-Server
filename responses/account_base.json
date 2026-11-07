@@ -10,8 +10,13 @@
  },
  "features": {
   "vip": {},
+  "messenger": {},
   "antifairplaychecker": {},
   "teamcolor": {},
+  "laddermatch": {
+   "vs1": {},
+   "mgr1": {}
+  },
   "teammanagement": {
    "playermanagement": {
     "playerpool": {},
@@ -139,7 +144,8 @@
     "purchase": {},
     "sale": {},
     "myofferlist": {}
-   }
+   },
+   "playerpricegraph": {}
   },
   "coachinfo": {
    "coachinfo": {

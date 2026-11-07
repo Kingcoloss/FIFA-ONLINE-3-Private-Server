@@ -41,7 +41,7 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   cấp HLV / cầu thủ: EXP sau mỗi trận, cầu thủ LV.1-23 (+1 mọi chỉ số mỗi cấp), HLV LV.1-100.
 - Âm thanh game và nhạc menu EA Trax. `tools/eatrax_song.py` đặt bài hát của bạn lên đầu, nhưng sau đó
   game bị crash sau mỗi trận (xem lỗi đã biết bên dưới).
-- Trang quản trị web tại http://127.0.0.1:8088/ (EP, cầu thủ, gói, quà, quà hằng ngày, thưởng sau trận, Cửa hàng, nhật ký)
+- Trang quản trị web tại http://127.0.0.1:8088/ (EP, cầu thủ, gói, quà, quà hằng ngày, thưởng sau trận, chat AI, Cửa hàng, nhật ký)
   có chọn ngôn ngữ (issue #15): Bahasa Indonesia, English, 简体中文, ไทย, Tiếng Việt, 한국어; trình duyệt
   nhớ lựa chọn.
 - Áo đấu CLB thật trong trận (kit id = `teamid << 5 | type`; kiểu cũ `<< 10` hiện thành ô bàn cờ).
@@ -160,6 +160,29 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   xuống, một viên cho thẻ 2017): chọn một cầu thủ và anh ấy nhận EXP đó. Trước đây thiếu các yêu cầu của
   màn hình draft (`/item/draftpack/<id>/players/<n>`, `/transfer/price/default/<grade>`) và loại vật phẩm
   viên EXP. Trang admin tạo thêm được cả hai (ô "Draft" của gói, loại vật phẩm "EXP Capsule").
+- **Multiple > Rank: các HLV khác và trận đấu thật** (issue #30): màn hình xếp hạng trước đây dừng ở lỗi UI
+  vì máy chủ không gửi hạng đấu, phần thưởng và thành tích ladder. Giờ màn hình mở được, và các HLV ảo lấp
+  đầy bảng xếp hạng: top 3 (VS Manager Top) và xếp hạng bạn bè gồm 20 người, mỗi người có tên, câu lạc bộ,
+  hạng đấu và thành tích thay đổi dần trong ngày khi họ thi đấu. Lúc đầu có 100 HLV, mỗi ngày thêm 0-3 người
+  mới, tối đa 300. Mỗi người đá theo lối chơi riêng (kiểm soát bóng, phản công, pressing tầm cao, bóng dài,
+  dựng xe buýt hoặc tấn công tổng lực: sơ đồ, chiến thuật và cách chạy chỗ) trong bộ áo của câu lạc bộ mình,
+  với thẻ ngẫu nhiên từ mọi câu lạc bộ và mùa giải quanh rating của họ, mỗi thẻ có cấp thẻ riêng (từ +1 với
+  người mới đến +6 trở lên) và level riêng. Ngày qua ngày, họ mua bán thẻ, nâng cấp thẻ (nâng cấp thất bại
+  từ +5 bị tụt một cấp) và tăng level cho thẻ. Rank 1 on 1 và VS Manager đá một trận thật với một trong năm
+  HLV có rating gần bạn nhất: màn hình đội hình, cài đặt trận, rồi cả trận với AI của game điều khiển phía
+  đối thủ, sau đó là kết quả, phần thưởng và rating xếp hạng mới của bạn, hiện trong các bảng của màn hình
+  Rank, trong cửa sổ thành tích (các trận gần nhất, biểu đồ mùa giải) và trong danh sách trận đấu của
+  Info Manager. Trong trận, đối thủ chat trong khung chat của trận theo tính cách riêng (lúc giao bóng, khi
+  có bàn thắng của hai bên, sút trượt, cứu thua, và trả lời khi bạn gõ chat), rồi bình luận về kết quả khi
+  quay lại màn hình Rank; tab Chat AI trên trang quản trị dùng để tắt hoặc chọn ngôn ngữ (Indonesia, Anh,
+  Việt). Messenger giờ mở được (trước đây nó chờ một danh sách thông báo mà máy chủ không bao giờ gửi) và
+  hiện 20 người bạn ở trạng thái online, bận (đang trong trận Rank) hoặc offline theo khung giờ chơi của họ
+  (08:00-02:00 WIB); nút Info của một người bạn hiện hồ sơ và đội hình của người đó.
+- **Market sôi động** (issue #30): các HLV ảo mua thẻ bạn đăng bán ("Dijual" tự chuyển thành "Terjual" trong
+  vài phút, nhanh hơn khi giá rẻ hơn, kèm thông báo nổi "terjual seharga" và một thông báo ghi tên người
+  mua; Batal và Ulang dùng được) và tự đăng bán thẻ của mình bên cạnh lượng thẻ +1..+3 có sẵn, cả ở các cấp
+  thẻ khác, với giá thấp hơn giá thị trường một chút, còn Kuantitas thay đổi mỗi giờ. Tab Market Price trong
+  cửa sổ thẻ vẽ biểu đồ giá của 30 ngày gần nhất.
 - **Mở được hộp ngẫu nhiên** (Kotak Platinum và các hộp khác, issue #12): màn hình hộp liệt kê phần thưởng
   từ `staticdata.availables`, trước đây bị thiếu, nên mọi hộp đều lỗi khi bấm "Gunakan" (dùng).
 - **Thẻ mới vào Tim Cadangan**: thẻ từ gói, giao dịch, Market, Bag hoặc trang quản trị hiện "-" ở cột Tim
@@ -170,7 +193,10 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   mùa có thẻ trên Market (World Legend, World Best, '14 TOTS, …), nên vd. WL R. Gullit không bao giờ hiện
   ra. Danh sách mùa trong bộ lọc Market đã dùng được (issue #14: chọn mùa báo lỗi "cannot convert 39 to
   Array", vì `value` của mỗi mùa phải là danh sách) và hiện tên mùa của client (World Legend, 02 Chinese
-  Legend, …).
+  Legend, …). Kết quả tìm kiếm không còn hiện các thẻ engine mà các CLB AI ở Liga và Cup dùng để thi đấu
+  (mang biểu tượng mùa '17, chỉ số tới 127, vd. L. Messi 125; vốn cũng không mua được): mùa 0 của các thẻ
+  này đã được bỏ khỏi `/static/roster`, và mục "default" ở đó giờ là mùa '17 của chính client (88), nên
+  "2017" chỉ còn hiện một lần trong danh sách mùa.
 - **Mọi thẻ giao dịch được** đều có trên Market, trong giao dịch và trong gói: một thẻ được tính khi
   fifaaddict có nó hoặc chính game đánh dấu nó giao dịch được (`permid.transferable`). Chỉ dùng fifaaddict
   sẽ thiếu 6.599 thẻ (4.313 thẻ trong đó là '17); Market giờ có 44.703 thẻ. Gói mới **Semua Pemain** (tất
@@ -189,7 +215,7 @@ thô (37,7 MB), dạng EALayer3 (6,5 MB, `tools/re/ealayer3.py`) thêm làm bài
 TrackID 1 với kho nhạc nhỏ hơn bản gốc, nên kích thước nhạc không phải nguyên nhân. Hãy dùng nhạc gốc của
 game: `python -I tools/eatrax_song.py --restore` khôi phục lại.
 
-Chưa làm: chế độ online (xếp hạng, giao hữu, King of the Hill), Road to World, mô phỏng giải đấu.
+Chưa làm: chơi online với người khác (xếp hạng PvP, giao hữu, King of the Hill), Road to World, mô phỏng giải đấu.
 
 ## Yêu cầu
 
@@ -238,7 +264,7 @@ Chưa làm: chế độ online (xếp hạng, giao hữu, King of the Hill), Roa
 | `tools/fo4_season.py` | Thêm thẻ 26 LIVE và 25 LIVE của FIFA Online 4 (dữ liệu fifaaddict, chỉ số tính là +0) thành hai mùa mới với biểu tượng mùa của FO4: `fetch`, `collect` + `import`, `build`, `install` (ghi đè các mục trong `data_0.big` tại chỗ vì kích thước tệp không được đổi, và ghi nối thêm vào `Label.big`; `restore` khôi phục cả hai). |
 | `tools/fa_faces.py` | Thêm ảnh mặt nhỏ của cầu thủ còn thiếu trong bộ nhớ đệm của client (fifaaddict có cùng loại PNG 128x128); `--crests` thêm logo CLB còn thiếu (đa số CLB không có trong bộ nhớ đệm nên game hiện logo mặc định). Chạy tiếp được nếu bị ngắt, `--remove` hoàn tác. |
 | `tools/draft_icons.py` | Vẽ biểu tượng Shop cho các gói draft (bộ nhớ đệm của client không có ảnh draft) vào `assets/externalAssets/shop/`, máy chủ gửi các ảnh này trước ảnh của client; `<icon> <tag> <picks>` vẽ thêm một biểu tượng cho gói tạo trên trang admin. Cần Pillow. |
-| `tools/re/` | Công cụ hỗ trợ dịch ngược: `bigdir.py` (bảng lưu trữ BIg4), `refpack.py` (codec RefPack), `eadb.py` (bảng cơ sở dữ liệu "DB" của EA), `abc*.py` (phân tích / tìm kiếm / khai thác cấu trúc bytecode AS3), `gfxx.py` (SWF giao diện), `memgrab.py`, `gamectl.ps1` (điều khiển cửa sổ client khi kiểm thử). |
+| `tools/re/` | Công cụ hỗ trợ dịch ngược: `bigdir.py` (bảng lưu trữ BIg4), `refpack.py` (codec RefPack), `eadb.py` (bảng cơ sở dữ liệu "DB" của EA), `abc*.py` (phân tích / tìm kiếm / khai thác cấu trúc bytecode AS3), `gfxx.py` (SWF giao diện), `memgrab.py`, `dbwin.py` (đầu ra debug của client), `relay_emu.py` (bộ mã hóa gói relay PvP và relay thử nghiệm), `gamectl.ps1` (điều khiển cửa sổ client khi kiểm thử). |
 | `blaze.py`, `server.py`, `test_client.py`, `analyze_capture.py` | Khung EA Blaze (Fire/TDF) và máy chủ kiểm thử loopback từ giai đoạn đầu của dự án; sau đó hóa ra client dùng REST + messenger. |
 | `analysis/` | Các script phân tích client ban đầu (chuỗi, section PE, endpoint mạng). |
 | `FO3ID-private-server.md`, `reports/` | Phát hiện và báo cáo tiến độ (`reports/` viết bằng tiếng Indonesia). |
