@@ -227,6 +227,25 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   Agar layar langsung menampilkannya saat berganti perangkat, jalankan sekali
   `python tools/control_presets.py` saat game tertutup: tool ini mem-patch layar Kontrol di client
   (cadangannya disimpan; `--remove` mengembalikan aslinya).
+- **Menu Manager terisi** (issue #33): Info manager menampilkan catatanmu, bukan "-": pertandingan, gol,
+  kemenangan dan win streak di Liga, Cup dan Rank, juara liga dan tingkat yang dicapai, cup yang
+  dimenangkan beserta hadiahnya, kartu yang dibeli dan dijual beserta yang termahal, waktu bermain, serta
+  perkenalan dan fotomu. Semuanya dihitung mulai versi ini. Manager Ranking menampilkan nilai timmu
+  selama 30 hari terakhir dibanding rata-rata 20 temanmu dan peringkatmu di antara mereka, beserta
+  perubahan peringkat sejak kemarin.
+- **Misi dan achievement** (issue #33): Manager > Daftar pencapaian berisi baris lencana (level manajer,
+  pertandingan, kemenangan, upgrade, grade tertinggi, nilai tim, gol, kemenangan Rank); tiap achievement
+  punya 5 grade hadiah EP, pak dan item yang bisa diklaim, dan lencananya bisa dipakai setelah satu baris
+  selesai. Ada juga baris Misi harian (main, menang, cetak gol, main Rank) yang direset pukul 00:00 WIB.
+  Tombol Quest di bar atas membuka quest mingguan (direset Senin pukul 00:00 WIB) dengan hitung mundur;
+  quest yang selesai memberi GP untuk kotak hadiah di jendela itu (EP, Lucky EP,
+  pak, boost upgrade, Kotak Emas). Server menghitung pertandingan yang kamu mainkan dan upgrade yang
+  berhasil. Tab Misi baru di halaman admin menyalakan atau mematikannya dan mengatur bahasanya
+  (Indonesia, Inggris, Vietnam) serta pengali target dan hadiah; hadiah EP juga ikut harga pemain di tab
+  Ekonomi.
+- **Wasit saat kick-off** (issue #33): kedua asisten wasit diambil dari data kosong (wasit itu tidak ada
+  di daftar game), dengan kepala, rambut dan badan yang tidak ada asetnya, jadi tampak rusak saat
+  line-up. Sekarang server memakai wasit yang memang ada di game.
 - **Kotak acak bisa dibuka** (Kotak Platinum dan lainnya, issue #12): layar kotak menampilkan
   hadiahnya dari `staticdata.availables`, yang belum ada, jadi tiap kotak gagal saat "Gunakan".
 - **Kartu baru masuk Tim Cadangan**: kartu dari pak, trade, Market, Bag, atau halaman admin tampil

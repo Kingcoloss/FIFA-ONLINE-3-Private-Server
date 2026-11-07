@@ -147,6 +147,7 @@
     <button role="tab" data-tab="prematch" data-i18n="nav_prematch"></button>
     <button role="tab" data-tab="economy" data-i18n="nav_economy"></button>
     <button role="tab" data-tab="chat" data-i18n="nav_chat"></button>
+    <button role="tab" data-tab="missions" data-i18n="nav_missions"></button>
     <button role="tab" data-tab="scout" data-i18n="nav_scout"></button>
     <button role="tab" data-tab="log" data-i18n="nav_log"></button>
   </nav>
@@ -325,6 +326,18 @@
       </div>
     </section>
 
+    <section id="missions" hidden>
+      <h2 data-i18n="mis_title"></h2>
+      <p class="lead" id="misLead"></p>
+      <div class="row">
+        <label class="check"><input type="checkbox" id="misOn"> <span data-i18n="mis_on"></span></label>
+        <label class="f"><span data-i18n="mis_lang"></span><select id="misLang"></select></label>
+        <label class="f"><span data-i18n="mis_targets"></span><input type="number" id="misTargets" min="0.1" max="10" step="0.1"></label>
+        <label class="f"><span data-i18n="mis_rewards"></span><input type="number" id="misRewards" min="0" max="10" step="0.1"></label>
+        <button class="b primary" id="misSave" data-i18n="save"></button>
+      </div>
+    </section>
+
     <section id="scout" hidden>
       <h2 data-i18n="scout_title"></h2>
       <p class="lead" data-i18n="scout_lead"></p>
@@ -489,6 +502,14 @@ const loaders = {
     $("#chatLead").textContent = t("chat_lead", d.file);
     $("#chatOn").checked = d.enabled;
     $("#chatLang").innerHTML = Object.entries(d.langs).map(([k, v]) => `<option value="${k}"${k === d.lang ? " selected" : ""}>${esc(v)}</option>`).join("");
+  },
+  async missions() {
+    const d = await api("missions");
+    $("#misLead").textContent = t("mis_lead", d.file);
+    $("#misOn").checked = d.enabled;
+    $("#misLang").innerHTML = Object.entries(d.langs).map(([k, v]) => `<option value="${k}"${k === d.lang ? " selected" : ""}>${esc(v)}</option>`).join("");
+    $("#misTargets").value = d.targets;
+    $("#misRewards").value = d.rewards;
   },
   async scout() {
     const s = await api("summary");
@@ -879,6 +900,11 @@ $("#chatSave").addEventListener("click", () => act(async () => {
   await api("vm_chat_set", {enabled: $("#chatOn").checked, lang: $("#chatLang").value});
   await loaders.chat();
 }, t("chat_saved")));
+$("#misSave").addEventListener("click", () => act(async () => {
+  await api("missions_set", {enabled: $("#misOn").checked, lang: $("#misLang").value,
+                             targets: Number($("#misTargets").value), rewards: Number($("#misRewards").value)});
+  await loaders.missions();
+}, t("mis_saved")));
 $("#scoutReset").addEventListener("click", () => act(async () => { await api("scouts_reset", {}); await loaders.scout(); }, t("scouts_ready")));
 $("#logRefresh").addEventListener("click", () => loaders.log());
 setInterval(() => { if ($("#logAuto").checked && !$("#log").hidden) loaders.log(); }, 3000);

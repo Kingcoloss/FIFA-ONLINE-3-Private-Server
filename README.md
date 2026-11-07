@@ -212,6 +212,24 @@ Added, passing the tests but not yet checked in the client:
   To see it on the screen right away when you switch, run `python tools/control_presets.py` once
   with the game closed: it patches the client's Kontrol screen (a backup is kept; `--remove` puts
   the original back).
+- **The Manager menu is filled in** (issue #33): Info Manager shows your records instead of "-":
+  matches, goals, wins and win streaks in League, Cup and Rank, league titles and the level reached,
+  cups won and their prize money, cards bought and sold with the dearest of each, play time, and your
+  intro and photo. They count from this version on. Manager Ranking shows your team value over the
+  last 30 days against your 20 friends' average and ranks you among them, with each one's change
+  since yesterday.
+- **Missions and achievements** (issue #33): Manager > Daftar pencapaian has badge rows (manager level,
+  matches, wins, upgrades, top grade, team value, goals, Rank wins), each achievement with 5 grades of
+  EP, packs and items to claim and a badge to wear once a row is done, plus a daily missions row (play,
+  win, score, play Rank) that resets at 00:00 WIB. The Quest button on the top bar opens the weekly
+  quests (reset on Monday at 00:00 WIB) with a countdown; a finished quest pays
+  GP for the window's reward boxes (EP, Lucky EP, a pack, an upgrade boost, Kotak Emas). The server
+  counts the matches you play and the upgrades that succeed. The admin page's new Misi tab turns them
+  on or off and sets their language (Indonesian, English, Vietnamese) and the target and reward
+  multipliers; EP rewards also follow the Ekonomi tab's player prices.
+- **Officials at kick-off** (issue #33): the two assistant referees were drawn from an empty record (no
+  such referee in the game's list), with heads, hair and bodies that do not exist, so they looked
+  deformed in the line-up. The server now names referees the game has.
 - **Random boxes open** (Kotak Platinum and the rest, issue #12): the box screen lists its prizes
   from `staticdata.availables`, which was missing, so every box failed at "Gunakan".
 - **New cards join Tim Cadangan**: a card from a pack, a trade, the Market, the Bag or the admin

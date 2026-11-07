@@ -211,6 +211,22 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   Để màn hình hiện ngay preset của thiết bị khi chuyển, hãy đóng game rồi chạy một lần
   `python tools/control_presets.py`: công cụ này vá màn hình Kontrol của client (có lưu bản sao lưu;
   `--remove` khôi phục bản gốc).
+- **Menu Manager đã có dữ liệu** (issue #33): Info Manager hiện thành tích của bạn thay vì "-": số trận, bàn
+  thắng, số trận thắng và chuỗi thắng ở Giải đấu, Cúp và Rank, các chức vô địch giải và mức độ đã đạt, số cúp đã
+  thắng cùng tiền thưởng, số thẻ đã mua và bán cùng thẻ đắt nhất của mỗi loại, thời gian chơi, phần giới thiệu và
+  ảnh của bạn. Các số liệu được tính từ phiên bản này. Manager Ranking hiện giá trị đội của bạn trong 30 ngày qua
+  so với mức trung bình của 20 người bạn, thứ hạng của bạn trong nhóm đó và thay đổi thứ hạng so với hôm qua.
+- **Nhiệm vụ và thành tích** (issue #33): Manager > Daftar pencapaian có các dòng huy hiệu (cấp HLV, số trận,
+  số trận thắng, nâng cấp, cấp thẻ cao nhất, giá trị đội, bàn thắng, thắng Rank), mỗi thành tích có 5 cấp thưởng
+  EP, gói và vật phẩm để nhận, và đeo được huy hiệu khi xong cả dòng; thêm một dòng nhiệm vụ hằng ngày (chơi,
+  thắng, ghi bàn, chơi Rank) làm mới lúc 00:00 WIB. Nút Quest trên thanh trên cùng mở nhiệm vụ hằng tuần (làm
+  mới thứ Hai lúc 00:00 WIB) kèm đồng hồ đếm ngược; nhiệm vụ hoàn thành thưởng GP để đổi các hộp
+  quà trong cửa sổ đó (EP, Lucky EP, gói, tăng tỉ lệ nâng cấp, Kotak Emas). Máy chủ đếm các trận bạn chơi và các
+  lần nâng cấp thành công. Tab Misi mới trên trang quản trị dùng để bật hoặc tắt, chọn ngôn ngữ (tiếng Indonesia,
+  tiếng Anh, tiếng Việt) và hệ số mục tiêu, phần thưởng; thưởng EP cũng theo giá cầu thủ ở tab Kinh tế.
+- **Trọng tài lúc giao bóng** (issue #33): hai trợ lý trọng tài được tạo từ một bản ghi trống (không có trọng tài
+  đó trong danh sách của game), với đầu, tóc và thân không có tệp tài nguyên, nên trông méo mó khi xếp hàng ra sân.
+  Giờ máy chủ dùng các trọng tài có thật trong game.
 - **Mở được hộp ngẫu nhiên** (Kotak Platinum và các hộp khác, issue #12): màn hình hộp liệt kê phần thưởng
   từ `staticdata.availables`, trước đây bị thiếu, nên mọi hộp đều lỗi khi bấm "Gunakan" (dùng).
 - **Thẻ mới vào Tim Cadangan**: thẻ từ gói, giao dịch, Market, Bag hoặc trang quản trị hiện "-" ở cột Tim

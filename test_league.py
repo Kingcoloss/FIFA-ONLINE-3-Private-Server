@@ -33,6 +33,7 @@ def main():
         hc.SHOP_FILE = os.path.join(tmp, "shop.json"); hc.apply_shop({})  # the built-in Shop, not the live edits
         hc.ECONOMY_FILE = os.path.join(tmp, "economy.json"); hc.ECONOMY = dict(hc.ECONOMY_DEFAULT)  # not the live one
         hc.MATCH_REWARD_FILE = os.path.join(tmp, "match_rewards.json")  # default match rewards; admin test writes here
+        hc.MISSIONS_FILE = os.path.join(tmp, "missions.json")  # default missions; admin test writes here
         # a fresh account through the client's club creation (the live state may hold no manager)
         hc._save({"coaches": [], "defaultcoachid": "", "teams": {}})
         spids = [p["spid"] for p in hc.roster(241)["team"]["players"]]  # 2017 file, or built for 26 LIVE
@@ -261,6 +262,22 @@ def main():
         assert sum(p["pos"] < hc.POS_SUB for p in team["squad"]["positions"]) == 11
         coach = body(hc.route(f"/coach/{vid}")("", b""))  # its squad popup: a coach with teamsquadlist.preset
         assert coach["name"] == fr[0]["name"] and coach["team"]["squad"] == team["squad"] and coach["teamsquadlist"]["preset"]
+        # issue #33, Manager > Peringkat manajer: my team value over 30 days (oldest first; {} kept its
+        # spinner going) and the friends' team value ranking (an array; {} left it empty): the same
+        # 20 managers and me, ranked by value, fluc = yesterday's rank - today's; no clubs here
+        hist = body(hc.ENDPOINTS["/coach/me/teamvalue/history"]("", b""))["values"]
+        cm = hc.coach_me(hc._state(), hc._default_slot(hc._state()))
+        assert len(hist) == hc.TV_DAYS and hist[-1] == hc.first_team_value(cm["team"]) and all(isinstance(v, int) for v in hist)
+        rows = body(hc.ENDPOINTS["/rank/teamvalue/friend"]("", b""))
+        assert [r["rank"] for r in rows] == list(range(1, hc.VM_FRIENDS + 2)) and {r["_id"] for r in rows} == {f["_id"] for f in fr} | {cm["_id"]}
+        assert [r["teamvalue"]["val"] for r in rows] == sorted((r["teamvalue"]["val"] for r in rows), reverse=True)
+        assert all(set(r) == {"_id", "name", "level", "ovr", "teamvalue", "rank", "fluc"} and set(r["ovr"]) == {"FW", "MF", "DF"} for r in rows)
+        assert sum(r["fluc"] for r in rows) == 0 and body(hc.ENDPOINTS["/rank/teamvalue/club"]("", b"")) == []
+        assert cm["_id"] == cm["id"] and cm["hiderank"] is False
+        hid = body(hc.ENDPOINTS["/coach/me/hiderank"]("", b'{"hiderank": true, "_method": "PUT"}'))
+        assert hid["resources"][0]["body"]["hiderank"] is True
+        hc.ENDPOINTS["/coach/me/hiderank"]("", b'{"hiderank": false, "_method": "PUT"}')
+        assert body(hc.route(f"/coach/{cm['_id']}/summary")("", b""))["coach"]["name"] == cm["name"]  # my row's Info
         divs = json.load(open(os.path.join(hc.RESPONSES, "ladder_division_info.json")))
         assert [d["rating"] for d in divs] == sorted((d["rating"] for d in divs), reverse=True)  # highest first
         assert all(d["mingames"] > 0 for d in divs)  # the centre panel's "Match yg diperlukan x/<mingames>"
@@ -300,7 +317,7 @@ def main():
         assert tot == {"highelo": lad["high"][3], "hightype": "Ladder_MGR_PvP_1v1", "playedgames": 1, "totalwins": 1}
         # "Poin peringkat" / record screen: setSeasonalRecord finds the season by season.sid === String(sid)
         sid = body(hc.ENDPOINTS["/ladder/season/info"]("", b""))["sid"]
-        season = hc.coach_me(st, 0)["statistics"]["ladder"]["seasons"][0]
+        season = hc.coach_me(st, 0)["statistics"]["ladder"]["seasons"][-1]  # this season last
         assert season["sid"] == str(sid) and season["elos"][3] == [{"elo": tot["highelo"], "dateymd": time.strftime("%Y%m%d", time.gmtime())}]
         st.pop("match"); hc._save(st)
         # the room flow: search, cancel (its timer firing late must not match), search again, found
@@ -338,8 +355,11 @@ def main():
         fr = my["ladder_pvp_1v1"]["firstround"]
         assert not fr["ongoing"] and fr["wins"] == [True] * 5 and fr["beforeelo"] == hc.LADDER_START < fr["afterelo"]
         assert my["ladder_total"]["totalwins"] == my["ladder_total"]["playedgames"] == 6
+        hr = hc.coach_me(st, 0)["statistics"]["ladder"]["highrecords"]  # Info Manager's Rank record
+        assert hr["count"] == 6 and hr["winningstreak"][0] == 5 and hr["winningstreak"][3] == 1 and hr["rank"][0] >= 1
+        assert my["sid"] == str(hc.ladder_season()[0])  # the Summary tab shows this season's Rank rates for it
         # match history: the record screen's last 3 (streak, rating after) and Info Manager's list
-        season = hc.coach_me(st, 0)["statistics"]["ladder"]["seasons"][0]
+        season = hc.coach_me(st, 0)["statistics"]["ladder"]["seasons"][-1]
         rm = season["recentmatches"][0]
         assert len(rm) == 3 and [r["streak"] for r in rm] == [3, 4, 5] and rm[-1]["elo"] == hc.my_ladder(st)["elo"][0]
         assert rm[-1]["goals"] == 1 and rm[-1]["elodiff"] > 0 and season["recentmatches"][3][-1]["streak"] == 1  # the manager win
@@ -350,10 +370,10 @@ def main():
         lad = hc.my_ladder(st); lad["sid"] -= 1; prev = copy.deepcopy(lad)
         hc.my_ladder(st)
         stats = hc.coach_me(st, 0)["statistics"]["ladder"]
-        assert [s["sid"] for s in stats["seasons"]] == [str(sid), str(prev["sid"])] and not any(hc.my_ladder(st)["games"])
+        assert [s["sid"] for s in stats["seasons"]] == [str(prev["sid"]), str(sid)] and not any(hc.my_ladder(st)["games"])
         # no season-end reward yet: an unrewarded past season makes the Rank front POST /ladder/reward and
         # open the reward popup on the default reply (TypeError) at every visit
-        assert stats["seasons"][1]["rewarded"] is True and "rewarded" not in stats["seasons"][0]
+        assert stats["seasons"][0]["rewarded"] is True and "rewarded" not in stats["seasons"][1]
         assert stats["highrecords"]["elo"][0] == prev["high"][0] > hc.LADDER_START
         assert hc.my_coach(st)["ladderweek"]["wins"] == 6
         # issue #30 part 3: his chat (pushes recorded, timers fired here; odds 1, no gap between lines)
@@ -596,6 +616,15 @@ def main():
         after = body(hc.ep_l2_me("", b""))
         assert after["sponsoroffice"]["season"]["status"] == "finished" and "league" in after
         assert after["difficultyselect"] == end["promotion"]["next"]
+        # issue #33, Info Manager's record tab: my league matches (played or simulated) and goals, the
+        # title and the level reached (it shows noramlbest - 10), once a season
+        rec = hc.coach_me(hc._state(), 0)["statistics"]["league"]
+        mine = [x for x in after["league"]["matchrecords"] if me in (x["home"], x["away"])]
+        assert rec["wins"] + rec["draws"] + rec["losses"] == len(mine) == 2 * (hc.LEAGUE_SIZE - 1)
+        assert rec["goals"] == sum(x["goals"]["home" if x["home"] == me else "away"] for x in mine)
+        assert rec["normalwins"] == (s[str(me)]["rank"] == 1) and rec["noramlbest"] == max(12, end["promotion"]["next"]) + 1
+        body(hc.ep_l2_end("", b"{}"))  # the closing day again: not counted twice
+        assert hc.coach_me(hc._state(), 0)["statistics"]["league"]["normalwins"] == rec["normalwins"]
         body(hc.ep_l2_finish("", b"{}"))  # give up / reset
         assert "league" not in body(hc.ep_l2_me("", b""))
         # --- cup: groups of 4 then an 8-club knock-out; I win every match I play
@@ -632,6 +661,10 @@ def main():
         assert lv["rewards"] == [{"itemid": 1, "count": 60000}], lv
         assert ep() == ep0 + 60000  # cup prize credited
         assert cid not in hc._state()["cups"]
+        cr = hc.coach_me(hc._state(), 0)["statistics"]["cup"]  # Info Manager: cup matches, won (by AI level), prize
+        assert (cr["wins"], cr["draws"], cr["losses"]) == (6, 0, 0) and cr["cupwins"] == [0, 0, 1, 0, 0] and cr["highrecords"]["prize"] == 60000
+        rec = body(hc.ENDPOINTS["/cup/record"]("", b""))["resources"][0]["body"]
+        assert (rec["totalchallenges"], rec["totalwins"], rec["totalprize"]) == (1, 1, 60000)
         # --- market: top list, search, buy (EP checked, a new card instance in my players)
         top = body(hc.route("/transfer/top/50")("", b""))
         assert len(top) == 50 and top[0]["price"] >= top[-1]["price"] and top[0]["expandme"] == "player"
@@ -649,6 +682,8 @@ def main():
         ep0 = ep()
         assert buy(offer)["result"] and len(copies(spid)) == 1 and ep() == ep0 - offer["price"]
         assert buy(offer)["result"] and len(copies(spid)) == 2  # a second copy: an upgrade pair
+        car = hc.coach_me(hc._state(), 0)["career"]  # Info Manager: cards bought, the dearest
+        assert car["buyplayers"] == 2 and (car["maxbuy"]["spid"], car["maxbuy"]["amount"]) == (spid, offer["price"]) and "maxsell" not in car
         # the virtual managers' listings beside the +1..+3 stock: other grades a little under the market
         # price, Kuantitas per hour; buying takes from the row the path names, a row sold out (or never
         # there) is NO_SUCH_OFFER ("Pemain tidak ada.")
@@ -1243,6 +1278,82 @@ def main():
         # the Rank opponents' chat: on/off and language (gamedata/vm_chat.json)
         assert A("vm_chat")["enabled"] and A("vm_chat")["lang"] == "id" and refused("vm_chat_set", enabled=True, lang="xx")
         assert A("vm_chat_set", enabled=False, lang="vi") == hc.vm_chat_cfg() == {"enabled": False, "lang": "vi"}
+        # issue #33, Info Manager: the record tab draws once /coach/me has createdat, playtime, career and
+        # statistics with every object it reads (one missing stopped it at "-")
+        me = hc.coach_me(hc._state(), 0)
+        assert len(me["createdat"]) > 19 and {"clubs", "maxplayers", "buyplayers", "sellplayers"} <= set(me["career"])
+        s = me["statistics"]
+        assert {"league", "friendly", "simulation", "club", "cup", "ladder", "winstreak"} <= set(s) and s["league"]["leaguewins"] == [0]
+        assert set(s["friendly"]) == {"custom", "quick", "vscom"} and len(s["friendly"]["quick"]["wins"]) == 5
+        assert all(len(s["ladder"]["highrecords"][k]) == hc.LADDER_COUNT for k in ("rank", "winningstreak", "elo"))
+        assert body(hc.ENDPOINTS["/coach/me/profile"]("", b'{"description": "Halo", "_method": "PUT"}'))["result"]
+        assert hc.coach_me(hc._state(), 0)["profile"]["description"] == "Halo"
+        # play time: the gaps between requests, a long silence is time away; added on the next save
+        hc.PLAYTIME.update(last=0.0, pending=0.0)
+        for t in (10_000, 10_600, 20_000):  # away, 600 s of play, away
+            hc.note_activity(t)
+        st = hc._state(); t0 = hc.my_coach(st).get("playtime", 0); hc._save(st)
+        assert hc.coach_me(hc._state(), 0)["playtime"] == t0 + 600
+        # missions: the server counts my play; Manager > Daftar pencapaian (badge rows of achievements
+        # and the daily row) and the weekly Quest window (GP for its reward boxes)
+        st = hc._state(); hc.my_coach(st).pop("missions", None); hc._save(st)
+        ep_before = ep()  # the rewards paid below are taken back after
+        sa = body(hc.ENDPOINTS["/static/info/ACHIEVEMENT"]("", b""))
+        ids = {d["id"] for d in sa["list"]}
+        assert all(i in ids and isinstance(i, int) for g in sa["mixed"].values() for i in g) and set(sa["mixed"]) <= ids
+        assert all(len(g) <= 5 for g in sa["mixed"].values()) and all(len(d.get("rewards", [])) <= 5 for d in sa["list"])
+        names = body(hc.ENDPOINTS["/static/db/ITEMNAMES"]("", b""))  # a reward without a name throws
+        assert all(str(r["itemid"]) in names for d in sa["list"] for g in d.get("rewards", []) for r in g["reward"])
+        assert {b["asset"] for b in body(hc.ENDPOINTS["/static/db/BADGES"]("", b""))} <= set(sa["mixed"]) and "misc" in sa["mixed"]
+        ach = lambda: body(hc.ENDPOINTS["/achievement/me"]("", b""))
+        rows = lambda: {r["id"]: r for r in ach()["achievement"]}
+        mine = ach()
+        subs = [r for r in mine["achievement"] if not isinstance(r["id"], str)]
+        assert len(subs) == mine["summary"]["total"] == len(ids) - len(sa["mixed"]) and all(r["aon"] for r in subs)
+        assert {r["id"] for r in mine["achievement"]} == ids - set(sa["mixed"])  # every id of a row (or the row stops);
+        # a group's own entry only with its badge (the panel lights it and dates it whenever there is one)
+        st = hc._state(); hc.mission_event(st, match=3, win=2, goal=5, rank=1, rankwin=1); hc._save(st)
+        assert all(rows()[i]["rewards"]["available"] for i in (901, 902, 903, 904))  # today's missions done
+        e0 = ep()
+        got = body(hc.route("/achievement/902/reward/1")("", b"{}"))
+        assert got["result"] and got["rewards"][0]["itemid"] == hc.EP_ITEM and ep() == e0 + got["rewards"][0]["count"]
+        assert got["resources"][0]["uri"] == "/achievement/me" and rows()[902]["complete"]
+        assert not body(hc.route("/achievement/902/reward/1")("", b"{}"))["result"]  # once a day
+        st = hc._state(); hc.my_coach(st)["missions"]["day"] = "2000-01-01"; hc._save(st)  # the next day
+        assert not rows()[902]["complete"] and rows()[902]["progress"]["detail"]["current"] == 0
+        assert rows()[102]["progress"]["detail"]["current"] == 3  # the totals stay
+        # a badge row all paid earns its badge, which can be worn
+        st = hc._state(); hc.mission_event(st, goal=1000, rankwin=150); hc._save(st)
+        for aid in (401, 402):
+            for g in range(1, 6):
+                assert body(hc.route(f"/achievement/{aid}/reward/{g}")("", b"{}"))["result"], (aid, g)
+        assert rows()["gol"]["complete"] and rows()["gol"]["completedat"] and 900039 in hc.coach_me(hc._state(), 0)["badges"]
+        assert body(hc.route("/badge/900039/use")("", b"{}"))["resources"][0]["body"]["currentbadge"] == 900039
+        assert not body(hc.route("/badge/900046/use")("", b"{}"))["result"]  # not earned
+        # this week's quests (until Monday 00:00 WIB) and next week's; a done one paid its GP
+        bank, end = body(hc.ENDPOINTS["/static/info/request"]("", b"")), hc.week_end()
+        assert bank["expire"] == [hc.w3c(end), hc.w3c(end + 7 * 86400)] and len(bank["current"]) == hc.QUEST_COUNT  # expire[i]
+        assert [q["name"] for q in bank["next"]] == [q[0] for q in hc.week_quests(hc.missions_cfg(), end + 7 * 86400)]
+        quests = ach()["quest"]
+        assert all(("completedat" in q) == (q["progress"]["detail"]["current"] == b["todo"]) for q, b in zip(quests, bank["current"]))
+        assert hc.coach_me(hc._state(), 0)["gpdata"]["point"] == sum(b["reward"]["count"] for q, b in zip(quests, bank["current"]) if "completedat" in q)
+        shop = body(hc.ENDPOINTS["/shop/list/GPSHOP"]("", b""))  # its reward boxes, priced in GP
+        assert [(e["product"]["itemid"], e["product"]["staticdata"]["bunches"][0]["price"]) for e in shop] == list(hc.GP_SHOP)
+        st = hc._state(); hc.missions_state(st)["gp"] = 25; hc._save(st)
+        buy_gp = lambda e: body(hc.ENDPOINTS["/shop/purchase"]("", json.dumps({"shopid": e["shopid"], "productid": e["product"]["itemid"], "bunch": 0}).encode()))
+        assert buy_gp(shop[1])["resources"][0]["body"]["gpdata"]["point"] == 5 and buy_gp(shop[1])["reason"] == "NOT_ENOUGH_GP"
+        # the admin page's Misi tab: on/off, language, targets and rewards
+        assert A("missions")["enabled"] and refused("missions_set", enabled=True, lang="xx", targets=1, rewards=1)
+        assert refused("missions_set", enabled=True, lang="en", targets=0, rewards=1)
+        assert A("missions_set", enabled=True, lang="en", targets=2, rewards=0.5) == hc.missions_cfg() == \
+            {"enabled": True, "lang": "en", "targets": 2.0, "rewards": 0.5}
+        d902 = next(d for d in body(hc.ENDPOINTS["/static/info/ACHIEVEMENT"]("", b""))["list"] if d["id"] == 902)
+        assert d902["name"] == "Daily: Wins" and d902["rewards"][0]["todo"] == 4
+        assert "quest" in body(hc.ep_account("", b""))["features"]["freeroambuttons"]
+        A("missions_set", enabled=False, lang="id", targets=1, rewards=1)
+        assert ach()["achievement"] == [] and "quest" not in body(hc.ep_account("", b""))["features"]["freeroambuttons"]
+        A("missions_set", enabled=True, lang="id", targets=1, rewards=1)
+        A("ep", set=ep_before)
         # issue #31, pre-match settings: Rank's game setting screen has the steppers (its stadium list is
         # GET /stadium/list, a change is PUT /match/<id>/gamesettings); Liga and Cup only show the values,
         # which come from the last choice (also set here, on the admin page)
@@ -1284,6 +1395,9 @@ def main():
         hl, hc.HALF_LENGTH = hc.HALF_LENGTH, 20  # a FO3_HALF_LENGTH off the stepper's list: kept, the stepper off
         m = mk(); hc.apply_prematch(hc._state(), m)
         assert m["gamesettings"]["halfLength"] == 20 and not m["gamesettings"]["matchtimechange"]
+        # issue #33: the officials are rows of the engine's referee table (assistants 0 = an all-zero
+        # record, missing heads and bodies: the deformed officials at the line-up)
+        assert m["gamesettings"]["refereeIdSelector"] == 112 and 0 not in m["gamesettings"]["subRefereeIds"]
         hc.HALF_LENGTH = hl
         # issue #30's economy request: harder, configurable prices (admin Ekonomi tab). Easy = as it was
         assert A("economy") == dict(hc.ECONOMY_DEFAULT, shopfree=hc.SHOP_FREE) and hc.SHOP_FREE

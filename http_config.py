@@ -167,6 +167,7 @@ def _state():
 def _save(st):
     """Write state.json whole or not at all (a temp file, then a rename): background writers
     (market_loop, the Rank timers) save while the user may close the server window."""
+    fold_playtime(st)
     os.makedirs(os.path.dirname(STATE), exist_ok=True)
     tmp = STATE + ".tmp"
     with open(tmp, "w") as f:
@@ -410,6 +411,8 @@ def ep_account(query, body):
     with open(os.path.join(RESPONSES, "account_base.json"), encoding="utf-8") as f:
         acc = json.load(f)
     acc["option"] = account_option()
+    if missions_cfg()["enabled"]:  # the Quest window's menu button (missions)
+        acc["features"].setdefault("freeroambuttons", {})["quest"] = {}
     return _json(acc)
 
 
@@ -747,8 +750,13 @@ def new_match(mtype, left, right, **extra):
                               "halfLength": HALF_LENGTH,
                               # the rest is what native ApplyGameSettings (0x946FD0) reads; values are
                               # its own defaults (0x959050). Missing gameSpeed broke the match clock.
-                              "gameSpeed": 1, "crowd": 100, "pitchWear": 1, "refereeIdSelector": 845,
-                              "subRefereeIds": [0, 0], "disableMomentum": False, "bookingsOn": True,
+                              # officials: rows of the engine DB's referee table (ids 52..306;
+                              # native falls back to 112 for the referee unless all three
+                              # exist). Assistants 0 (no such row) were drawn from an all-zero
+                              # record, with heads, hair and bodies that do not exist: the
+                              # deformed officials at the line-up (issue #33)
+                              "gameSpeed": 1, "crowd": 100, "pitchWear": 1, "refereeIdSelector": 112,
+                              "subRefereeIds": [178, 157], "disableMomentum": False, "bookingsOn": True,
                               "offsidesOn": True, "injuriesOn": True, "foulsOn": True, "fatigueOn": True,
                               "subOnBench": 5, "availableSubs": 3, "drawMode": 0, "gameType": mtype,
                               "shootoutmode": False, "prevScore": {"home": 0, "away": 0}}}
@@ -1648,6 +1656,7 @@ def set_economy(cfg):
         json.dump(new, f, indent=1)
     ECONOMY = new
     pack_ev.cache_clear()
+    vm_value.cache_clear()
     trade2_pool.cache_clear()
     _T3_POOL.clear()
     return new
@@ -1664,6 +1673,94 @@ def add_ep(st, n):
     coach["ep"] = coach.get("ep", START_EP) + int(n)
 
 
+# Manager > Info Manager (issue #33: its Jum.Rekor tab showed only "-"). CoachTotalRecordTabPage
+# draws once /coach/me has all of createdat (W3C), playtime (s), career and statistics, and reads
+# statistics .league, .friendly (with its custom/quick/vscom rows), .simulation, .club and
+# .ladder.highrecords {count, rank [i], winningstreak [i]} without guards: one missing stops the
+# rest. coach["record"] keeps what this server can count (league, cup and Rank matches, league
+# titles and best level, cups, the Market); friendlies, simulations and clubs do not exist here.
+CUP_LEVELS = 5  # statistics.cup.cupwins [AI level 0..4]
+
+
+def coach_record(coach, part):
+    """A coach's record of one kind (league, cup, ladder, market), created empty."""
+    return coach.setdefault("record", {}).setdefault(part, {})
+
+
+def record_match(st, part, gf, ga):
+    """A finished league or cup match of mine (my goals gf, theirs ga)."""
+    r = coach_record(my_coach(st), part)
+    for k in ("wins", "draws", "losses", "goals", "goalsconceded", "streak", "maxstreak"):
+        r.setdefault(k, 0)
+    res = "wins" if gf > ga else "losses" if gf < ga else "draws"
+    r[res] += 1
+    r["goals"] += gf
+    r["goalsconceded"] += ga
+    r["streak"] = r["streak"] + 1 if res == "wins" else 0
+    r["maxstreak"] = max(r["maxstreak"], r["streak"])
+
+
+def record_trade(coach, kind, spid, amount, now=None):
+    """A card bought (kind "buy") or sold ("sell") on the Market: the count and the dearest."""
+    r = coach_record(coach, "market")
+    r[kind] = r.get(kind, 0) + 1
+    top = r.get("max" + kind)
+    if not top or amount > top["amount"]:
+        r["max" + kind] = {"amount": int(amount), "spid": int(spid), "name": card_name(spid),
+                           "date": w3c(time.time() if now is None else now)}
+
+
+def coach_statistics(st, coach, slot):
+    """/coach/me statistics: Rank (ladder_statistics plus the record's count, best rank and best
+    win streak per ladder), league, cup, and the empty friendly / simulation / club records."""
+    rec = coach.get("record", {})
+    lg, cup, lad = rec.get("league", {}), rec.get("cup", {}), rec.get("ladder", {})
+    ladder = (ladder_statistics(st)[0] if slot == _default_slot(st) else
+              {"seasons": [], "highrecords": {"elo": [LADDER_START] * LADDER_COUNT, "division": [None] * LADDER_COUNT}})
+    ladder["highrecords"].update(count=lad.get("count", 0), rank=lad.get("rank", [0] * LADDER_COUNT),
+                                 winningstreak=lad.get("winningstreak", [0] * LADDER_COUNT))
+    rows = lambda: {k: [0] * 5 for k in ("wins", "draws", "losses")}  # 1 vs 1 .. 5 vs 5
+    return {"ladder": ladder,
+            # noramlbest (sic) / ultimatebest: the level shown is it - 10 / - 20; leaguewins: an
+            # array the titles count sums (shown only when not empty)
+            "league": {**{k: lg.get(k, 0) for k in ("wins", "draws", "losses", "goals", "goalsconceded", "normalwins",
+                                                    "noramlbest", "ultimatewins", "ultimatebest")},
+                       "winningstreak": {"max": lg.get("maxstreak", 0)}, "leaguewins": [0]},
+            "friendly": {"custom": rows(), "quick": {**rows(), "winningstreak": {"max": [0]}}, "vscom": rows()},
+            "simulation": {k: {"wins": 0, "draws": 0, "losses": 0} for k in ("custom", "quick", "vscom")},
+            "winstreak": [], "club": {},
+            "cup": {**{k: cup.get(k, 0) for k in ("wins", "draws", "losses", "abandonments")},
+                    "cupwins": cup.get("cupwins", [0] * CUP_LEVELS), **({"highrecords": cup["best"]} if cup.get("best") else {})}}
+
+
+def coach_career(coach, team):
+    m = coach.get("record", {}).get("market", {})
+    return {"appat": coach.setdefault("appat", w3c(time.time())), "clubs": 1, "maxplayers": len(team["players"]),
+            "buyplayers": m.get("buy", 0), "sellplayers": m.get("sell", 0),
+            **{k: m[k] for k in ("maxbuy", "maxsell") if k in m}}  # none = "Tidak ada pertukaran"
+
+
+# Play time (Info Manager's "Waktu bermain"): the gaps between the game's requests, up to
+# PLAYTIME_GAP (a whole match sends nothing for its length); a longer silence is time away. Kept
+# in memory and added to the active coach whenever the state is saved.
+PLAYTIME_GAP = 1200
+PLAYTIME = {"last": 0.0, "pending": 0.0}
+
+
+def note_activity(now=None):
+    now = time.time() if now is None else now
+    if 0 < now - PLAYTIME["last"] <= PLAYTIME_GAP:
+        PLAYTIME["pending"] += now - PLAYTIME["last"]
+    PLAYTIME["last"] = now
+
+
+def fold_playtime(st):
+    if PLAYTIME["pending"] >= 1 and st.get("coaches"):
+        coach = my_coach(st)
+        coach["playtime"] = coach.get("playtime", 0) + int(PLAYTIME["pending"])
+        PLAYTIME["pending"] -= int(PLAYTIME["pending"])
+
+
 def coach_me(st, slot):
     """Body of the /coach/me resource (CoachProxy). Field paths are the ones its
     fetchCoach* methods read; values are a fresh account. startFreeRoam waits for this
@@ -1676,7 +1773,9 @@ def coach_me(st, slot):
     if team["formations"] and team["squad"].get("formation") is None:
         team["squad"]["formation"] = team["formations"][0]["formationid"]
     return {
-        "id": coach["_id"], "name": coach["name"], "slot": slot, "teamid": coach["teamid"], "team": team,
+        # _id: the Peringkat manajer tab finds my own row by it; hiderank: its "hide me" box
+        "id": coach["_id"], "_id": coach["_id"], "hiderank": coach.get("hiderank", False),
+        "name": coach["name"], "slot": slot, "teamid": coach["teamid"], "team": team,
         # CoachProxy.expandMoney parses money.mpdata.until as a W3C date; an exception there
         # silently aborts onChangeCoachMeResource before squad/players are read.
         "money": {"ep": coach.get("ep", START_EP), "es": coach.get("es", 0), "cash": 0, "mp": 0, "useable_mp": 0,
@@ -1685,14 +1784,20 @@ def coach_me(st, slot):
         # isVip() = vipDetail > 0 and vipExpireAt in the future; vipStatus.VIP1 = VIP expiry
         # after a VVIP period (updateVipExpireAt)
         "igr": True, "vipDetail": VIP_DETAIL, "vipExpireAt": VIP_UNTIL, "vipStatus": {"VIP1": VIP_UNTIL},
-        "sp": {"point": 0}, "gpdata": {"gp": 0}, "badges": [], "currentbadge": 0,
+        # the Quest window's GP (this week's; CoachProxy.expandMoney: money.gp = gpdata.point, cleared
+        # once until passes) and the achievement badges (missions)
+        "sp": {"point": 0}, "gpdata": {"point": mission_gp(coach), "until": w3c(week_end())},
+        "badges": coach.get("missions", {}).get("badges", []), "currentbadge": coach.get("missions", {}).get("currentbadge", 0),
         # league.leagueid -> CoachProxy.leagueId: Single > Liga builds the league from it
         # statistics.ladder: Multiple > Rank's record tab (LadderMatchController.rebuildLadderRecordInfo
         # reads seasons [{sid, ...}] and highrecords {elo [i], division [i]}, i = ladder index;
         # without it the screen stopped on a UI error): my ladder record (ladder_statistics)
         "levelinfo": coach_levelinfo(coach),
-        "statistics": {"ladder": ladder_statistics(st)[0] if slot == _default_slot(st) else
-                       {"seasons": [], "highrecords": {"elo": [LADDER_START] * LADDER_COUNT, "division": [None] * LADDER_COUNT}}},
+        # Manager > Info Manager (issue #33): createdat + playtime + career + statistics (see
+        # coach_statistics); profile {description, picture, views} for its Summary tab
+        "statistics": coach_statistics(st, coach, slot),
+        "createdat": coach.setdefault("appat", w3c(time.time())), "playtime": int(coach.get("playtime", 0)),
+        "profile": {"description": "", "views": 0, **coach.get("profile", {})},
         "league": {"leagueid": roster_summary(teamid).get("league", {}).get("id", 0)},
         # limits.cups -> CupProxy.playMax (cups you can run at once); limits.players/baseplayers
         # -> the market's player-slot check (TransferPurchaseTabPage._limitPlayerCount)
@@ -1710,7 +1815,7 @@ def coach_me(st, slot):
         # Tim > Klub > Informasi tim (issue #9): TeamStaticInfo reads career.appat (start date,
         # W3C; a manager from before this field gets the day it is first sent) and stadium {id};
         # TeamManagementTeamInfoTabPage draws its player panel only once stadium is defined
-        "career": {"appat": coach.setdefault("appat", w3c(time.time()))},
+        "career": coach_career(coach, team),
         "stadium": {"id": club_stadium(teamid)},
         # cups -> CupProxy.cupPlayList: {metaid, cupid} of cups not left yet (front screen resumes
         # them; an ended one shows its won/eliminated screen with the reward button -> /leave)
@@ -2108,6 +2213,8 @@ def league_play_round(st, rnd, mine=None, seed=None):
             gh, ga = mine
         else:
             gh, ga = sim_score(rng, team_strength(st, h), team_strength(st, a))
+        if me in (h, a):  # played or simulated: Info Manager's league record
+            record_match(st, "league", *((gh, ga) if h == me else (ga, gh)))
         played.append({"type": "league", "matchtype": "league", "round": rnd, "home": h, "away": a,
                        "goals": {"home": gh, "away": ga}})
     league["matchrecords"] += played
@@ -2416,6 +2523,11 @@ def ep_l2_end(query, body):
            "sponsorRewards": {"sponsorid": str(lg.get("sponsor")), "level": 1, "achievement": done,
                               "missions": [{"mid": mid, "achievement": done, "progress": progress}]},
            "leaderRewards": leaders, "seasonRewards": {"items": []}}
+    if (lg.get("sponsoroffice") or {}).get("season", {}).get("status") != "finished":  # once a season
+        r = coach_record(my_coach(st), "league")
+        track, best = ("ultimate", "ultimatebest") if cur >= 20 else ("normal", "noramlbest")
+        r[track + "wins"] = r.get(track + "wins", 0) + (rank == 1)
+        r[best] = max(r.get(best, 0), max(cur, nxt) + 1)  # Info Manager shows it - 10 / - 20: the level's number
     lg.update(difficultyselect=nxt, sponsoroffice={"season": {"status": "finished"}})
     add_ep(st, out["rewards"]["money"]["reward"]["total"])
     _save(st)
@@ -2631,6 +2743,10 @@ def ep_match_end(mid, query, body):
         match["reward"] = match_reward(st, req)
         add_ep(st, match["reward"]["money"]["reward"]["total"])
         ladder_result(st, mid, req)
+        score = lambda side: int((req.get(side) or {}).get("score") or 0)  # missions count it
+        gf, ga = score(req.get("myTeam", "home")), score(req.get("opponentTeam", "away"))
+        rank = str(match.get("type", "")).startswith("Ladder")
+        mission_event(st, match=1, win=int(gf > ga), goal=gf, rank=int(rank), rankwin=int(rank and gf > ga))
     cp = st.get("cup_pending") or {}
     if cp.get("id") == mid and cp.get("cupid") in (st.get("cups") or {}):
         h, a = req.get("home") or {}, req.get("away") or {}
@@ -2651,7 +2767,7 @@ def ep_match_end(mid, query, body):
         out["resources"] = l2_resources(st)
     if match is not None:
         match["stage"] = "closed"
-        out["resources"] = [{"uri": f"/match/{mid}", "body": match}] + out.get("resources", [])
+        out["resources"] = [{"uri": f"/match/{mid}", "body": match}] + out.get("resources", []) + achievement_resources(st)
     _save(st)
     return _json(out)
 
@@ -2785,6 +2901,8 @@ def cup_play_round(st, cup, mine=None):
             else:
                 gh, ga = sim_score(rng, team_strength(st, h["teamid"]), team_strength(st, a["teamid"]))
             leg["score"] = {"home": gh, "away": ga}
+            if h["coach"] or a["coach"]:  # Info Manager's cup record
+                record_match(st, "cup", *((gh, ga) if h["coach"] else (ga, gh)))
             if ko and gh == ga and played and len(mine) > 3 and mine[2] != mine[3]:  # shootout played in game
                 leg["shootout"] = {"home": mine[2], "away": mine[3]}
             elif ko and gh == ga:  # penalties
@@ -2841,6 +2959,8 @@ def ep_cup_new(query, body):
     st = _state()
     cup = new_cup(st, meta, int(req.get("difficulty") or 0))
     st.setdefault("cups", {})[cup["_id"]] = cup
+    r = coach_record(my_coach(st), "cup")
+    r["totalchallenges"] = r.get("totalchallenges", 0) + 1
     _save(st)
     return _json({"result": True, "resources": cup_resources(cup)})
 
@@ -2894,6 +3014,16 @@ def ep_cup_leave(cupid, query, body):
     st = _state(); cup = (st.get("cups") or {}).pop(cupid, None)
     ep = cup_reward_ep(cup) if cup else 0
     add_ep(st, ep)
+    if cup:  # Info Manager's cup record: given up, won (by AI level), prize money and the best
+        r, state = coach_record(my_coach(st), "cup"), cup["coaches"][0]["state"]
+        r["abandonments"] = r.get("abandonments", 0) + (state == "playing")
+        if state == "won":
+            r["totalwins"] = r.get("totalwins", 0) + 1
+            wins = r.setdefault("cupwins", [0] * CUP_LEVELS)
+            wins[min(CUP_LEVELS - 1, max(0, int(cup.get("difficulty", 0))))] += 1
+        r["totalprize"] = r.get("totalprize", 0) + ep
+        if ep > (r.get("best") or {}).get("prize", 0):
+            r["best"] = {"prize": ep, "metaid": cup["metaid"], "date": w3c(time.time())}
     _save(st)
     return _json({"result": True, "rewards": [{"itemid": 1, "count": ep}] if ep else []})
 
@@ -2928,9 +3058,11 @@ def ep_cup_match(cupid, query, body):
 def ep_cup_record(query, body):
     """GET /cup/record: CupProxy.onCupRecordResourceChanged takes resources[] entries whose
     `resource` is /cup/record and body._id is my coach id."""
-    st = _state(); coach = coach_me(st, _default_slot(st))
+    st = _state(); coach = my_coach(st)
+    r = coach.get("record", {}).get("cup", {})
     return _json({"result": True, "resources": [{"resource": "/cup/record", "uri": "/cup/record",
-                  "body": {"_id": coach["id"], "recordsbymetaid": []}}]})
+                  "body": {"_id": coach["_id"], "recordsbymetaid": [],
+                           **{k: r.get(k, 0) for k in ("totalchallenges", "totalwins", "totalprize")}}}]})
 
 
 # --------------------------------------------------------------------------- #
@@ -3148,6 +3280,7 @@ def ep_transfer_purchase(spid, grade, price, query, body):
         return _json({"result": False, "reason": "NO_SUCH_OFFER"})
     add_ep(st, -cost)
     add_player(team, spid, grade)
+    record_trade(my_coach(st), "buy", spid, cost)
     _save(st)
     return _json({"result": True, "resources": coach_me_resources(st, slot)})
 
@@ -3225,6 +3358,9 @@ def settle_offers(st, now=None):
     sold = [o for o in st.get("offers", []) if o["status"] == "waiting" and o.get("buyat", 0) <= now]
     for o in sold:
         o["status"], o["soldat"] = "sold", w3c(now)
+        seller = next((c for c in st["coaches"] if c["slot"] == o.get("slot", _default_slot(st))), None)
+        if seller:  # its manager's Info Manager: cards sold, the dearest
+            record_trade(seller, "sell", o["spid"], o["price"], now)
     return sold
 
 
@@ -3481,10 +3617,11 @@ def ep_enhance(a, b, boost, guard, query, body):
     after = enhance_grade(pa, pb) if success else before - 1 if before >= ENHANCE_DROP_FROM else before
     pa["grade"] = after
     merge_into(team, pa, pb)
+    mission_event(st, upgrade=int(after > before))  # a grade up (a +0 material adds none)
     _save(st)
     return _json({"result": True, "success": success, "grade": after, "rgrade": after,
                   "rprice": card_price(pa["spid"], after), "attribPlus": GRADE_BOOST[after] - GRADE_BOOST[before],
-                  "resources": coach_me_resources(st, slot)})
+                  "resources": coach_me_resources(st, slot) + achievement_resources(st)})
 
 
 # --------------------------------------------------------------------------- #
@@ -3570,7 +3707,7 @@ def enhance25_result(st, slot, p, success, before, grant, usepoint):
     g = grade_of(p)
     return _json({"result": True, "success": success, "grade": g, "rgrade": g, "rprice": card_price(p["spid"], g),
                   "attribPlus": GRADE_BOOST[g] - GRADE_BOOST[before], "grantes": grant,
-                  "usepoint": usepoint, "getitems": [], "resources": coach_me_resources(st, slot)})
+                  "usepoint": usepoint, "getitems": [], "resources": coach_me_resources(st, slot) + achievement_resources(st)})
 
 
 def ep_enhance25(a, b, use_point, itemid, event, query, body):
@@ -3600,6 +3737,7 @@ def ep_enhance25(a, b, use_point, itemid, event, query, body):
     success = random.random() < rate
     pa["grade"] = enhance_grade(pa, pb) if success else before - 1 if before >= ENHANCE_DROP_FROM else before
     merge_into(team, pa, pb)
+    mission_event(st, upgrade=int(grade_of(pa) > before))
     grant = 0 if success else need
     add_es(st, grant)
     st.pop("enhance_restore", None)
@@ -4795,15 +4933,23 @@ def ep_shop_purchase(query, body):
     """POST /shop/purchase {shopid, productid, bunch: price option index}: pay EP; packs and
     items go to Item saya, a package's contents too."""
     req = json.loads(body or b"{}")
-    itemid = int(req.get("productid") or 0) or int(req.get("shopid") or 0) % MP_SHOPID % STSHOPID
-    if itemid in SHOP_HIDDEN or not any(itemid in t for t in (PACKS, ITEMS, PACKAGES, MONTHLY)):
+    shopid = int(req.get("shopid") or 0)
+    gp = shopid >= GP_SHOPID and dict(GP_SHOP).get(shopid - GP_SHOPID)  # a Quest window reward box: GP
+    itemid = int(req.get("productid") or 0) or (shopid - GP_SHOPID if gp else shopid % MP_SHOPID % STSHOPID)
+    if itemid in SHOP_HIDDEN and not gp or not any(itemid in t for t in (PACKS, ITEMS, PACKAGES, MONTHLY)):
         return _json({"result": False, "reason": "NOT_EXIST_PRODUCT"})
-    bunches = item_def(itemid)["bunches"]
+    bunches = [{"bunch": 1, "price": gp}] if gp else item_def(itemid)["bunches"]
     b = bunches[min(max(int(req.get("bunch") or 0), 0), len(bunches) - 1)]
     st = _state(); slot = _default_slot(st); coach = my_coach(st)
-    if coach_me(st, slot)["money"]["ep"] < b["price"]:
+    if gp:
+        m = missions_state(st)
+        if m["gp"] < gp:
+            return _json({"result": False, "reason": "NOT_ENOUGH_GP"})
+        m["gp"] -= gp
+    elif coach_me(st, slot)["money"]["ep"] < b["price"]:
         return _json({"result": False, "reason": "NOT_ENOUGH_EP"})
-    add_ep(st, -b["price"])
+    else:
+        add_ep(st, -b["price"])
     contents = PACKAGES[itemid][2] if itemid in PACKAGES else MONTHLY[itemid][3] if itemid in MONTHLY else [(itemid, 1)]
     for i, n in contents:
         if i == EP_ITEM:
@@ -5090,6 +5236,319 @@ def ep_bag_unpackall(query, body):
             bag_apply(st, e)
     _save(st)
     return bag_reply(st)
+
+
+# --------------------------------------------------------------------------- #
+# Missions (issue #33: "the Mission section is completely empty"). The client has two mission
+# systems of its own and reports nothing to them, so the server counts my play (coach
+# ["missions"]: matches, wins, goals, Rank matches and wins, upgrades; per WIB day, week and in
+# all) and feeds both from GET /achievement/me {summary, achievement, quest} (AchievementProxy
+# reads it by path; a cached resource, so the replies after a match or an upgrade carry it):
+#  * Manager > Daftar pencapaian (CoachAchievementListTabPage): a row per badge group of up to 5
+#    achievements of up to 5 grades. GET /static/info/ACHIEVEMENT {list: defs, mixed: {group:
+#    [ids]}}; a def {id (an int), name, shortdesc / longdesc ({0} = the target), difficulty
+#    (stars), rewards [{todo, reward [{itemid, count}]}]}; the group's own def (id = the group)
+#    names its row. GET /static/db/BADGES [{itemid, category, itemicon, itemback, asset: group,
+#    image_effect}] lists a row ("misc" has no badge: the client adds that row itself). GET
+#    /static/db/ITEMNAMES {itemid: {ind, kor}}: a reward with no name throws. Progress entries:
+#    {id, aon: true (else 0 shows), complete, progress {grade from 1, detail {current, total}},
+#    rewards {available, grade}}; a row stops drawing at an id without one. Once a badge is earned,
+#    its group's {id, complete, completedat} too (the panel lights and dates a badge that has one). POST /achievement/<id>/reward/<grade> pays a grade; a group all paid
+#    earns its badge (coach badges; POST /badge/<itemid>/use wears it, 0 none). The misc row holds
+#    the daily missions, reset at 00:00 WIB.
+#  * The Quest window (AchievementQuestWindow, "Quest Mingguan"; features.freeroambuttons.quest
+#    adds its menu button): GET /static/info/request {expire [current's, next's], current [{name, todo,
+#    reward {count}}], next [...]} = this week's quests (until Monday 00:00 WIB) and next week's,
+#    the client switching itself at the reset; progress: /achievement/me quest [{id = index,
+#    progress {detail {current}}, completedat}]: current == todo with a newer completedat lights
+#    its button and posts "quest completed". A done quest pays GP (coach gpdata {point, until}; it
+#    lapses at the reset, CoachProxy.clearGP) for the window's reward boxes (GET /shop/list/GPSHOP,
+#    up to 5; /shop/purchase charges GP for them).
+# The admin page's Misi tab (gamedata/missions.json): on/off, the texts' language, a multiplier on
+# the targets and one on the rewards; EP rewards also follow the Ekonomi tab's player prices.
+# --------------------------------------------------------------------------- #
+MISSIONS_FILE = os.path.join(HERE, "gamedata", "missions.json")
+MISSIONS_DEFAULT = {"enabled": True, "lang": "id", "targets": 1.0, "rewards": 1.0}
+MISSION_LANGS = {"id": "Bahasa Indonesia", "en": "English", "vi": "Tiếng Việt"}
+# (id, group, counter or "level" / "grade" / "value" (from the coach and the club now), targets
+# of its grades, stars). Daily ones: one grade, counted today
+ACHIEVEMENTS = ((101, "lv", "level", (10, 20, 40, 70, 100), 2), (102, "lv", "match", (10, 50, 150, 400, 1000), 2),
+                (103, "lv", "win", (5, 25, 75, 200, 500), 3), (201, "upg", "upgrade", (1, 5, 20, 50, 100), 2),
+                (202, "upg", "grade", (3, 4, 5, 6, 7), 4), (301, "tv", "value", (10 ** 7, 10 ** 8, 10 ** 9, 10 ** 10, 10 ** 11), 3),
+                (401, "gol", "goal", (10, 50, 150, 400, 1000), 2), (402, "gol", "rankwin", (1, 10, 30, 75, 150), 3))
+DAILY = ((901, "match", 3, 30_000), (902, "win", 2, 40_000), (903, "goal", 5, 30_000), (904, "rank", 1, 20_000))
+GRADE_REWARDS = ((50_000, None), (100_000, 501), (250_000, 28007), (500_000, 8223601), (1_000_000, 50122))  # EP, item
+BADGE_GROUPS = {"lv": (900046, 1, 2), "upg": (900021, 1, 4), "tv": (900038, 1, 3), "gol": (900039, 1, 3)}  # badge, effect, stars
+QUESTS = (("match", 10, 30), ("win", 6, 30), ("goal", 15, 25), ("upgrade", 3, 20), ("rank", 5, 25), ("rankwin", 3, 30),
+          ("match", 20, 50), ("goal", 30, 45))  # (counter, target, GP): QUEST_COUNT of them a week
+QUEST_COUNT = 5
+GP_SHOP = ((50021, 40), (501, 20), (8223601, 50), (1000053, 30), (50122, 60))  # (itemid, GP): the reward boxes
+GP_SHOPID = 920_000_000
+MISSION_TEXT = {  # counter: {lang: (name, the goal ({0} = target), the goal said in full)}
+    "level": {"id": ("Level manajer", "Capai level {0}", "Naikkan level manajer sampai level {0}."),
+              "en": ("Manager level", "Reach level {0}", "Raise your manager to level {0}."),
+              "vi": ("Cấp HLV", "Đạt cấp {0}", "Nâng HLV lên cấp {0}.")},
+    "match": {"id": ("Pertandingan", "Main {0} pertandingan", "Mainkan {0} pertandingan di Liga, Cup atau Rank."),
+              "en": ("Matches", "Play {0} matches", "Play {0} matches in League, Cup or Rank."),
+              "vi": ("Trận đấu", "Chơi {0} trận", "Chơi {0} trận ở Giải đấu, Cúp hoặc Rank.")},
+    "win": {"id": ("Kemenangan", "Menangi {0} pertandingan", "Menangkan {0} pertandingan."),
+            "en": ("Wins", "Win {0} matches", "Win {0} matches."), "vi": ("Chiến thắng", "Thắng {0} trận", "Thắng {0} trận.")},
+    "goal": {"id": ("Gol", "Cetak {0} gol", "Cetak {0} gol di pertandingan yang kamu mainkan."),
+             "en": ("Goals", "Score {0} goals", "Score {0} goals in the matches you play."),
+             "vi": ("Bàn thắng", "Ghi {0} bàn", "Ghi {0} bàn trong các trận bạn chơi.")},
+    "rank": {"id": ("Rank", "Main {0} pertandingan Rank", "Mainkan {0} pertandingan Rank."),
+             "en": ("Rank", "Play {0} Rank matches", "Play {0} Rank matches."), "vi": ("Rank", "Chơi {0} trận Rank", "Chơi {0} trận Rank.")},
+    "rankwin": {"id": ("Kemenangan Rank", "Menang {0} kali di Rank", "Menangkan {0} pertandingan Rank."),
+                "en": ("Rank wins", "Win {0} Rank matches", "Win {0} Rank matches."),
+                "vi": ("Thắng Rank", "Thắng {0} trận Rank", "Thắng {0} trận Rank.")},
+    "upgrade": {"id": ("Upgrade berhasil", "Upgrade pemain {0} kali", "Berhasil meng-upgrade pemain {0} kali."),
+                "en": ("Successful upgrades", "Upgrade players {0} times", "Upgrade players successfully {0} times."),
+                "vi": ("Nâng cấp thành công", "Nâng cấp cầu thủ {0} lần", "Nâng cấp cầu thủ thành công {0} lần.")},
+    "grade": {"id": ("Pemain berkelas", "Punya pemain +{0}", "Miliki pemain dengan grade +{0} atau lebih."),
+              "en": ("Top grade", "Own a +{0} player", "Own a player of grade +{0} or higher."),
+              "vi": ("Thẻ cấp cao", "Sở hữu cầu thủ +{0}", "Sở hữu cầu thủ cấp +{0} trở lên.")},
+    "value": {"id": ("Nilai tim", "Nilai tim {0} EP", "Naikkan nilai Tim inti sampai {0} EP."),
+              "en": ("Team value", "Team value {0} EP", "Raise your first team's value to {0} EP."),
+              "vi": ("Giá trị đội", "Giá trị đội {0} EP", "Nâng giá trị đội hình chính lên {0} EP.")},
+}
+MISSION_WORDS = {  # lang: (group names, "Daily", "today", the reset note)
+    "id": ({"lv": "Manajer", "upg": "Upgrade", "tv": "Nilai tim", "gol": "Gol", "misc": "Misi harian"},
+           "Harian", "hari ini", "Direset tiap hari pukul 00:00 WIB."),
+    "en": ({"lv": "Manager", "upg": "Upgrades", "tv": "Team value", "gol": "Goals", "misc": "Daily missions"},
+           "Daily", "today", "Resets every day at 00:00 WIB."),
+    "vi": ({"lv": "HLV", "upg": "Nâng cấp", "tv": "Giá trị đội", "gol": "Bàn thắng", "misc": "Nhiệm vụ hằng ngày"},
+           "Hằng ngày", "hôm nay", "Làm mới mỗi ngày lúc 00:00 WIB."),
+}
+
+
+def missions_cfg():
+    try:
+        with open(MISSIONS_FILE, encoding="utf-8") as f:
+            cfg = {**MISSIONS_DEFAULT, **json.load(f)}
+    except (OSError, ValueError):
+        return dict(MISSIONS_DEFAULT)
+    return cfg if cfg["lang"] in MISSION_LANGS else {**cfg, "lang": MISSIONS_DEFAULT["lang"]}
+
+
+def week_end(now=None):
+    """This mission week's end, Monday 00:00 WIB (epoch s)."""
+    t = time.gmtime((time.time() if now is None else now) + WIB)
+    return calendar.timegm((t.tm_year, t.tm_mon, t.tm_mday, 0, 0, 0)) + (7 - t.tm_wday) * 86400 - WIB
+
+
+def mission_target(n, cfg):
+    return max(1, round(n * cfg["targets"]))
+
+
+def mission_ep(n, cfg):
+    return nice_price(n * cfg["rewards"] * ECONOMY["players"])
+
+
+def mission_defs(cfg):
+    """[(def for /static/info/ACHIEVEMENT, group, counter, daily)] in the admin page's language."""
+    lang = cfg["lang"]
+    groups, daily_word, today, reset = MISSION_WORDS[lang]
+    out = []
+    for aid, group, stat, todos, stars in ACHIEVEMENTS:
+        name, short, long = MISSION_TEXT[stat][lang]
+        todos = [mission_target(t, cfg) if stat not in ("level", "grade") else t for t in todos]
+        rewards = [{"todo": t, "reward": [{"itemid": EP_ITEM, "count": mission_ep(ep, cfg)}]
+                    + ([{"itemid": item, "count": 1}] if item else [])} for t, (ep, item) in zip(todos, GRADE_REWARDS)]
+        out.append(({"id": aid, "name": name, "shortdesc": short, "longdesc": long, "difficulty": stars, "rewards": rewards},
+                    group, stat, False))
+    for aid, stat, todo, ep in DAILY:
+        name, short, long = MISSION_TEXT[stat][lang]
+        out.append(({"id": aid, "name": f"{daily_word}: {name}", "shortdesc": f"{short} {today}",
+                     "longdesc": f"{short} {today}. {reset}", "difficulty": 1,
+                     "rewards": [{"todo": mission_target(todo, cfg), "reward": [{"itemid": EP_ITEM, "count": mission_ep(ep, cfg)}]}]},
+                    "misc", stat, True))
+    return out
+
+
+def week_quests(cfg, week_end_ts):
+    """The week's quests: [(name, counter, target, GP)], the same draw for the same week."""
+    lang = cfg["lang"]
+    return [(MISSION_TEXT[stat][lang][1].format(f"{mission_target(todo, cfg):,}"), stat, mission_target(todo, cfg),
+             max(1, round(gp * cfg["rewards"])))
+            for stat, todo, gp in random.Random(f"quests/{week_end_ts}").sample(QUESTS, QUEST_COUNT)]
+
+
+def mission_gp(coach):
+    m = coach.get("missions", {})
+    return m.get("gp", 0) if m.get("week") == week_end() else 0
+
+
+def missions_state(st, now=None):
+    """My mission counters, turned over to today (WIB) and this week."""
+    now = time.time() if now is None else now
+    m = my_coach(st).setdefault("missions", {})
+    day, week = today_wib(now), week_end(now)
+    if m.get("day") != day:
+        m.update(day=day, daily={}, dailyclaimed=[])
+    if m.get("week") != week:
+        m.update(week=week, weekly={}, quests={}, gp=0)
+    for k, v in (("total", {}), ("claimed", {}), ("groups", {}), ("badges", []), ("currentbadge", 0)):
+        m.setdefault(k, v)
+    return m
+
+
+def mission_event(st, now=None, **counts):
+    """Count my play (match, win, goal, rank, rankwin, upgrade); a quest just done pays its GP."""
+    cfg = missions_cfg()
+    if not cfg["enabled"]:
+        return
+    now = time.time() if now is None else now
+    m = missions_state(st, now)
+    for k, n in counts.items():
+        for scope in ("daily", "weekly", "total"):
+            m[scope][k] = m[scope].get(k, 0) + int(n)
+    for i, (_, stat, todo, gp) in enumerate(week_quests(cfg, m["week"])):
+        if str(i) not in m["quests"] and m["weekly"].get(stat, 0) >= todo:
+            m["quests"][str(i)] = w3c(now)
+            m["gp"] += gp
+
+
+def mission_value(st, m, stat, daily):
+    if stat == "level":
+        return coach_levelinfo(my_coach(st))["level"]
+    team = st["teams"].get(str(_default_slot(st))) or {"players": [], "squad": {"positions": [], "kickers": []}}
+    if stat == "grade":
+        return max((grade_of(p) for p in team["players"]), default=0)
+    if stat == "value":
+        return first_team_value(owned_team(team))
+    return m["daily" if daily else "total"].get(stat, 0)
+
+
+def achievement_me(st, now=None):
+    """GET /achievement/me: my achievements, daily missions and this week's quests."""
+    cfg = missions_cfg()
+    if not cfg["enabled"]:
+        return {"summary": {"done": 0, "total": 0, "rewardable": 0}, "achievement": [], "quest": []}
+    m = missions_state(st, now)
+    rows, groups = [], {}
+    for d, group, stat, daily in mission_defs(cfg):
+        todos = [r["todo"] for r in d["rewards"]]
+        paid = int(str(d["id"]) in m["dailyclaimed"]) if daily else m["claimed"].get(str(d["id"]), 0)
+        grade, cur = min(paid + 1, len(todos)), mission_value(st, m, stat, daily)
+        rows.append({"id": d["id"], "aon": True, "complete": paid >= len(todos),
+                     "progress": {"grade": grade, "detail": {"current": min(cur, todos[grade - 1]), "total": todos[grade - 1]}},
+                     "rewards": {"available": paid < len(todos) and cur >= todos[paid], "grade": paid}})
+        groups.setdefault(group, []).append(paid >= len(todos))
+    done = sum(r["complete"] for r in rows)
+    # a group's own entry only once its badge is earned: the panel lights the badge and shows the
+    # date whenever there is one (none was 1.1.1970 on an unlit row)
+    out = rows + [{"id": g, "complete": True, "completedat": m["groups"][g]} for g in groups if g in m["groups"]]
+    quests = [{"id": i, "progress": {"detail": {"current": min(m["weekly"].get(stat, 0), todo)}},
+               **({"completedat": m["quests"][str(i)]} if str(i) in m["quests"] else {})}
+              for i, (_, stat, todo, _) in enumerate(week_quests(cfg, m["week"]))]
+    return {"summary": {"done": done, "total": len(rows), "rewardable": sum(r["rewards"]["available"] for r in rows)},
+            "achievement": out, "quest": quests}
+
+
+def achievement_resources(st):
+    return [{"uri": "/achievement/me", "body": achievement_me(st)}] if missions_cfg()["enabled"] else []
+
+
+def ep_achievement_me(query, body):
+    st = _state()
+    out = achievement_me(st)
+    _save(st)  # the day / week turned over
+    return _json(out)
+
+
+def ep_achievement_other(cid, query, body):
+    """GET /achievement/<another manager>: his badge popup; the virtual managers have none."""
+    return _json({"summary": {"done": 0, "total": 0, "rewardable": 0}, "achievement": []})
+
+
+def ep_static_achievement(query, body):
+    cfg = missions_cfg()
+    if not cfg["enabled"]:
+        return _json({"list": [], "mixed": {}})
+    defs, groups = mission_defs(cfg), MISSION_WORDS[cfg["lang"]][0]
+    mixed = {}
+    for d, group, _, _ in defs:
+        mixed.setdefault(group, []).append(d["id"])
+    stars = {g: v[2] for g, v in BADGE_GROUPS.items()}
+    return _json({"list": [d for d, _, _, _ in defs] + [{"id": g, "name": groups[g], "difficulty": stars.get(g, 1)} for g in mixed],
+                  "mixed": mixed})
+
+
+def ep_badges(query, body):
+    return _json([{"itemid": b, "category": "BADGE", "itemicon": b, "itemback": "defaultblack", "asset": g, "image_effect": fx}
+                  for g, (b, fx, _) in BADGE_GROUPS.items()])
+
+
+def ep_itemnames(query, body):
+    """GET /static/db/ITEMNAMES {itemid: {ind, kor}}: the reward panels' (and Upgrade's) item names."""
+    ids = [EP_ITEM, ES_ITEM, *PACKS, *ITEMS, *PACKAGES, *MONTHLY]
+    return _json({str(i): {"ind": item_def(i)["name"], "kor": item_def(i)["name"]} for i in ids})
+
+
+def ep_quest_bank(query, body):
+    """GET /static/info/request: this week's quests and next week's. expire is [this week's end,
+    next week's] (AchievementProxy.checkCurrentQuestAndFeed reads expire[i] for current / next)."""
+    cfg, end = missions_cfg(), week_end()
+    expire = [w3c(end), w3c(end + 7 * 86400)]
+    if not cfg["enabled"]:
+        return _json({"expire": expire, "current": [], "next": []})
+    bank = lambda e: [{"name": name, "todo": todo, "reward": {"count": gp}, "platform": 1}
+                      for name, _, todo, gp in week_quests(cfg, e)]
+    return _json({"expire": expire, "current": bank(end), "next": bank(end + 7 * 86400)})
+
+
+def gp_shop_list():
+    """The Quest window's reward boxes: Shop entries priced in GP."""
+    out = []
+    for itemid, gp in GP_SHOP:
+        e = shop_entry(itemid, "GPSHOP", GP_SHOPID + itemid)
+        e["product"]["staticdata"]["bunches"] = [{"bunch": 1, "price": gp}]
+        out.append(e)
+    return out
+
+
+def ep_achievement_reward(aid, grade, query, body):
+    """POST /achievement/<id>/reward/<grade>: pay a grade that is done."""
+    st = _state(); cfg = missions_cfg(); slot = _default_slot(st)
+    me = achievement_me(st)
+    row = next((r for r in me["achievement"] if str(r["id"]) == aid), None)
+    found = next(((d, group, daily) for d, group, _, daily in mission_defs(cfg) if str(d["id"]) == aid), None)
+    if not cfg["enabled"] or row is None or found is None or int(grade) != row["rewards"]["grade"] + 1 \
+            or not row["rewards"]["available"]:
+        return _json({"result": False, "reason": "ACHIEVEMENT_REWARDS_ERROR"})
+    d, group, daily = found
+    m, coach = missions_state(st), my_coach(st)
+    reward = d["rewards"][row["rewards"]["grade"]]["reward"]
+    for r in reward:
+        if r["itemid"] == EP_ITEM:
+            add_ep(st, r["count"])
+        else:
+            inventory_add(coach, r["itemid"], r["count"])
+    if daily:
+        m["dailyclaimed"].append(aid)
+    else:
+        m["claimed"][aid] = row["rewards"]["grade"] + 1
+    after = achievement_me(st)
+    ids = {d["id"] for d, g, _, _ in mission_defs(cfg) if g == group}
+    if all(r["complete"] for r in after["achievement"] if r["id"] in ids) and group in BADGE_GROUPS \
+            and BADGE_GROUPS[group][0] not in m["badges"]:
+        m["groups"][group] = w3c(time.time())  # the badge screen shows after the popup
+        m["badges"].append(BADGE_GROUPS[group][0])
+        after = achievement_me(st)
+    _save(st)
+    return _json({"result": True, "rewards": [{**r, "staticdata": item_def(r["itemid"])} for r in reward],
+                  "resources": [{"uri": "/achievement/me", "body": after}] + coach_me_resources(st, slot)})
+
+
+def ep_badge_use(itemid, query, body):
+    """POST /badge/<itemid>/use: wear an earned badge (0 = none)."""
+    st = _state()
+    m = missions_state(st)
+    if int(itemid) and int(itemid) not in m["badges"]:
+        return _json({"result": False, "reason": "INVALID_PARAM"})
+    m["currentbadge"] = int(itemid)
+    _save(st)
+    return _json({"result": True, "resources": coach_me_resources(st, _default_slot(st))})
 
 
 # --------------------------------------------------------------------------- #
@@ -5414,6 +5873,95 @@ def ep_ladder_friends(query, body):
                    "ovr": vm_ovr(m["_id"])} for m in vm_friends()])
 
 
+# Manager > Peringkat manajer (CoachRankingTabPage, issue #33: the list spun forever on {}).
+# GET /coach/me/teamvalue/history {values}: my team value on each of the last TV_DAYS days, oldest
+# first (the graph is 30 points of 12 px and dates them by the client's clock; no values = its
+# spinner never stops). GET /rank/teamvalue/friend | club: a top-level array of {_id, rank, name,
+# level, ovr {FW, MF, DF}, teamvalue {val}, fluc = yesterday's rank - today's (none = "NEW")}.
+# Friends = the Messenger's 20 virtual managers and me; there are no clubs (club: {}), so the club
+# tab says "not in any club". A team's value is the client's own (CoachProxy.expandTeam): the
+# prices of its Tim inti cards. POST /coach/me/hiderank {hiderank} hides my name on the club tab.
+TV_DAYS = 30
+
+
+def first_team_value(team):
+    return sum(p["price"] for p in team["players"] if p.get("state") == "first")
+
+
+@functools.lru_cache(maxsize=256)
+def vm_value(vid, day):
+    """A virtual manager's team value on crowd day `day` (set_economy drops these)."""
+    return first_team_value(owned_team(copy.deepcopy(vm_squad(vid, day))))
+
+
+def tv_history(st):
+    """My team value on each of the last TV_DAYS crowd days, oldest first: coach["tvhist"] {day:
+    EP}, today's taken now; a day without one repeats the one before (the first known, before)."""
+    coach, today = my_coach(st), vm_day()
+    hist = {int(d): v for d, v in coach.get("tvhist", {}).items() if int(d) > today - TV_DAYS}
+    hist[today] = first_team_value(coach_me(st, coach["slot"])["team"])
+    coach["tvhist"] = {str(d): v for d, v in hist.items()}
+    last, out = hist[min(hist)], []
+    for d in range(today - TV_DAYS + 1, today + 1):
+        last = hist.get(d, last)
+        out.append(last)
+    return out
+
+
+def ep_tv_history(query, body):
+    st = _state()
+    values = tv_history(st)
+    _save(st)
+    return _json({"values": values})
+
+
+def ep_rank_friends(query, body):
+    st = _state()
+    coach, day = my_coach(st), vm_day()
+    me, hist = coach_me(st, coach["slot"]), tv_history(st)
+    _save(st)
+    rows = [(m["_id"], m["name"], m["level"], vm_ovr(m["_id"]), vm_value(m["_id"], day), vm_value(m["_id"], day - 1))
+            for m in vm_friends()]
+    rows.append((coach["_id"], coach["name"], me["levelinfo"]["level"],
+                 {k: (me["summary"].get("ovr") or {}).get(k, 0) for k in ("FW", "MF", "DF")}, hist[-1], hist[-2]))
+    before = {r[0]: k for k, r in enumerate(sorted(rows, key=lambda r: (-r[5], -r[2])), 1)}
+    return _json([{"_id": i_, "name": n, "level": lv, "ovr": o, "teamvalue": {"val": v}, "rank": k, "fluc": before[i_] - k}
+                  for k, (i_, n, lv, o, v, _) in enumerate(sorted(rows, key=lambda r: (-r[4], -r[2])), 1)])
+
+
+def ep_hiderank(query, body):
+    st = _state()
+    my_coach(st)["hiderank"] = bool(json.loads(body or b"{}").get("hiderank"))
+    _save(st)
+    return _json({"result": True, "resources": coach_me_resources(st, _default_slot(st))})
+
+
+def ep_my_summary(cid, query, body):
+    """GET /coach/<my id>/summary: my own profile (my row's Info button on a ranking), as
+    ep_vm_summary gives a virtual manager's."""
+    st = _state()
+    coach = my_coach(st)
+    if coach["_id"] != cid:
+        return _json({"result": False, "reason": "invalid coach id"})
+    me = coach_me(st, coach["slot"])
+    return _json({"coach": {"_id": cid, "id": cid, **{k: me[k] for k in ("name", "levelinfo", "currentbadge", "playtime", "profile")},
+                            "statistics": {"ladder": me["statistics"]["ladder"]}}, "friends": VM_FRIENDS})
+
+
+def ep_coach_profile(query, body):
+    """PUT /coach/me/profile {description} | {picture: a card's _id} (Info Manager's Summary: its
+    intro box, its manager photo; the photo redraws on result true)."""
+    req = json.loads(body or b"{}")
+    st = _state()
+    prof = my_coach(st).setdefault("profile", {})
+    if isinstance(req.get("description"), str):
+        prof["description"] = req["description"][:200]
+    if req.get("picture") is not None:
+        prof["picture"] = str(req["picture"])
+    _save(st)
+    return _json({"result": True})
+
+
 def vm_status(vm, hour=None):
     """His Messenger presence now (issue #30, simulated online presence): "busy" in an hour he has
     a Rank game today (vm_crowd), "online" the hour before or after one, else "offline". Game hours
@@ -5583,14 +6131,16 @@ def ladder_statistics(st):
     lad, coach = my_ladder(st), my_coach(st)
     rank = [next(r + 1 for r, e in enumerate(ladder_board(st, i)) if e[2] == coach["_id"])
             if lad["games"][i] else 0 for i in range(LADDER_COUNT)]
+    # this season last: Info Manager's Summary and the profile popup take the last one as the
+    # current season (the Rank screens find a season by its sid)
     seasons = [ladder_season_record(lad, rank)]
     prev = coach.get("ladderprev")
     if prev:  # last season, ranked by its final ratings against the virtual managers. rewarded: no
         # season-end reward yet; without it LadderMatchFrontScreen.checkSeasonReward POSTs /ladder/reward
         # on every visit and opens the season reward popup on the default {result: true} (TypeError)
-        seasons.append({**ladder_season_record(prev, [1 + sum(m["elo"][i] > e for m in virtual_managers()) if g else 0
-                                                      for i, (e, g) in enumerate(zip(prev["elo"], prev["games"]))]),
-                        "rewarded": True})
+        seasons.insert(0, {**ladder_season_record(prev, [1 + sum(m["elo"][i] > e for m in virtual_managers()) if g else 0
+                                                         for i, (e, g) in enumerate(zip(prev["elo"], prev["games"]))]),
+                           "rewarded": True})
     # the best season (closure 46 of rebuildLadderRecordInfo): the best rating of any season, its division
     best = [max(b, h) for b, h in zip(coach.get("ladderbest") or lad["high"], lad["high"])]
     return {"seasons": seasons, "highrecords": {"elo": best, "division": [
@@ -5605,7 +6155,8 @@ def ladder_my_info(st):
     lad = my_ladder(st)
     _, start, nxt = ladder_season()
     stats, rank = ladder_statistics(st)
-    out = {"start": start, "next": nxt}
+    # sid: Info Manager's Summary shows this season's Rank rates only for a season of this sid
+    out = {"sid": str(ladder_season()[0]), "start": start, "next": nxt}
     for i, key in LADDER_MY_KEYS.items():
         if lad["games"][i]:
             # firstround: the placement matches (LadderMatchFrontRecordWindow.setRankedMatchRecord
@@ -5857,6 +6408,14 @@ def ladder_record(st, i, vm, mine, theirs, sh=0, sa=0):
         "team": {"teamid": me["teamid"], "score": mine, "shootout": sh, "coaches": [{"coachid": me["_id"], "name": me["name"]}]},
         "opponent": {"teamid": vm.get("teamid"), "score": theirs, "shootout": sa, "clubname": "",
                      "coaches": [{"coachid": vm.get("_id", ""), "name": vm.get("name", "")}]}}])[-MULTIPLAY_MAX:]
+    # Info Manager's Rank record: matches, and per ladder the best rank and the best win streak
+    r = coach_record(me, "ladder")
+    r["count"] = r.get("count", 0) + 1
+    run, best, top = (r.setdefault(k, [0] * LADDER_COUNT) for k in ("streak", "winningstreak", "rank"))
+    run[i] = run[i] + 1 if score == 1 else 0
+    best[i] = max(best[i], run[i])
+    pos = next(k for k, e in enumerate(ladder_board(st, i), 1) if e[2] == me["_id"])
+    top[i] = min(top[i] or pos, pos)
     # this ISO week's wins (ladder_my_info ladder_total), on the coach: a season can start mid-week
     week, wk = time.strftime("%G%V", time.gmtime()), my_coach(st).setdefault("ladderweek", {})
     if wk.get("week") != week:
@@ -6024,6 +6583,10 @@ ROUTES = [
     (re.compile(r"/match/([0-9a-f]+)/messages"), ep_match_messages),
     # a virtual manager's profile (CoachUserPopupScreen: summary, 1on1 rank, squad, achievements)
     (re.compile(r"/coach/(vm\d{4})/summary"), ep_vm_summary),
+    (re.compile(r"/coach/([0-9a-f]{24})/summary"), ep_my_summary),
+    (re.compile(r"/achievement/(\d+)/reward/(\d+)"), ep_achievement_reward),
+    (re.compile(r"/achievement/(vm\d{4}|[0-9a-f]{24})"), ep_achievement_other),
+    (re.compile(r"/badge/(\d+)/use"), ep_badge_use),
     (re.compile(r"/ladder/(vm\d{4})/info"), ep_vm_ladder_info),
     (re.compile(r"/coach/(vm\d{4})"), ep_vm_coach),
     (re.compile(r"/achievement/(vm\d{4})"), lambda vid, q, b: _json({"summary": {"done": 0}})),
@@ -6078,6 +6641,12 @@ ENDPOINTS.update({"/ladder/leaderboard": ep_ladder_leaderboard, "/ladder/friends
                   "/room": ep_room, "/matchmaking": ep_matchmaking})
 ENDPOINTS["/coaches"] = ep_coaches
 ENDPOINTS["/coach/me"] = ep_coach_me
+ENDPOINTS.update({"/coach/me/teamvalue/history": ep_tv_history, "/rank/teamvalue/friend": ep_rank_friends,
+                  "/rank/teamvalue/club": lambda query, body: _json([]), "/coach/me/hiderank": ep_hiderank,
+                  "/coach/me/profile": ep_coach_profile})
+ENDPOINTS.update({"/achievement/me": ep_achievement_me, "/static/info/ACHIEVEMENT": ep_static_achievement,
+                  "/static/db/BADGES": ep_badges, "/static/db/ITEMNAMES": ep_itemnames, "/static/info/request": ep_quest_bank,
+                  "/shop/list/GPSHOP": lambda query, body: _json(gp_shop_list() if missions_cfg()["enabled"] else [])})
 ENDPOINTS["/coach/me/onready"] = ep_coach_onready
 for _slot in (0, 1):  # two coach slots
     ENDPOINTS[f"/coach/{_slot}"] = lambda q, b, s=_slot: ep_create_coach(s, q, b)
@@ -6180,6 +6749,7 @@ class H(http.server.BaseHTTPRequestHandler):
         else:
             try:
                 with STATE_LOCK:
+                    note_activity()
                     ctype, data = from_file(path) or (ENDPOINTS.get(path) or route(path) or fallback)(query, body)
             except Exception:
                 # an empty reply is a curl error and the client quits (CLIENT_CLOSE); answer
