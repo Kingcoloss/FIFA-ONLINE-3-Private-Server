@@ -198,6 +198,14 @@ Added, passing the tests but not yet checked in the client:
   their dearest (+13%), as it can be opened on any day.
   Items with no EP in them (boosts, upgrade points, EXP capsules, a name or team change) have a set
   price times the player price setting, so Hard doubles it.
+  A change reaches a running game: the server tells it to drop the Shop list it keeps for the
+  session, so a Shop tab shows the new prices the next time it opens; a tab already opened since the
+  game started keeps its old prices until the game restarts. The Shop's limited-stock check no longer
+  ends in "Kesalahan UI telah terjadi".
+- **Ten times the AI chat** (issue #30): the virtual managers' chat has 20 lines for every moment and
+  personality in each language, 2,700 in all: small talk and football talk at kick-off, reactions to
+  goals, misses and saves, banter when you type, and a word on the result. No line holds a word the
+  game's chat filter would hide (it also hides them inside longer words).
 - **Pre-match settings** (issue #31): Multiple > Rank's game setting screen has working steppers for
   the stadium (the 70 stadiums the client has complete), the time of day (day or night), the weather
   (clear, rain, snow, overcast: dusk at night), the match length (6, 8, 10 or 12 minutes) and the ball
@@ -230,6 +238,11 @@ Added, passing the tests but not yet checked in the client:
 - **Officials at kick-off** (issue #33): the two assistant referees were drawn from an empty record (no
   such referee in the game's list), with heads, hair and bodies that do not exist, so they looked
   deformed in the line-up. The server now names referees the game has.
+- **Vietnamese commentary from an FO3 VN client** (issue #34): with the game closed, run
+  `python tools/commentary.py "<FO3 VN client folder>"`. It copies the VN client's
+  `audiodata\speechdata\vie_vn` next to this client's English commentary (`eng_us`) and lists only
+  Vietnamese as commentary language in `data\loc\locale.big` (a backup is kept); the game then reads
+  its commentary from `vie_vn`. `--remove` brings English back.
 - **Random boxes open** (Kotak Platinum and the rest, issue #12): the box screen lists its prizes
   from `staticdata.availables`, which was missing, so every box failed at "Gunakan".
 - **New cards join Tim Cadangan**: a card from a pack, a trade, the Market, the Bag or the admin

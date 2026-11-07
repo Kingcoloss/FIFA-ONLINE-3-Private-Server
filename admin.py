@@ -317,6 +317,7 @@ def match_rewards_set(p):
     cfg = {"result": result, "cards": cards}
     with open(hc.MATCH_REWARD_FILE, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=1)
+    hc.shop_changed()  # a paid Shop prices the League Simulation coupon by these rewards
     return cfg
 
 
@@ -400,7 +401,9 @@ def economy_set(p):
         raise AdminError("e_eco_value")
     new = hc.set_economy({**cfg, "dynamic": bool(p.get("dynamic"))})
     if "shopfree" in p:
-        shop_free({"free": p["shopfree"]})
+        shop_free({"free": p["shopfree"]})  # saves the Shop: the game drops its Shop list
+    else:
+        hc.shop_changed()  # the prices follow the multipliers
     return {**new, "shopfree": hc.SHOP_FREE}
 
 
@@ -476,6 +479,7 @@ def save_shop(cfg):
     os.makedirs(os.path.dirname(hc.SHOP_FILE), exist_ok=True)
     with open(hc.SHOP_FILE, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=1, ensure_ascii=False)
+    hc.shop_changed()
 
 
 def known(i, *kinds):

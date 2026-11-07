@@ -130,6 +130,37 @@ def main():
                 "setproperty selected", "getproperty Controller", "getproperty Type", "setproperty index",
                 "getproperty selectedIndex", "setproperty Type", "getproperty Type", "setproperty selectedIndex",
                 "getproperty index", "setproperty Type", "getproperty _option"], code
+        # issue #34, Vietnamese commentary (tools/commentary.py): a VN client's speechdata\vie_vn copied
+        # over and vie,vn first in the ID settings of data/loc/locale.big, patched in place (on a copy)
+        import commentary
+        loc = os.path.join(hc.GAME, commentary.BIG)
+        if os.path.isfile(loc):
+            game, vn = os.path.join(tmp, "game"), os.path.join(tmp, "vn")
+            os.makedirs(os.path.join(game, "data", "loc"))
+            shutil.copyfile(loc, os.path.join(game, commentary.BIG))
+            os.makedirs(os.path.join(vn, commentary.SPEECH, "vie_vn"))
+            for f in ("vie_vn.xml", "VIE_VN_BANK.sbr", "VIE_VN_BANK.sbs"):
+                open(os.path.join(vn, commentary.SPEECH, "vie_vn", f), "wb").close()
+            commentary.BACKUP = os.path.join(tmp, "commentary_backup.big")
+            ini = lambda path: {n: bigdir.read(path, n) for n, *_ in bigdir.entries(path)}
+            dst = commentary.install(game, vn)
+            assert sorted(os.listdir(dst)) == ["VIE_VN_BANK.sbr", "VIE_VN_BANK.sbs", "vie_vn.xml"]
+            was, now = ini(loc), ini(os.path.join(game, commentary.BIG))
+            assert {n for n in was if was[n] != now[n]} == set(commentary.INIS)
+            for n in commentary.INIS:  # both commentary entries vie,vn: the game speaks its own eng,us while listed
+                want = was[n]
+                for eng, vie in commentary.PAIRS:
+                    want = want.replace(eng, vie)
+                assert now[n] == want and want.count(b",us") == was[n].count(b",us") - 2
+            assert os.path.getsize(os.path.join(game, commentary.BIG)) == os.path.getsize(loc)
+            assert commentary.install(game, vn) == dst  # again: nothing left to switch
+            commentary.remove(game)
+            assert ini(os.path.join(game, commentary.BIG)) == was
+            try:
+                commentary.install(game, os.path.join(tmp, "no_vn"))  # no vie_vn there
+                assert False
+            except SystemExit as e:
+                assert "vie_vn" in str(e)
         st = hc._state(); st["option"]["controlOption"] = pad(5); st.pop("controlType"); hc._save(st)  # saved before the fix
         assert acc_ctl()["Type"] == 0  # shown as the pad's Default
         assert ctl_type(kb(0)) == 5 and hc._state()["controlType"] == {"0": 5}  # the 5 was the keyboard's (a guide flip)
@@ -386,6 +417,23 @@ def main():
             mid, vm = st["match"]["id"], hc.vm_by_id(st["ladder_pending"]["opponent"])
             chat = json.load(open(os.path.join(hc.RESPONSES, "vm_chat.json"), encoding="utf-8"))
             mine = lambda trig, lang="id": chat[lang][trig][hc.vm_personality(vm)]
+            # the library (issue #30: about 10x the lines): 20 per trigger and personality, none twice
+            # in a language, short, in the chat font (no emoji, no markup), and nothing the overlay
+            # masks: it starts any line holding a word of FORBIDDENWORDS_CHAT_<locale> (checked when
+            # the client is installed; "biasa" holds "asa", "santai" "tai", "pass" "ass")
+            masked = set()
+            for big, tag in (("eng.big", "ENG"), ("ind.big", "IND")):
+                masked |= {w.lower() for w in hc.client_json(os.path.join(hc.GAME, "data", "ui", "localization", big),
+                                                             f"data/ui/localization/FORBIDDENWORDS_CHAT_{tag}.json")}
+            assert set(chat) == set(hc.VM_CHAT_LANGS)
+            for lang, triggers in chat.items():
+                lines = [s for cells in triggers.values() for v in cells.values() for s in v]
+                assert set(triggers) == {"hello", "goal", "conceded", "miss", "save", "win", "loss", "draw", "reply"}
+                assert all(set(cells) == set(hc.VM_PERSONALITIES) and all(len(v) == 20 for v in cells.values())
+                           for cells in triggers.values())
+                assert len({s.lower() for s in lines}) == len(lines) == 900
+                assert all(3 <= len(s) <= 60 and not set(s) & set("<>&") and max(map(ord, s)) < 0x1F00 for s in lines)
+                assert not [s for s in lines if any(w in s.lower() for w in masked)], lang
 
             def after(act):  # what goes out for act, its timers fired
                 n0 = len(pushed); act()
@@ -1404,8 +1452,15 @@ def main():
         m88, p1, pk = 88158023, hc.card_price(88158023), next(iter(hc.PACKS))
         pp1 = hc.pack_price(pk)
         assert refused("economy_set", players=0, packs=1, start_ep=0) and refused("economy_set", players=1, packs="x", start_ep=0)
+        n_push = len(pushed)
         r = A("economy_set", players=2, packs=3, start_ep=5000, dynamic=False, shopfree=False)
         assert r == dict(players=2.0, packs=3.0, start_ep=5000, dynamic=False, shopfree=False) and not hc.SHOP_FREE
+        # a running game keeps its Shop list for the whole session: the push makes it ask again, and
+        # the game reads /shop/list/clear back and acts only on a new value (issue #30: a preset
+        # chosen while the game ran left every price at 0)
+        clears = lambda: [b["changed"] for u, b in pushed[n_push:] if u == "/shop/list/clear"]
+        assert len(clears()) == 1 and body(hc.ENDPOINTS["/shop/list/clear"]("", b"")) == {"changed": clears()[0]}
+        assert body(hc.ENDPOINTS["/shop/remained/limited"]("", b"")) == []  # {} raised a UI error in the Shop
         assert hc.card_price(m88) == hc.sig3(p1 * 2) and abs(hc.pack_price(pk) - pp1 * 6) <= pp1 * 6 * 0.1  # caches dropped
         # the paid Shop prices every product by what it gives (EP at face, packs at their cards'
         # worth), rounded up and none off for 10: rounding down or 5% off made EP
@@ -1441,6 +1496,7 @@ def main():
         # goes to 105% (a slower buyer; the fee takes that back), the managers list bargains, the
         # graph draws the real days
         A("economy_set", players=1, packs=1, start_ep=1000000, dynamic=True, shopfree=True)
+        assert len(clears()) == 2 and clears()[1] > clears()[0]  # each change a new value
         days = [hc.market_value(m88, 1, hc.VM_EPOCH + d * 86400 + 3600) for d in range(60)]
         assert all(0.86 * p1 <= v <= 1.14 * p1 for v in days) and max(days) / min(days) > 1.1  # room to trade
         lower, upper, v = hc.sell_band(m88, 1)

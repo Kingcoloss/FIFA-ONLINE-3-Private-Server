@@ -211,6 +211,15 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   nilai kartunya di harga tertinggi (+13%), karena pak bisa dibuka kapan saja.
   Barang tanpa EP di dalamnya (boost, poin upgrade, kapsul EXP, ganti nama atau tim) punya harga
   dasar dikali pengali harga pemain, jadi di Sulit harganya dua kali lipat.
+  Perubahan langsung sampai ke game yang sedang jalan: server menyuruh game membuang daftar Shop yang
+  disimpannya selama sesi, jadi tab Shop menampilkan harga baru saat dibuka berikutnya; tab yang sudah
+  dibuka sejak game dimulai tetap memakai harga lama sampai game di-restart. Pengecekan stok terbatas di
+  Shop tidak lagi berakhir dengan "Kesalahan UI telah terjadi".
+- **AI Chat sepuluh kali lebih banyak** (issue #30): obrolan manajer virtual punya 20 kalimat untuk tiap
+  momen dan kepribadian di tiap bahasa, total 2.700: basa-basi dan obrolan bola saat kick-off, reaksi atas
+  gol, peluang gagal dan penyelamatan, candaan saat kamu mengetik, dan komentar soal hasil akhir. Tidak ada
+  kalimat yang memuat kata yang akan disensor filter chat game (filter itu juga menyensor kata yang ada di
+  dalam kata lain).
 - **Pengaturan sebelum match** (issue #31): layar pengaturan game di Multiple > Rank punya stepper
   yang berfungsi untuk stadion (70 stadion yang datanya lengkap di client), waktu (siang atau
   malam), cuaca (cerah, hujan, salju, mendung: senja di malam hari), durasi match (6, 8, 10, atau
@@ -246,6 +255,11 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
 - **Wasit saat kick-off** (issue #33): kedua asisten wasit diambil dari data kosong (wasit itu tidak ada
   di daftar game), dengan kepala, rambut dan badan yang tidak ada asetnya, jadi tampak rusak saat
   line-up. Sekarang server memakai wasit yang memang ada di game.
+- **Komentator Vietnam dari klien FO3 VN** (issue #34): dengan game tertutup, jalankan
+  `python tools/commentary.py "<folder klien FO3 VN>"`. Skrip menyalin `audiodata\speechdata\vie_vn` dari
+  klien VN ke samping komentator Inggris klien ini (`eng_us`) dan hanya mencantumkan bahasa Vietnam sebagai
+  bahasa komentator di `data\loc\locale.big` (cadangannya disimpan); game lalu membaca komentatornya dari
+  `vie_vn`. `--remove` mengembalikan komentator Inggris.
 - **Kotak acak bisa dibuka** (Kotak Platinum dan lainnya, issue #12): layar kotak menampilkan
   hadiahnya dari `staticdata.availables`, yang belum ada, jadi tiap kotak gagal saat "Gunakan".
 - **Kartu baru masuk Tim Cadangan**: kartu dari pak, trade, Market, Bag, atau halaman admin tampil

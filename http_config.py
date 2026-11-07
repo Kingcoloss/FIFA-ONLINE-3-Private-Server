@@ -6228,6 +6228,22 @@ def messenger_push(uri, body):
         print(f"messenger push {uri} failed: {e}", flush=True)
 
 
+SHOP_CHANGED = 0  # ms of the last shop_changed(): GET /shop/list/clear
+
+
+def shop_changed():
+    """The Shop's products or prices changed on the admin page (issue #30: a preset chosen while
+    the game ran left its Shop at the old prices). The game keeps /shop/list, /shop/list/STSHOP
+    and /shop/products/* in StaticData for the whole session; StaticData's observer on the
+    /shop/list/clear push drops them, so the Shop asks again the next time it opens (a tab
+    already drawn keeps its prices until the game restarts). The same push twice does nothing
+    (seen live: only the first {} cleared), so each change carries a new time, and GET
+    /shop/list/clear (the game's read of an empty push) answers it."""
+    global SHOP_CHANGED
+    SHOP_CHANGED = max(int(time.time() * 1000), SHOP_CHANGED + 1)
+    messenger_push("/shop/list/clear", {"changed": SHOP_CHANGED})
+
+
 def push_match(match):
     """The match as pushed: every card of a big club (~165+) took it over the 64 KB a push can
     carry, so the Rank search never ended. Each side keeps the cards of its 18; the HTTP replies
@@ -6436,9 +6452,9 @@ def ladder_record(st, i, vm, mine, theirs, sh=0, sa=0):
 # result screen hides the overlay and the banners) and goes out as an /alert/<key>/latest banner.
 # The client shows a typed line only when it comes back: POST /match/<id>/messages
 # {message, target ""|"team"} is pushed back with myside true. The overlay masks every substring
-# found in FORBIDDENWORDS_CHAT_ENG.json (data/ui/localization/eng.big), so the lines in
-# responses/vm_chat.json avoid them ("masuk" has "asu", "cuma" "cum", "santai" "tai"...);
-# no emoji (the font has none).
+# found in the client's localization/FORBIDDENWORDS_CHAT_<locale>.json (ENG or IND here: eng.big,
+# ind.big), so the lines in responses/vm_chat.json avoid them ("masuk" has "asu", "cuma" "cum",
+# "santai" "tai", "pass" "ass"; test_league.py checks); no emoji (the font has none).
 # --------------------------------------------------------------------------- #
 VM_CHAT_FILE = os.path.join(HERE, "gamedata", "vm_chat.json")
 VM_CHAT_DEFAULT = {"enabled": True, "lang": "id"}
@@ -6695,6 +6711,10 @@ ENDPOINTS.update({
     "/static/db/STATICVALUES/max_coachlevel": lambda q, b: _json(COACH_MAX_LEVEL),
     "/static/info/teamcolor": ep_teamcolor,
     "/shop/list": lambda q, b: _json(shop_list(_state())), "/shop/list/STSHOP": ep_stshop,
+    "/shop/list/clear": lambda q, b: _json({"changed": SHOP_CHANGED}),
+    # the Shop's limited stock, polled each minute while it is open (ShopController.onRemainedChange
+    # takes an array; {} raised "Kesalahan UI telah terjadi"): nothing is limited here
+    "/shop/remained/limited": lambda q, b: _json([]), "/shop/remained/limited/STSHOP": lambda q, b: _json([]),
     "/specifictarget": ep_specifictarget, "/monthlypack": ep_monthlypack,
     "/shop/purchase": ep_shop_purchase, "/static/cache/item": ep_static_item,
     "/bag": lambda q, b: _json(bag_list(_state())), "/bag/unpackall": ep_bag_unpackall,

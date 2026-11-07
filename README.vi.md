@@ -196,6 +196,13 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   đắt nhất (+13%), vì gói có thể để dành mở vào bất kỳ ngày nào.
   Vật phẩm không chứa EP (tăng tỉ lệ nâng cấp, điểm nâng cấp, viên EXP, đổi tên hoặc đổi đội) có giá cơ bản
   nhân hệ số giá cầu thủ, nên ở mức Khó giá gấp đôi.
+  Thay đổi có hiệu lực ngay cả khi game đang chạy: máy chủ báo game bỏ danh sách Shop nó giữ suốt phiên, nên
+  tab Shop hiện giá mới ở lần mở tiếp theo; tab nào đã mở kể từ lúc khởi động game thì vẫn giữ giá cũ cho đến
+  khi khởi động lại game. Việc kiểm tra hàng giới hạn của Shop không còn báo "Kesalahan UI telah terjadi".
+- **AI Chat nhiều gấp mười lần** (issue #30): HLV ảo có 20 câu cho mỗi tình huống và mỗi tính cách ở mỗi ngôn
+  ngữ, tổng cộng 2.700 câu: chào hỏi và chuyện bóng đá lúc giao bóng, phản ứng khi ghi bàn, sút hỏng và cứu
+  thua, trêu đùa khi bạn gõ chat, và nhận xét về kết quả. Không câu nào chứa từ mà bộ lọc chat của game sẽ che
+  (bộ lọc còn che cả từ nằm bên trong từ dài hơn).
 - **Cài đặt trước trận** (issue #31): các nút chọn trên màn hình cài đặt trận của Multiple > Rank đã dùng
   được cho sân (70 sân có đủ dữ liệu trong client), thời gian trong ngày (ban ngày hoặc ban đêm), thời
   tiết (quang đãng, mưa, tuyết, âm u: thành hoàng hôn nếu là ban đêm), thời lượng trận (6, 8, 10 hoặc 12
@@ -227,6 +234,11 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
 - **Trọng tài lúc giao bóng** (issue #33): hai trợ lý trọng tài được tạo từ một bản ghi trống (không có trọng tài
   đó trong danh sách của game), với đầu, tóc và thân không có tệp tài nguyên, nên trông méo mó khi xếp hàng ra sân.
   Giờ máy chủ dùng các trọng tài có thật trong game.
+- **Bình luận tiếng Việt từ client FO3 VN** (issue #34): khi đã tắt game, chạy
+  `python tools/commentary.py "<thư mục client FO3 VN>"`. Script chép `audiodata\speechdata\vie_vn` của client
+  VN vào cạnh phần bình luận tiếng Anh của client này (`eng_us`) và chỉ để tiếng Việt làm ngôn ngữ bình luận
+  trong `data\loc\locale.big` (có lưu bản sao lưu); sau đó game đọc bình luận từ `vie_vn`. `--remove` trả lại
+  bình luận tiếng Anh.
 - **Mở được hộp ngẫu nhiên** (Kotak Platinum và các hộp khác, issue #12): màn hình hộp liệt kê phần thưởng
   từ `staticdata.availables`, trước đây bị thiếu, nên mọi hộp đều lỗi khi bấm "Gunakan" (dùng).
 - **Thẻ mới vào Tim Cadangan**: thẻ từ gói, giao dịch, Market, Bag hoặc trang quản trị hiện "-" ở cột Tim
