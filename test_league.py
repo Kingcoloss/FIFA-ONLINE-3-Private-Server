@@ -219,6 +219,13 @@ def main():
         gk = next(i for i, p in pos.items() if p == 0)
         assert bare[gk] == hc.card_ovr(card[gk]["spid"]) + hc.GRADE_BOOST[8] + card[gk]["levelinfo"]["level"] - 1
         assert all(shown[i] > bare[i] for i in pos), (shown, bare)  # club + grade colors
+        # a match side's bars are the pre-match list's ratings, without team color (the list there
+        # shows none: 86 over a list of 79-83); its team colors still go to the match
+        side = hc.match_side(t0, 241, {"id": "u"})
+        for k, r in hc.LINES.items():
+            v = [bare[i] for i, p in pos.items() if p in r]
+            assert k == "GK" or side["team"]["summary"]["ovr"][k] == round(sum(v) / len(v)), (k, side["team"]["summary"], v)
+        assert side["team"]["teamcolors"] == tm["teamcolors"] and summ != side["team"]["summary"]["ovr"]
         res = next(p for p in st["teams"]["0"]["players"] if not hc.in_squad(st["teams"]["0"], p))
         assert not body(hc.ENDPOINTS["/transfer/offer"]("", json.dumps({"playerobjectid": hc.iid(res), "price": 1000}).encode()))["result"]
         # club picker ("Tim lain"): nation -> league -> club lists agree; a club without a starter
@@ -232,7 +239,8 @@ def main():
         assert len({m["name"] for m in vms}) == len(vms) >= hc.VM_COUNT and {m["grade"] for m in vms} <= set(range(1, 7))
         # stage 3, the crowd grows: newcomers from crowd day 1 (2026-11-02), each from his join hour,
         # with a name nobody has; one from an earlier season starts the next with no games; VM_MAX caps it
-        assert len(hc.vm_crowd(202611, 1, 23)) == hc.VM_COUNT and len(hc.vm_newcomers(400)) == hc.VM_MAX - hc.VM_COUNT
+        assert len(hc.vm_crowd(202611, 1, 23)) == hc.VM_COUNT + hc.VM_EXTRA
+        assert len(hc.vm_newcomers(400)) == hc.VM_MAX - hc.VM_COUNT - hc.VM_EXTRA
         nc = hc.vm_newcomers(60)
         assert 30 <= len(nc) <= 180 and [m["_id"] for *_, m in nc] == [f"vm{hc.VM_COUNT + k:04d}" for k in range(len(nc))]
         assert len({m["name"] for *_, m in nc} | {m["name"] for m in hc.vm_base()}) == len(nc) + hc.VM_COUNT
@@ -251,9 +259,57 @@ def main():
         assert hc.vm_squad("vm0095", 90) == s90 and len({p["levelinfo"]["level"] for p in s0["players"]}) > 1
         # the crowd plays through the season: ratings and records move, the same hour gives the same crowd
         early, late = hc.vm_crowd(202611, 1, 0), hc.vm_crowd(202611, 20, 23)
-        assert [{k: v for k, v in m.items() if k != "hours"} for m in early] == hc.vm_base()  # nothing played at 00
+        assert [{k: v for k, v in m.items() if k != "hours"} for m in early] == hc.vm_base() + hc.vm_extra()  # nothing played at 00
         assert late == hc.vm_crowd(202611, 20, 23) and any(a["elo"] != b["elo"] for a, b in zip(early, late))
         assert all(sum(b["wins"] + b["losses"]) > sum(a["wins"] + a["losses"]) for a, b in zip(early, late))
+        # some 1,000 managers (user: "max player ai online 1000"): the first crowd keeps its ids and
+        # names (the friends), the rest of the population is there from day 0 under names of its own
+        # that the chat overlay leaves alone, newcomers fill up to VM_MAX
+        ext = hc.vm_extra()
+        assert len(ext) == hc.VM_EXTRA and [m["_id"] for m in ext[:2]] == [f"vm{hc.VM_EXTRA_ID:04d}", f"vm{hc.VM_EXTRA_ID + 1:04d}"]
+        names = {m["name"] for m in ext}
+        assert len(names) == hc.VM_EXTRA and not names & ({m["name"] for m in hc.vm_base()} | {m["name"] for *_, m in nc})
+        assert not [n for n in names if "tai" in n.lower()] and hc.vm_by_id(ext[-1]["_id"])["name"] == ext[-1]["name"]
+        assert hc.vm_friends() == hc.virtual_managers()[:hc.VM_COUNT:hc.VM_COUNT // hc.VM_FRIENDS]
+        assert {m["_id"] for m in hc.vm_friends()} <= {m["_id"] for m in hc.vm_base()}
+
+        def ref_crowd(sid, day, hour):  # every day played from day 1, as before the day-by-day crowd
+            first = hc.vm_season_first(sid); today = first + day - 1
+            joined = {m["_id"]: (jd, jh) for jd, jh, m in hc.vm_newcomers(today) if (jd, jh) <= (today, hour)}
+            out = copy.deepcopy(hc.vm_base() + hc.vm_extra() + [m for _, _, m in hc.vm_newcomers(today) if m["_id"] in joined])
+            for vm in out:
+                jd, jh = joined.get(vm["_id"], (None, 0))
+                skill = hc.random.Random(f"{vm['_id']}/skill").randint(-60, 60)
+                for d in range(1 if jd is None else max(1, jd - first + 1), day + 1):
+                    rnd = hc.random.Random(f"{vm['_id']}/{sid}/{d}")
+                    for i in range(hc.LADDER_COUNT):
+                        for _ in range(rnd.choice(hc.VM_GAMES)):
+                            at, opp = rnd.choice(hc.VM_HOURS), vm["elo"][i] + rnd.randint(-80, 80)
+                            won = rnd.random() < 1 / (1 + 10 ** ((opp - vm["elo"][i] - skill) / 400))
+                            if first + d - 1 == jd and at < jh:
+                                continue
+                            if d == day and i in (0, 3):
+                                vm.setdefault("hours", []).append(at)
+                            if d < day or at <= hour:
+                                expect = 1 / (1 + 10 ** ((opp - vm["elo"][i]) / 400))
+                                vm["elo"][i] = max(hc.LADDER_START, round(vm["elo"][i] + hc.LADDER_K * (won - expect)))
+                                vm["wins" if won else "losses"][i] += 1
+            return out
+
+        def fresh(extra):
+            hc.VM_EXTRA = extra
+            for f in (hc.vm_extra, hc.vm_newcomers, hc.vm_crowd):
+                f.cache_clear()
+            hc.VM_SEASON.clear()
+        real_extra = hc.VM_EXTRA
+        fresh(40)  # a smaller population: the same rules, a quicker check
+        for sid, day, hour in ((202611, 1, 0), (202611, 3, 5), (202611, 3, 20), (202611, 9, 12), (202611, 10, 1),
+                               (202611, 7, 3), (202612, 2, 23), (202701, 30, 19)):  # on, on, back, other seasons
+            assert hc.vm_crowd(sid, day, hour) == ref_crowd(sid, day, hour), (sid, day, hour)
+        fresh(real_extra)
+        t = time.perf_counter(); hc.vm_crowd(202611, 20, 10); cold = time.perf_counter() - t
+        t = time.perf_counter(); hc.vm_crowd(202611, 20, 11); hourly = time.perf_counter() - t
+        assert hourly < cold / 3, (hourly, cold)  # an hour plays today's games only
         lb = body(hc.ENDPOINTS["/ladder/leaderboard"]("", b""))
         assert len(lb) == hc.LADDER_COUNT and [e["rank"] for e in lb[3][:3]] == [1, 2, 3] and lb[3][0]["elo"] >= lb[3][1]["elo"]
         squad = hc.vm_team(vms[0]["_id"])  # stage 2: a random-season squad per virtual manager
@@ -262,9 +318,44 @@ def main():
         side = hc.vm_side(vms[0])  # each card at its own grade and level, in the match and the ratings
         assert [(p["grade"], p["levelinfo"]["level"]) for p in side["team"]["players"]] == \
             [(p["grade"], p["levelinfo"]["level"]) for p in squad["players"]]
-        assert hc.vm_ovr(vms[0]["_id"]) == {k: side["team"]["summary"]["ovr"][k] for k in ("FW", "MF", "DF")}
+        # his team colors and staff (user: "Virtual manager harus dapat bonus team color saat bertanding dan harus
+        # mempunyai staff sesuai dengan level nya"): in his match side and his ratings (as my summary counts
+        # mine), not in the pre-match bars (that list shows neither); one more role frame every 12 levels
+        raised = colored = 0
+        for vm in sorted(hc.virtual_managers(), key=lambda m: m["level"])[::97]:
+            t, n, g = hc.vm_side(vm)["team"], min(7, 1 + vm["level"] // 12), min(10, 1 + vm["level"] // 12)
+            assert sorted(s["position"] for s in t["staffs"]) == sorted(hc.VM_STAFF_ORDER[:n]), vm["level"]
+            assert [r["staffid"] for r in t["staffroles"]] == [s["_id"] for s in t["staffs"]] and hc.vm_staff(vm) == hc.vm_staff(vm)
+            assert all(abs(s["grade"] - g) <= 1 and s["stat"] and s["life"] > 0 for s in t["staffs"])
+            assert t["teamcolors"] == hc.active_teamcolors(t)
+            ovr = hc.vm_ovr(vm["_id"])
+            assert ovr == {k: hc.team_summary(t, t["teamid"])["ovr"][k] for k in ("FW", "MF", "DF")}
+            assert all(t["summary"]["ovr"][k] <= v for k, v in ovr.items())
+            raised, colored = raised + (t["summary"]["ovr"] != ovr), colored + bool(t["teamcolors"])
+        assert raised >= 5 and colored >= 5, (raised, colored)  # of 11
         fr = body(hc.ENDPOINTS["/ladder/friends/info"]("", b""))
         assert len(fr) == hc.VM_FRIENDS and set(fr[0]["ovr"]) == {"FW", "MF", "DF"} and len(fr[0]["elo"]) == hc.LADDER_COUNT
+        # squad themes (user: "tambah variasi dalam pemilihan skuad ... meta, klub tertentu, negara tertentu,
+        # pemain tertentu, team color tertentu, stats tertentu"; "Klub dan negara top saja"): each one in
+        # the crowd, a club / nation / color theme filling his XI with top clubs and nations only, a
+        # star in his XI, every themed XI near his rating
+        day, (cards, hist), seen = hc.vm_day(), hc.tc_static(), Counter()
+        for vm in hc.virtual_managers()[::15]:
+            _, rec = hc.vm_origin(vm["_id"], day)
+            centre = 64 + (max(rec["elo"]) - hc.LADDER_START) * 18 // 780
+            xi_slots = hc.style_slots(hc.vm_style(rec)) or hc.roster_team(rec["teamid"])["squad"]["positions"]
+            kind, key = hc.vm_theme(vm["_id"], centre, tuple(hc.POS_ROLE[s["pos"]] for s in xi_slots), rec["teamid"])
+            seen[kind] += 1
+            xi = [p["spid"] for p in hc.vm_squad(vm["_id"], day)["squad"]["positions"]]
+            assert abs(sum(map(hc.card_ovr, xi)) / 11 - centre) <= 4, (vm["_id"], kind, key)
+            fit = {"club": lambda s: cards[s][1] == key or key in hist.get(cards[s][0], ()),
+                   "nation": lambda s: cards[s][2] == key, "color": lambda s: s in hc.tc_special_sets()[key][0],
+                   "star": lambda s: cards[s][0] == key[0]}.get(kind)
+            if kind in ("club", "nation", "color"):
+                assert sum(map(fit, xi)) >= hc.VM_THEME_MIN - 1 and key in hc.vm_theme_keys()[kind], (vm["_id"], kind, key)
+            if kind == "star":
+                assert any(map(fit, xi)) and key[2] in (hc.VM_TOP_CLUBS if key[1] == "club" else hc.VM_TOP_NATIONS)
+        assert set(seen) == {k for k, *_ in hc.VM_THEMES}, seen
         # playing styles: his style's tactic (radios 1|2) and formation; every style is someone's
         for vm in vms[:20]:
             side, name = hc.vm_side(vm), hc.vm_style(vm)
@@ -1130,12 +1221,200 @@ def main():
         assert not body(hc.route(f"/bag/{e1['_id']}/unpack")("", b"{}"))["result"]  # already taken
         assert list(body(hc.ENDPOINTS["/static/cache/item"]("", json.dumps({"itemids": [1]}).encode()))) == ["1"]
         st = hc._state(); hc.my_coach(st).pop("items", None); hc._save(st)  # packs from the rewards (shop test counts)
+        # --- manager level rewards (issue #35, FO3's table): each level reached puts its EP and items in
+        # the Bag, the post-match popup lists them once, the coming levels' table is served, and the
+        # reward-only packs stay out of the Shop
+        assert len(hc.LEVEL_EP) == 99 and hc.LEVEL_EP[0] == 50_000 and hc.LEVEL_EP[58] == 1_900_000 and hc.LEVEL_EP[-1] == 28_900_000
+        assert all(i in hc.PACKS or i in hc.ITEMS for items in hc.LEVEL_ITEMS.values() for i, _ in items)
+        assert hc.level_reward_items(2) == [{"itemid": hc.EP_ITEM, "count": 50_000}, {"itemid": 82214007, "count": 2},
+                                            {"itemid": 92000000, "count": 5}, {"itemid": 2001, "count": 3}]
+        assert hc.level_reward_items(30) == [{"itemid": hc.EP_ITEM, "count": 330_000}] and hc.level_reward_items(101) == []
+        st = hc._state(); coach = hc.my_coach(st); coach["bag"] = []; coach.pop("levelreward", None)
+        li, lv0 = dict(coach.get("levelinfo") or {}), hc.coach_levelinfo(coach)["level"]
+        prev, cur = hc.coach_gain_exp(st, sum(hc.coach_need(lv) for lv in (lv0, lv0 + 1)) - hc.coach_levelinfo(coach)["exp"])
+        assert (prev["level"], cur["level"]) == (lv0, lv0 + 2)
+        assert [e["title"] for e in coach["bag"]] == [f"Hadiah naik level Lv.{lv}" for lv in (lv0 + 1, lv0 + 2)]
+        hc._save(st)
+        want = Counter()
+        for lv in (lv0 + 1, lv0 + 2):
+            for it in hc.level_reward_items(lv):
+                want[it["itemid"]] += it["count"]
+        pop = body(hc.ENDPOINTS["/coach/me/level/reward"]("", b""))
+        assert {it["itemid"]: it["count"] for it in pop} == dict(want) and all(it["staticdata"]["itemid"] == it["itemid"] for it in pop)
+        assert body(hc.ENDPOINTS["/coach/me/level/reward"]("", b"")) == []  # once
+        table = body(hc.ENDPOINTS["/static/db/REWARDS/coachlevelup"]("", b""))
+        assert list(table) == [str(lv) for lv in range(2, hc.COACH_MAX_LEVEL + 1)] and table["60"]["coachlevel"] == 60
+        assert [it["itemid"] for it in table["60"]["items"]] == [hc.EP_ITEM, 98000004, 98000012, 98000002]
+        assert not {e["shopid"] for e in body(hc.ENDPOINTS["/shop/list"]("", b""))} & set(hc.REWARD_PACKS)
+        st = hc._state(); hc.my_coach(st)["bag"] = []; hc.my_coach(st)["levelinfo"] = li; hc._save(st)
+        # --- staff (user: "Aktifkan kembali staff"): /static/db/STAFF as the client reads it, Rekrut (EP
+        # and the daily free pack), the role frames and their boosts (summary bars, match sides),
+        # contracts, Latihan (what its popup predicts from the tables) and Pembinaan
+        sdb = body(hc.ENDPOINTS["/static/db/STAFF"]("", b""))
+        assert sdb["study"] and sdb["config"]["max_staff_life"] == hc.STAFF_LIFE and sdb["config"]["default_staff_count"] == hc.STAFF_MAX
+        assert [s["slot"] for s in sdb["slots"]["1"]] == list(range(1, 8))
+        assert all(s["enabled"] and s["position"] in hc.STAFF_SLOTS for s in sdb["slots"]["1"])
+        assert set(sdb["stafflist"]) == {str(i) for i in hc.STAFF_CATALOGUE}
+        assert all(str(v["expectid"]) in sdb["gradeexpect"] for v in sdb["stafflist"].values())
+        xt = sdb["exptable"]
+        assert list(xt) == [str(g) for g in range(1, 11)] and xt["10"]["gradeupto"] == 0
+        assert all(xt[str(g + 1)]["totalexp"] == xt[str(g)]["totalexp"] + xt[str(g)]["gradeupto"] for g in range(1, 10))
+        assert sorted(v["location"] for v in sdb["study"].values()) == [f"LOCATION_NAME_0{i}" for i in range(1, 7)]
+        client_stats = set(("strength stamina acceleration sprintspeed jumping agility balance slidingtackle dribbling ballcontrol "
+                            "marking standingtackle crossing shortpassing finishing longpassing shotpower headingaccuracy longshots "
+                            "volleys curve freekickaccuracy penalties interceptions positioning vision reactions aggression gkkicking "
+                            "gkdiving gkhandling gkpositioning gkreflexes ovr").split())  # PlayerListUtil.PLAYER_STATS + ovr
+        assert all(x in client_stats for c in hc.STAFF_CATALOGUE.values() if c[1] for pool in c[1] for x in pool)
+        rng = hc.random.Random(7)  # a pack's staff: its positions and grades, boosts by grade from its pools
+        for p in list(hc.STAFF_PACKS.values()) + [hc.STAFF_FREE_PACK]:
+            for _ in range(60):
+                x = hc.staff_new(p, rng)
+                pos, pools, _ = hc.STAFF_CATALOGUE[x["stfid"]]
+                assert pos in p[3] and p[4][0] <= x["grade"] <= p[4][1] and x["life"] == hc.STAFF_LIFE
+                assert x["effect"] == [] if pools is None else \
+                    len(x["effect"]) == 1 + (x["grade"] >= 3) + (x["grade"] >= 6) and x["effect"][0]["amount"] == x["grade"] \
+                    and all(e["effect"] in pools[k] for k, e in enumerate(x["effect"]))
+        slot = str(hc._default_slot(hc._state()))
+        st = hc._state(); raw = st["teams"][slot]
+        for k in ("staffs", "staffslots", "staffsmc", "staffrecruit"):
+            raw.pop(k, None)
+        ep_kept = hc.my_coach(st).get("ep", hc.START_EP); hc.my_coach(st)["ep"] = 10 ** 9; hc._save(st)
+        me = lambda: hc.coach_me(hc._state(), hc._default_slot(hc._state()))
+        staffs = lambda: me()["team"]["staffs"]
+        staff = lambda sid: next(s for s in hc._state()["teams"][slot]["staffs"] if s["_id"] == sid)
+        call = lambda path, req: body((hc.ENDPOINTS.get(path) or hc.route(path))("", json.dumps(req).encode()))
+        rows = body(hc.ENDPOINTS["/staff/recruit"]("", b""))
+        assert [r["recruitid"] for r in rows if r["recruittype"] == "normal"] == list(hc.STAFF_PACKS)
+        assert all(r["ep"] > 0 and r["staffpack_name"].startswith("STAFFPACK_NAME_") for r in rows if r["recruittype"] == "normal")
+        assert rows[-1]["eventlist"] == {"login": {"count": 1, "targetcount": 1, "enable": True},
+                                         "pcmatch": {"count": 0, "targetcount": 3, "enable": False}}
+        assert hc.asset_path(f"externalAssets/shop/{rows[0]['icon']}.png") == hc.asset_path("externalAssets/staffs/2103.png")
+        ep0 = ep()
+        got = call("/staff/recruit/3", {"feetype": "ep"})  # Basic FW: appended last, EP taken
+        assert got["result"] and ep() == ep0 - hc.staff_ep(50_000) and [s["position"] for s in staffs()] == ["FW"]
+        s = staffs()[-1]
+        assert "id" not in s and s["commonname"] == f"STAFF_NAME_{s['stfid']}" and isinstance(s["effect"], list)
+        mt = got["resources"][0]["body"]["team"]  # the shapes CoachProxy needs (numbers, an array of 7 frames)
+        assert mt["staffroleidx"] == 1 and mt["maxstaff"] == hc.STAFF_MAX and mt["staffsmc"] == 0
+        assert [r["slotidx"] for r in mt["staffroles"]] == list(range(1, 8)) and not any(r["staffid"] for r in mt["staffroles"])
+        assert call("/staff/recruit/1", {"eventtype": "login"})["result"] and not call("/staff/recruit/1", {"eventtype": "login"})["result"]
+        assert not call("/staff/recruit/1", {"eventtype": "pcmatch"})["result"]  # 3 matches first
+        st = hc._state(); [hc.staff_after_match(st) for _ in range(3)]; hc._save(st)
+        assert body(hc.ENDPOINTS["/staff/recruit"]("", b""))[-1]["eventlist"]["pcmatch"]["enable"]
+        assert call("/staff/recruit/1", {"eventtype": "pcmatch"})["result"] and len(staffs()) == 3
+        assert not any(e["enable"] for e in body(hc.ENDPOINTS["/staff/recruit"]("", b""))[-1]["eventlist"].values())
+        st = hc._state(); hc.my_coach(st)["ep"] = 0; hc._save(st)
+        assert call("/staff/recruit/9", {"feetype": "ep"}) == {"result": False, "reason": "STAFF_NOT_ENOUGH_GAMEMONEY"}
+        st = hc._state(); hc.my_coach(st)["ep"] = 10 ** 9
+        full = st["teams"][slot]["staffs"]; full += [dict(full[0], _id=hc.new_iid()) for _ in range(hc.STAFF_MAX - len(full))]
+        hc._save(st)
+        assert call("/staff/recruit/2", {"feetype": "ep"})["reason"] == "ITEM_INVENTORY_ERROR_STAFF_FULL_INFO"
+        # role frames: a staff in its position's frame boosts that group's starters (MEDICAL: all), as
+        # the client's squad lists do, and goes into my match side; out of contract it does neither
+        st = hc._state(); raw = st["teams"][slot]
+        fw = {"_id": hc.new_iid(), "stfid": 1105, "grade": 4, "exp": 0, "life": 2, "status": None, "effect": [{"effect": "ovr", "amount": 5}]}
+        fit = {"_id": hc.new_iid(), "stfid": 5001, "grade": 2, "exp": 0, "life": 50, "status": None, "effect": [{"effect": "ovr", "amount": 3}]}
+        raw["staffs"] = [fw, fit]; raw["staffsmc"] = 0; hc._save(st)
+        r0 = hc.xi_ratings(me()["team"])
+        bars0 = hc.match_side(hc._state()["teams"][slot], hc.my_teamid(hc._state()), user={"id": "x"})["team"]["summary"]["ovr"]
+        assert not call(f"/staff/appoint/{fw['_id']}", {"slot": 2, "staffrole": None})["result"]  # the MF frame
+        got = call(f"/staff/appoint/{fw['_id']}", {"slot": 1, "staffrole": None})
+        assert got["result"] and got["appointed"]["appointedstaff"]["status"] == "appointed" and got["appointed"]["prevstaff"] is None
+        assert got["resources"][0]["body"]["team"]["staffroles"][0]["staffid"] == fw["_id"]
+        t1 = me()["team"]; r1 = hc.xi_ratings(t1)
+        fwd = {str(p.get("id") or p["spid"]) for p in t1["squad"]["positions"] if 19 < p["pos"] < hc.POS_SUB}
+        assert fwd and all(r1[i] == r0[i] + 5 * (i in fwd) for i in r0)
+        assert call(f"/staff/appoint/{fit['_id']}", {"slot": 6})["result"]
+        assert all(hc.xi_ratings(me()["team"])[i] == r0[i] + 5 * (i in fwd) + 3 for i in r0)
+        side = hc.match_side(hc._state()["teams"][slot], hc.my_teamid(hc._state()), user={"id": "x"})["team"]
+        assert [r["staffid"] for r in side["staffroles"]] == [s["_id"] for s in side["staffs"]] == [fw["_id"], fit["_id"]]
+        assert side["staffs"][0]["stat"] == {"ovr": 5} and side["summary"]["ovr"] == bars0  # the pre-match list: no staff
+        ai = hc.match_side(hc._state()["teams"][slot], 1)["team"]
+        assert ai["staffs"] == [] == ai["staffroles"]
+        st = hc._state(); hc.staff_after_match(st); hc.staff_after_match(st); hc._save(st)
+        assert me()["team"]["staffsmc"] == 2 and staff(fw["_id"])["life"] == 0 and staff(fit["_id"])["life"] == 48
+        side = hc.match_side(hc._state()["teams"][slot], hc.my_teamid(hc._state()), user={"id": "x"})["team"]
+        assert [s["_id"] for s in side["staffs"]] == [fit["_id"]]
+        assert all(hc.xi_ratings(me()["team"])[i] == r0[i] + 3 for i in r0)
+        pv = call("/staff/recontract/preview", {"staffs": [fw["_id"], fit["_id"]], "_method": "PUT"})
+        assert pv["boost"] == {"igr": 0, "vip": 0, "discountlimit": 0} and pv["total"] == sum(r["contractfee"] for r in pv["staffs"])
+        assert {r["id"]: r["contractfee"] for r in pv["staffs"]} == {fw["_id"]: hc.staff_ep(100 * 4 * 50), fit["_id"]: 400}
+        e1 = ep()
+        assert call("/staff/recontract", {"staffs": [fw["_id"]], "_method": "PUT"})["result"]
+        assert ep() == e1 - hc.staff_ep(100 * 4 * 50) and staff(fw["_id"])["life"] == hc.STAFF_LIFE
+        got = call(f"/staff/appoint/{fw['_id']}", {"_method": "DELETE"})
+        assert got["result"] and got["staffid"] == fw["_id"] and staff(fw["_id"])["status"] is None
+        assert fw["_id"] not in {r["staffid"] for r in got["resources"][0]["body"]["team"]["staffroles"]}
+        assert not call(f"/staff/{fit['_id']}", {"_method": "DELETE"})["result"]  # at work: no Hapus
+        assert call(f"/staff/{fw['_id']}", {"_method": "DELETE"})["result"] and [s["_id"] for s in staffs()] == [fit["_id"]]
+        # Latihan: the staff comes out as the popup predicts from the static tables (no jackpot)
+        st = hc._state(); raw = st["teams"][slot]
+        tgt = {"_id": hc.new_iid(), "stfid": 2103, "grade": 2, "exp": 50, "life": 50, "status": None,
+               "effect": [{"effect": "ballcontrol", "amount": 2}]}
+        mats = [{"_id": hc.new_iid(), "stfid": i, "grade": g, "exp": 0, "life": 50, "status": None, "effect": []}
+                for i, g in ((4902, 3), (2101, 2), (1101, 1))]  # an MF helper, an MF, an FW
+        raw["staffs"] += [tgt] + mats; hc._save(st)
+
+        def predict(t, ms):  # TeamManagementStaffUpgradeSelectScene's sums
+            k = lambda m: int(hc.STAFF_CATALOGUE[m["stfid"]][0] == hc.STAFF_CATALOGUE[t["stfid"]][0]) \
+                + 2 * int(sdb["stafflist"][str(m["stfid"])]["material"])
+            cum = t["exp"] + sum(sdb["materialexp"][str(m["grade"])][k(m)] for m in ms) + xt[str(t["grade"])]["totalexp"]
+            g = max(g for g in range(1, 11) if cum >= xt[str(g)]["totalexp"])
+            amounts = [e["amount"] for e in t["effect"]] + [0, 0]
+            for gg in range(t["grade"] + 1, g + 1):
+                for i, n in enumerate(sdb["gradeexpect"][str(sdb["stafflist"][str(t["stfid"])]["expectid"])][str(gg)]["effects"]):
+                    amounts[i] += n
+            return g, 0 if g == 10 else cum - xt[str(g)]["totalexp"], [a for a in amounts if a > 0]
+        want, e1, real = predict(tgt, mats), ep(), hc.random.random
+        hc.random.random = lambda: 0.99  # no jackpot
+        try:
+            got = call(f"/staff/enhance/{tgt['_id']}", {"materials": [m["_id"] for m in mats], "_method": "PUT"})
+        finally:
+            hc.random.random = real
+        assert got["result"] and got["jackpot"] is False and ep() == e1 - sum(sdb["enhancefee"][str(m["grade"])]["fee"] for m in mats)
+        t = staff(tgt["_id"])
+        assert want == (4, 40, [4, 1]) and (t["grade"], t["exp"], [e["amount"] for e in t["effect"]]) == want
+        assert t["effect"][1]["effect"] in hc.STAFF_CATALOGUE[2103][1][1] and not {m["_id"] for m in mats} & {s["_id"] for s in staffs()}
+        st = hc._state(); helper = {"_id": hc.new_iid(), "stfid": 4902, "grade": 1, "exp": 0, "life": 50, "status": None, "effect": []}
+        st["teams"][slot]["staffs"].append(helper); hc._save(st)
+        hc.random.random = lambda: 0.0  # the jackpot: half as much EXP again
+        try:
+            assert call(f"/staff/enhance/{tgt['_id']}", {"materials": [helper["_id"]], "_method": "PUT"})["jackpot"] is True
+        finally:
+            hc.random.random = real
+        assert (staff(tgt["_id"])["grade"], staff(tgt["_id"])["exp"]) == (4, 40 + 180)
+        # Pembinaan: Asia (3) turns boost 2 of an MF / DF staff into another of the position's, in 5 matches
+        assert not call("/staff/study/1", {"staffs": [tgt["_id"]], "_method": "PUT"})["result"]  # Oceania: FW / DF only
+        e1 = ep()
+        assert call("/staff/study/3", {"staffs": [tgt["_id"]], "_method": "PUT"})["result"] and ep() == e1 - sdb["study"]["3"]["fee"]
+        t = staff(tgt["_id"]); b = t["study"]["boost"]
+        assert t["status"] == "studying" and t["study"]["lid"] == "3" and t["study"]["prevboost"] == {"effectidx": -1}
+        assert b["boosttype"] == "change" and b["effectidx"] == 1 and b["effect"] != t["effect"][1]["effect"]
+        assert not call("/staff/study/3/complete", {"_method": "PUT"})["result"]
+        st = hc._state(); [hc.staff_after_match(st) for _ in range(5)]; hc._save(st)
+        got = call("/staff/study/3/complete", {"_method": "PUT"})
+        assert got["result"] and got["staffs"][tgt["_id"]]["effect"][1]["effect"] == b["effect"] and staff(tgt["_id"])["status"] is None
+        assert hc.staff_study_fee(staff(tgt["_id"]), "3") == 2 * sdb["study"]["3"]["fee"]  # the client's sum
+        for _ in range(2):  # Europe: +1..3 on one boost, replacing the + the last one gave
+            before, bonus = [e["amount"] for e in staff(tgt["_id"])["effect"]], staff(tgt["_id"])["study"].get("bonus")
+            assert call("/staff/study/6", {"staffs": [tgt["_id"]], "_method": "PUT"})["result"]
+            b = staff(tgt["_id"])["study"]["boost"]
+            st = hc._state(); [hc.staff_after_match(st) for _ in range(10)]; hc._save(st)
+            assert call("/staff/study/6/complete", {"_method": "PUT"})["result"]
+            if bonus:
+                before[bonus["effectidx"]] -= bonus["inc"]
+            before[b["effectidx"]] += b["inc"]
+            assert b["boosttype"] == "enhance" and [e["amount"] for e in staff(tgt["_id"])["effect"]] == before
+        st = hc._state(); raw = st["teams"][slot]
+        for k in ("staffs", "staffslots", "staffsmc", "staffrecruit"):
+            raw.pop(k, None)
+        hc.my_coach(st)["ep"] = ep_kept; hc._save(st)
         # --- shop: player packs for EP (1 or 10); Item saya opens one card per use
         shop = body(hc.ENDPOINTS["/shop/list"]("", b""))
         cats = Counter(e["shopcategory"] for e in shop)
         # packs without a card (the FO4 seasons before tools/fo4_season.py install) stay out
         assert not hc.pack_pool(92000300) or 92000300 in {e["shopid"] for e in shop}
-        assert cats == {"PLAYERPACK": sum(1 for i in hc.PACKS if hc.pack_pool(i)), "USE": len(hc.ITEMS),
+        assert cats == {"PLAYERPACK": sum(1 for i in hc.PACKS if i not in hc.REWARD_PACKS and hc.pack_pool(i)), "USE": len(hc.ITEMS),
                         "PACKAGE": len(hc.PACKAGES) - len(hc.CHAIN_STEPS),
                         "MILEAGE": len(hc.MP_SHOP), "MONTHLYPACK": len(hc.MONTHLY), "CHAINED": len(hc.CHAINED)}
         assert all(b["price"] == 0 for e in shop for b in e["product"]["staticdata"]["bunches"])  # free Shop

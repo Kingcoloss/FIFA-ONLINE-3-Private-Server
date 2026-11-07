@@ -136,6 +136,8 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
 - **Rating FW / MF / DF tim sesuai pemainnya** (issue #18): di layar skuad dan lobi, nilainya rata-rata
   rating yang tampil di daftar pemain (rating di posisi pemain ditambah grade upgrade, level, dan team
   color). Dulu dihitung dari rating kartu saja, sekitar 12 lebih rendah.
+  Sebelum match (Liga, Cup, Rank) daftar pemain tidak memasukkan team color, jadi bar di sana juga
+  tanpa team color; bonusnya tetap berlaku di dalam match.
 - **Tab Rekor liga** (issue #19): tabel klasemen tampil (tab-nya error karena tabel `league2difficulty`
   tidak ada; tabel itu sekarang juga menentukan siapa naik atau turun di akhir musim). Rekorku
   menampilkan pertandingan, rating, gol, assist, umpan, tekel, dan penyelamatan tiap pemain dari
@@ -174,8 +176,8 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   berhenti di error UI karena server tidak mengirim divisi, hadiah, dan rekor ladder. Sekarang
   layarnya terbuka, dan manajer virtual mengisi peringkatnya: 3 teratas (VS Manager Top) dan
   peringkat teman berisi 20 manajer, masing-masing dengan nama, klub, divisi, dan rekor yang berubah
-  sepanjang hari seiring mereka bermain. Awalnya ada 100, lalu tiap hari bergabung 0-3 manajer baru,
-  sampai 300. Tiap manajer punya gaya main sendiri (penguasaan bola, serangan balik, pressing tinggi,
+  sepanjang hari seiring mereka bermain. Awalnya ada 100, ditambah 850 lainnya, lalu tiap hari bergabung 0-3
+  manajer baru, sampai 1.000. Tiap manajer punya gaya main sendiri (penguasaan bola, serangan balik, pressing tinggi,
   umpan panjang, parkir bus, atau menyerang total: formasi, taktik, dan pergerakan pemain), memakai
   kit klubnya dan kartu acak dari klub dan musim mana pun di sekitar ratingnya, tiap kartu dengan
   grade (+1 untuk pemula sampai +6 ke atas) dan level masing-masing. Dari hari ke hari mereka membeli
@@ -220,6 +222,15 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   gol, peluang gagal dan penyelamatan, candaan saat kamu mengetik, dan komentar soal hasil akhir. Tidak ada
   kalimat yang memuat kata yang akan disensor filter chat game (filter itu juga menyensor kata yang ada di
   dalam kata lain).
+- **Manajer virtual menyusun skuad dengan gayanya sendiri** (issue #30): tiap manajer punya tema skuad
+  tetap. Bisa kartu apa saja yang dekat ratingnya; klub top (Real Madrid, Barcelona, Atletico, kedua klub
+  Manchester, Chelsea, Liverpool, Arsenal, Tottenham, Bayern, Dortmund, Juventus, Milan, Inter, Roma,
+  Napoli, PSG), pemain klub itu sekarang atau dulu; negara top (Brasil, Argentina, Spanyol, Jerman,
+  Prancis, Inggris, Italia, Belanda, Portugal, Belgia, Uruguay, Kroasia); salah satu team color game
+  (satu season kartu atau set bernama); seorang pemain bintang bersama rekan klub atau negaranya; meta;
+  atau satu stat (kecepatan, fisik, teknik, umpan, bertahan, menembak, pemain muda, pemain lawas).
+  Manajer yang lebih kuat lebih sering mengikuti meta dan team color. Tema hanya mengambil kartu yang
+  dekat ratingnya, jadi skuadnya tidak jadi lebih kuat.
 - **Pengaturan sebelum match** (issue #31): layar pengaturan game di Multiple > Rank punya stepper
   yang berfungsi untuk stadion (70 stadion yang datanya lengkap di client), waktu (siang atau
   malam), cuaca (cerah, hujan, salju, mendung: senja di malam hari), durasi match (6, 8, 10, atau
@@ -260,6 +271,24 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   klien VN ke samping komentator Inggris klien ini (`eng_us`) dan hanya mencantumkan bahasa Vietnam sebagai
   bahasa komentator di `data\loc\locale.big` (cadangannya disimpan); game lalu membaca komentatornya dari
   `vie_vn`. `--remove` mengembalikan komentator Inggris.
+- **Hadiah naik level manajer** (issue #35): tiap level manajer dari 2 sampai 100 memberi hadiah level
+  FO3 (tabel di fifaaddict): EP ditambah item seperti pak Top 300, Top 100 dan Best, pak liga 65+ dan
+  GK 65+, kupon Simulasi Liga, kupon ganti tim, dan EXP capsule. Hadiahnya masuk ke Bag ("Hadiah naik
+  level Lv.N"); layar setelah match menampilkannya di popup naik level, dan ikon infonya menampilkan
+  hadiah level-level berikutnya. Item FO3 yang tidak dipakai server ini (pak staff, Red Ball, kupon locker
+  room dan reward boost, EXP transfer) dilewati. Hadiah EP ikut harga pemain di tab Ekonomi.
+- **Staff** (Tim > Manajemen Staff): sistem staff FO3 aktif lagi. *Rekrut*: pak staff dengan EP (Basic
+  FW / MF / DF / GK / ALL, Pro, Premium, Direktur Teknik, Premium Medical) dan, tiap hari, pak ALL gratis
+  untuk login dan satu lagi untuk main 3 match. *Staff yang dimiliki*: 7 frame peran (FW, MF, DF, pelatih
+  kepala, GK, pelatih kebugaran, direktur teknik); staff di frame-nya memberi boost ke pemain inti grup
+  posisinya (pelatih kebugaran, pelatih kepala, dan direktur teknik: semua pemain inti) di daftar skuad dan
+  di match, selama kontrak 50 match yang diperpanjang dengan EP. *Latihan*: masukkan staff lain ke satu
+  staff untuk menaikkan grade (0.5 sampai 5 bintang) dan boost-nya. *Pembinaan*: kirim staff ke luar negeri
+  5-10 match untuk mengganti atau menambah boost. Nama dan stat boost mengikuti daftar fo3staff di
+  fifaaddict; grade, harga, dan kontrak buatan server (angka Garena hilang), dan harga EP ikut harga pemain
+  di tab Ekonomi. Klien hanya punya foto 7 staff; `python -I tools/fa_faces.py --staffs` menambahkan sisanya dari fifaaddict.
+  Virtual manager bertanding dengan team color-nya, seperti kamu, dan punya staff sesuai level (satu
+  frame peran lagi tiap 12 level).
 - **Kotak acak bisa dibuka** (Kotak Platinum dan lainnya, issue #12): layar kotak menampilkan
   hadiahnya dari `staticdata.availables`, yang belum ada, jadi tiap kotak gagal saat "Gunakan".
 - **Kartu baru masuk Tim Cadangan**: kartu dari pak, trade, Market, Bag, atau halaman admin tampil
@@ -343,8 +372,8 @@ Belum dikerjakan: main online melawan orang lain (ranked PvP, friendly, King of 
 | `gen_teams.py` | Skuad awal dan ringkasan klub dari `gamedata/fifadb.sqlite`. |
 | `tools/eatrax_song.py` | Menaruh lagu di urutan pertama musik menu EA Trax sebagai EALayer3, mengganti TrackID 1 (mengubah `data_0.big` / `data_1.big` dengan menambahkan di akhir; `--restore` mengembalikan aslinya). Membuat game crash setelah pertandingan, lihat masalah yang diketahui. |
 | `tools/fa_sync.py` | Sinkronisasi harga fifaaddict.com. |
-| `tools/fo4_season.py` | Menambahkan kartu 26 LIVE dan 25 LIVE FIFA Online 4 (data fifaaddict, stat dianggap +0) sebagai dua season baru dengan badge season FO4: `fetch`, `collect` + `import`, `build`, `install` (menulis ulang isi `data_0.big` di tempat, karena ukurannya tidak boleh berubah, dan menambahkan di akhir `Label.big`; `restore` mengembalikan keduanya). |
-| `tools/fa_faces.py` | Menambahkan wajah mini pemain yang tidak ada di cache client (fifaaddict menyajikan PNG 128x128 yang sama); `--crests` menambahkan logo klub yang tidak ada (kebanyakan klub tidak punya di cache, jadi game menampilkan logo bawaan). Bisa dilanjutkan, `--remove` membatalkannya. |
+| `tools/fo4_season.py` | Menambahkan kartu 26 LIVE dan 25 LIVE FIFA Online 4 (data fifaaddict, stat dianggap +0) sebagai dua season baru dengan badge season FO4: `fetch`, `collect` + `import`, `build`, `install` (menulis ulang isi `data_0.big` di tempat, karena ukurannya tidak boleh berubah, dan menambahkan di akhir `Label.big` dan `Module.big`; `restore` mengembalikan semuanya). `hud` hanya menambal `Module.big`, untuk client yang sudah di-install sebelumnya: kotak nama pemain di match dulu menampilkan badge '17 pada semua kartu 2017 dan FO4, sekarang badge season kartunya sendiri. |
+| `tools/fa_faces.py` | Menambahkan wajah mini pemain yang tidak ada di cache client (fifaaddict menyajikan PNG 128x128 yang sama); `--crests` menambahkan logo klub yang tidak ada (kebanyakan klub tidak punya di cache, jadi game menampilkan logo bawaan); `--staffs` menambahkan foto staff (cache hanya punya 7 dari 71 staff yang diberikan server). Bisa dilanjutkan, `--remove` membatalkannya. |
 | `tools/draft_icons.py` | Menggambar ikon Shop untuk pak draft (cache client tidak punya gambar draft) ke `assets/externalAssets/shop/`, yang dilayani server sebelum gambar milik client; `<icon> <tag> <picks>` menggambar satu lagi, untuk pak buatan halaman admin. Butuh Pillow. |
 | `tools/re/` | Alat bantu reverse engineering: `bigdir.py` (tabel arsip BIg4), `refpack.py` (codec RefPack), `eadb.py` (tabel database "DB" EA), `abc*.py` (parser / grep / penambang skema bytecode AS3), `gfxx.py` (SWF UI), `memgrab.py`, `dbwin.py` (output debug client), `relay_emu.py` (codec paket relay PvP dan relay uji), `gamectl.ps1` (mengendalikan jendela client untuk tes). |
 | `blaze.py`, `server.py`, `test_client.py`, `analyze_capture.py` | Framing EA Blaze (Fire/TDF) dan server tes loopback dari fase pertama proyek; ternyata client memakai REST + messenger. |

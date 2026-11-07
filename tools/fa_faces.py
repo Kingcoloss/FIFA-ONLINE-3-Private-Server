@@ -11,11 +11,14 @@ players, faces the game already asked for, then every Market card, dearest first
 Crests are crests/large/s<teamid>.png (256x256) and crests/small/s<teamid>.png (128x128);
 fifaaddict has both sizes (fo3img/crests/large/s<id>.png and fo3img/crests/s<id>.png). Order:
 crests the game already asked for, then every club with a 2017 squad (the club picker's).
+With --staffs, the staff pictures (staffs/<stfid>.png; user: "boleh download"): the cache has 7 of
+the server's staff, fifaaddict has them all at fo3img/staffs/<its id>.png (its 10xx..40xx and
+9117..9122 are the client's 11xx..41xx and 9500..9505, http_config.STAFF_CATALOGUE).
 One request every --delay seconds; existing files are never touched; gamedata/fa_faces.json
 (fa_crests.json) records what was added or failed so a rerun resumes, and --remove deletes only
 the added files.
 
-Usage: python -I tools/fa_faces.py [--crests] [--delay 0.5] [--limit N] [--remove]
+Usage: python -I tools/fa_faces.py [--crests | --staffs] [--delay 0.5] [--limit N] [--remove]
 """
 import argparse, json, os, re, sys, time, urllib.request
 
@@ -27,7 +30,8 @@ import http_config as hc
 EXT = os.path.join(hc.ASSETS, "externalAssets")
 FA = "https://fifaaddict.com/fo3img/"
 MANIFESTS = {"faces": os.path.join(ROOT, "gamedata", "fa_faces.json"),
-             "crests": os.path.join(ROOT, "gamedata", "fa_crests.json")}
+             "crests": os.path.join(ROOT, "gamedata", "fa_crests.json"),
+             "staffs": os.path.join(ROOT, "gamedata", "fa_staffs.json")}
 
 
 def _asked(pattern):
@@ -59,14 +63,21 @@ def wanted_crests():
                                          (f"crests/small/s{t}.png", f"{FA}crests/s{t}.png"))]
 
 
+def wanted_staffs():
+    """[(path under externalAssets, url)] of every staff picture the server can hand out."""
+    fa = lambda s: s - 100 if 1100 < s < 4900 else s - 383 if 9500 <= s <= 9505 else s
+    return [(f"staffs/{s}.png", f"{FA}staffs/{fa(s)}.png") for s in hc.STAFF_CATALOGUE]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--crests", action="store_true", help="club crests instead of player faces")
+    ap.add_argument("--staffs", action="store_true", help="staff pictures instead of player faces")
     ap.add_argument("--delay", type=float, default=0.5)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--remove", action="store_true", help="delete the files this tool added")
     a = ap.parse_args(ARGS)
-    kind = "crests" if a.crests else "faces"
+    kind = "crests" if a.crests else "staffs" if a.staffs else "faces"
     manifest = MANIFESTS[kind]
     man = json.load(open(manifest)) if os.path.isfile(manifest) else {"added": [], "failed": {}}
     man = {"added": [_rel(e) for e in man["added"]], "failed": {_rel(k): v for k, v in man["failed"].items()}}
@@ -79,7 +90,7 @@ def main():
         if os.path.isfile(manifest):
             os.remove(manifest)
         return
-    jobs = wanted_crests() if a.crests else wanted_faces()
+    jobs = {"crests": wanted_crests, "staffs": wanted_staffs, "faces": wanted_faces}[kind]()
     todo = [(rel, url) for rel, url in jobs if not os.path.isfile(os.path.join(EXT, rel)) and rel not in man["failed"]]
     if a.limit:
         todo = todo[:a.limit]

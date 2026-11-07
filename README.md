@@ -127,6 +127,8 @@ Added, passing the tests but not yet checked in the client:
 - **Team FW / MF / DF ratings match the players** (issue #18): on the squad screens and in the lobby
   they are the average of the ratings the player list shows (rating at the player's slot plus
   upgrade grade, level and team color). They were built from the bare card ratings, about 12 lower.
+  Before a match (Liga, Cup, Rank) the list shows no team color, so its bars leave it out too; the
+  bonus still applies in the match.
 - **Rekor liga tabs** (issue #19): the standings table shows (its tab broke on the missing
   `league2difficulty` table, which now also decides who goes up or down at season end). Rekorku
   lists each player's matches, rating, goals, assists, passes, tackles and saves from the season's
@@ -165,8 +167,8 @@ Added, passing the tests but not yet checked in the client:
 - **Multiple > Rank: other managers and real matches** (issue #30): the ranked screen stopped on a UI
   error, as the server sent no divisions, rewards or ladder record. It now opens, and virtual managers
   fill its rankings: the top 3 (VS Manager Top) and a friends ranking of 20, each with a name, a club,
-  a division and a record that moves through the day as they play. 100 start and 0-3 newcomers join
-  every day, up to 300. Each one plays his own style (possession, counter, high press, long ball, park
+  a division and a record that moves through the day as they play. 100 start, joined by 850
+  more and then 0-3 newcomers a day, up to 1,000. Each one plays his own style (possession, counter, high press, long ball, park
   the bus or all-out attack: formation, tactics and runs) in his club's kit, with random cards of any
   club and season around his rating, each card at its own grade (+1 for beginners up to +6 and more)
   and level. From day to day they buy and sell cards, upgrade them (a failed upgrade from +5 drops a
@@ -206,6 +208,14 @@ Added, passing the tests but not yet checked in the client:
   personality in each language, 2,700 in all: small talk and football talk at kick-off, reactions to
   goals, misses and saves, banter when you type, and a word on the result. No line holds a word the
   game's chat filter would hide (it also hides them inside longer words).
+- **Virtual managers build their squads their own way** (issue #30): each one keeps a squad theme. It
+  may be any cards near his rating; a top club (Real Madrid, Barcelona, Atletico, the Manchester clubs,
+  Chelsea, Liverpool, Arsenal, Tottenham, Bayern, Dortmund, Juventus, Milan, Inter, Roma, Napoli, PSG),
+  its players now or formerly; a top nation (Brazil, Argentina, Spain, Germany, France, England, Italy,
+  Holland, Portugal, Belgium, Uruguay, Croatia); one of the game's team colors (a card season or a named
+  set); a famous player with his club or nation mates; the meta; or one stat (pace, power, technique,
+  passing, defence, shooting, young players, old school). Stronger managers follow the meta and team
+  colors more often. A theme only takes cards near his rating, so it does not make his squad stronger.
 - **Pre-match settings** (issue #31): Multiple > Rank's game setting screen has working steppers for
   the stadium (the 70 stadiums the client has complete), the time of day (day or night), the weather
   (clear, rain, snow, overcast: dusk at night), the match length (6, 8, 10 or 12 minutes) and the ball
@@ -243,6 +253,25 @@ Added, passing the tests but not yet checked in the client:
   `audiodata\speechdata\vie_vn` next to this client's English commentary (`eng_us`) and lists only
   Vietnamese as commentary language in `data\loc\locale.big` (a backup is kept); the game then reads
   its commentary from `vie_vn`. `--remove` brings English back.
+- **Manager level rewards** (issue #35): every manager level from 2 to 100 pays FO3's level reward
+  (the table on fifaaddict): EP plus items such as Top 300, Top 100 and Best packs, league 65+ and
+  GK 65+ packs, League Simulation coupons, a team change coupon and EXP capsules. It goes to the Bag
+  ("Hadiah naik level Lv.N"); the post-match screen shows it in its level-up popup, and its info icon
+  lists the coming levels' rewards. FO3 items this server has no use for (staff packs, Red Ball, locker room
+  and reward boost coupons, EXP transfer) are left out. EP rewards follow the Ekonomi tab's player
+  prices.
+- **Staff** (Tim > Manajemen Staff): FO3's staff system works again. *Rekrut*: staff packs for EP
+  (Basic FW / MF / DF / GK / ALL, Pro, Premium, Technical Director, Premium Medical) and, each day, a
+  free ALL pack for logging in and another for playing 3 matches. *Staff yang dimiliki*: 7 role frames
+  (FW, MF, DF, head coach, GK, fitness coach, technical director); a staff in its frame boosts the
+  starters of its position group (fitness coach, head coach and technical director: every starter) in
+  the squad lists and in matches, for a 50-match contract that is renewed for EP. *Latihan*: feed other
+  staff into one to raise its grade (0.5 to 5 stars) and boosts. *Pembinaan*: send a staff abroad for
+  5-10 matches to change or raise a boost. Names and boosted stats follow fifaaddict's fo3staff list;
+  grades, prices and contracts are the server's own (Garena's are lost), and EP prices follow the
+  Ekonomi tab's player prices. The client has pictures of 7 staff only; `python -I tools/fa_faces.py --staffs` adds the others from fifaaddict.
+  Virtual managers play with their team colors, as you do, and with staff by level (one role frame
+  more every 12 levels).
 - **Random boxes open** (Kotak Platinum and the rest, issue #12): the box screen lists its prizes
   from `staticdata.availables`, which was missing, so every box failed at "Gunakan".
 - **New cards join Tim Cadangan**: a card from a pack, a trade, the Market, the Bag or the admin
@@ -323,8 +352,8 @@ Not done: online play against other people (ranked PvP, friendly, King of the Hi
 | `gen_teams.py` | Starter squads and club summaries from `gamedata/fifadb.sqlite`. |
 | `tools/eatrax_song.py` | Puts a song first in the game's EA Trax menu music as EALayer3, replacing TrackID 1 (edits `data_0.big` / `data_1.big` by appending; `--restore` puts the originals back). Crashes the game after matches, see the known issue. |
 | `tools/fa_sync.py` | fifaaddict.com price sync. |
-| `tools/fo4_season.py` | Adds FIFA Online 4's 26 LIVE and 25 LIVE cards (fifaaddict data, stats as +0) as two new seasons with FO4's season badges: `fetch`, `collect` + `import`, `build`, `install` (rewrites entries of `data_0.big` in place, as its size must not change, and appends to `Label.big`; `restore` puts both back). |
-| `tools/fa_faces.py` | Adds the player mini faces missing from the client's cache (fifaaddict serves the same 128x128 PNGs); `--crests` adds the missing club crests (most clubs have none in the cache, so the game shows a default one). Resumable, `--remove` undoes it. |
+| `tools/fo4_season.py` | Adds FIFA Online 4's 26 LIVE and 25 LIVE cards (fifaaddict data, stats as +0) as two new seasons with FO4's season badges: `fetch`, `collect` + `import`, `build`, `install` (rewrites entries of `data_0.big` in place, as its size must not change, and appends to `Label.big` and `Module.big`; `restore` puts them back). `hud` patches only `Module.big`, for a client installed before it: a match's player name boxes showed the '17 badge on every 2017 and FO4 card, now each card's own. |
+| `tools/fa_faces.py` | Adds the player mini faces missing from the client's cache (fifaaddict serves the same 128x128 PNGs); `--crests` adds the missing club crests (most clubs have none in the cache, so the game shows a default one); `--staffs` adds the staff pictures (the cache has 7 of the 71 the server hands out). Resumable, `--remove` undoes it. |
 | `tools/draft_icons.py` | Draws the draft packs' Shop icons (the client's cache has no draft pictures) into `assets/externalAssets/shop/`, which the server serves before the client's own images; `<icon> <tag> <picks>` draws one more, for a pack made on the admin page. Needs Pillow. |
 | `tools/re/` | Reverse-engineering helpers: `bigdir.py` (BIg4 archive tables), `refpack.py` (RefPack codec), `eadb.py` (EA "DB" database tables), `abc*.py` (AS3 bytecode parser / grep / schema miner), `gfxx.py` (UI SWFs), `memgrab.py`, `dbwin.py` (the client's debug output), `relay_emu.py` (PvP relay packet codec and test relay), `gamectl.ps1` (drive the client window for tests). |
 | `blaze.py`, `server.py`, `test_client.py`, `analyze_capture.py` | EA Blaze framing (Fire/TDF) and a loopback test server from the first phase of the project; the client turned out to use REST + the messenger instead. |

@@ -89,7 +89,9 @@ OWN_ASSETS = os.path.join(HERE, "assets")
 def asset_path(rel):
     """OWN_ASSETS/rel or ASSETS/rel, whichever exists, else None. A club crest the cache lacks
     in one size is its other size (issue #29: the cache has 190 small crests but 49 large ones,
-    and the cup screens ask for the large one: Napoli, Bayern, Man United showed none)."""
+    and the cup screens ask for the large one: Napoli, Bayern, Man United showed none). A Rekrut
+    pack tile (shop/staffpack_<stfid>) is that staff's picture: the client has no staff pack art."""
+    rel = re.sub(r"^externalAssets/shop/staffpack_(\d+)\.png$", r"externalAssets/staffs/\1.png", rel)
     other = re.sub(r"crests/(large|small)/", lambda m: f"crests/{'small' if m[1] == 'large' else 'large'}/", rel)
     for r in dict.fromkeys((rel, other)):
         for root in (OWN_ASSETS, ASSETS):
@@ -546,7 +548,12 @@ def match_side(raw, teamid, user=None, tactics=None):
     team = owned_team(raw)
     # team color for the user's side only: an AI side is a whole club (+4 for free)
     team["teamcolors"] = active_teamcolors(team) if user else []
-    team.update(teamid=teamid, summary=team_summary(team, teamid), kit=team_kit(teamid))
+    if user:  # my working staff: native boosts the players from these two lists
+        team.update(staff_match(staff_team(raw)))
+    # the pre-match screens' squad list (Attr) shows each rating without team color (card, grade,
+    # level at his slot), so do their FW / MF / DF bars (user: "Hitungan stats home tidak sesuai
+    # dengan skuad": 86 over a list of 79-83); the colors and staff still apply in the match
+    team.update(teamid=teamid, summary=team_summary(dict(team, teamcolors=[], staffroles=[]), teamid), kit=team_kit(teamid))
     for p in team["players"]:  # "Pilihan terbaik" in a Rank squad screen: SquadUtil's best-XI filter
         p["rankedcards"] = None  # reads rankedcards.red/.yellow unless it is null (missing = TypeError)
     if user:  # the pre-match squad screen's formation list (side.<mine>.team.formations; was empty, issue #16)
@@ -1531,7 +1538,7 @@ def owned_team(raw):
     kick = ([str(k) for k in sq.get("kickers") or []] + [""] * KICKERS)[:KICKERS]
     sq["kickers"] = [k if k in xi or not xi else xi[-KICKERS:][i % len(xi[-KICKERS:])] for i, k in enumerate(kick)]
     team["squad"] = sq
-    team.update({"staffs": [], "staffroles": [], "staffroleidx": 0, "maxstaff": 0, "staffsmc": {}})
+    team.update({"staffs": [], "staffroles": [], "staffroleidx": 1, "maxstaff": 0, "staffsmc": 0})  # mine: staff_team
     # PlayerListUtil.generateCaptainFromCoachInfo (Tim > Formasi) reads these at team level
     team.update({"captain": sq["captain"], "kickers": sq["kickers"], "presetidx": team.get("presetidx", 0)})
     team.setdefault("formations", [])
@@ -1543,8 +1550,10 @@ def xi_ratings(team):
     Enums.calcPosOvr at his slot, on stats + grade boost + level - 1 (fillPlayerStaticData) +
     his team color boosts (TeamColorController over team.teamcolors: the best club / nation /
     special color by getBoostStatPoint plus the best grade color; "ovr" = every stat, a boost
-    with a target only in that position group)."""
+    with a target only in that position group) + the boosts of the working staff of his group or
+    of every group (applyStaffBoostStat)."""
     card = {iid(p): p for p in team["players"]}
+    staff = [(s["position"], staff_stat(s)) for s in staff_working(team)]
     xi = [(str(s.get("id") or s["spid"]), s["pos"]) for s in team["squad"]["positions"]
           if s.get("pos", POS_SUB) < POS_SUB and str(s.get("id") or s["spid"]) in card]
     stats = card_stats([card[i]["spid"] for i, _ in xi])
@@ -1570,9 +1579,11 @@ def xi_ratings(team):
                 if point > best.get(kind, (0,))[0]:
                     best[kind] = (point, bs)
         add = dict.fromkeys(STAT_COLS, GRADE_BOOST[grade_of(p)] + player_levelinfo(p)["level"] - 1)
-        for b in (b for _, bs in best.values() for b in bs):
-            for k in (STAT_COLS if b["type"] == "ovr" else [b["type"]] if b["type"] in add else []):
-                add[k] += b["amount"]
+        boosts = [(b["type"], b["amount"]) for _, bs in best.values() for b in bs] + \
+                 [kn for kind, stat in staff if kind in STAFF_FIT or kind == grp.upper() for kn in stat.items()]
+        for kind, n in boosts:
+            for k in (STAT_COLS if kind == "ovr" else [kind] if kind in add else []):
+                add[k] += n
         w = ROLE_WEIGHTS[POS_ROLE[pos]]
         out[i] = sum(n * (stats[spid][k] + add[k]) for k, n in w.items()) // 100
     return out
@@ -1766,7 +1777,9 @@ def coach_me(st, slot):
     fetchCoach* methods read; values are a fresh account. startFreeRoam waits for this
     resource to validate before signing on."""
     coach = next(c for c in st["coaches"] if c["slot"] == slot)
-    team = owned_team(st["teams"].get(str(slot), {"squad": {"positions": [], "kickers": []}, "players": []}))
+    raw = st["teams"].get(str(slot), {"squad": {"positions": [], "kickers": []}, "players": []})
+    team = owned_team(raw)
+    team.update(staff_team(raw))  # Tim > Manajemen Staff; summary.ovr below counts the working ones
     teamid = coach["teamid"]
     team["formations"] = team_formations(teamid)
     team["teamcolors"] = active_teamcolors(team)
@@ -2512,7 +2525,7 @@ def ep_l2_end(query, body):
                     for e in leaders[k])
     base_ep = (LEAGUE_SIZE - rank + 1) * PLACE_EP
     season_exp = (LEAGUE_SIZE - rank + 1) * 100
-    cprev, ccur = gain_exp(my_coach(st), season_exp, coach_need, COACH_MAX_LEVEL)
+    cprev, ccur = coach_gain_exp(st, season_exp)
     out = {"result": True, "promotion": {"current": cur, "next": nxt},
            # setRewardRankExp: coach.prev/current/reward.total; setRewardRankEP: money.prev +
            # reward.detail.season; the sponsor/leader scenes read detail.sponsor/.leader
@@ -2656,7 +2669,7 @@ def match_reward(st, stats):
     r = match_reward_cfg()["result"]["win" if won else "draw" if drew else "loss"]
     ep, cexp, pexp = r["ep"], r["coach"], r["player"]
     reward = lambda n: {"total": n, "detail": {"base": n, "extra": 0}}
-    prev, cur = gain_exp(my_coach(st), cexp, coach_need, COACH_MAX_LEVEL)
+    prev, cur = coach_gain_exp(st, cexp)
     players = []
     for p, s in match_cards(st, stats):
         n = pexp + 20 * int(s.get("goals") or 0) + 10 * int(s.get("assists") or 0)
@@ -2742,6 +2755,7 @@ def ep_match_end(mid, query, body):
         match["result"] = {k: v for k, v in req.items() if k != "_method"}
         match["reward"] = match_reward(st, req)
         add_ep(st, match["reward"]["money"]["reward"]["total"])
+        staff_after_match(st)
         ladder_result(st, mid, req)
         score = lambda side: int((req.get(side) or {}).get("score") or 0)  # missions count it
         gf, ga = score(req.get("myTeam", "home")), score(req.get("opponentTeam", "away"))
@@ -4360,6 +4374,17 @@ PACKS.update({
     200005: ("2017 Draft Pick 5", {"season": 88, "all": True, "draft": 5, "icon": 9900088}),
     97093: ("World Legend Draft Pick 3", {"season": 93, "all": True, "draft": 3, "icon": 9900093}),
 })
+# the manager level rewards' packs FO3 had and the Shop has not (LEVEL_ITEMS): not sold in the Shop
+REWARD_PACKS = {
+    98000001: ("Top 100", {"top": 100, "icon": 82214007}), 98000002: ("Best 50", {"top": 50, "icon": 45007}),
+    98000003: ("Best 20", {"top": 20, "icon": 45012}), 98000004: ("Best 10", {"top": 10, "icon": 45011}),
+    98000005: ("Best 7", {"top": 7, "icon": 8334}), 98000006: ("DF 70+", {"pos": "DF", "ovr": 70, "icon": 8223510}),
+    98000007: ("MF 70+", {"pos": "MF", "ovr": 70, "icon": 8223509}), 98000008: ("FW 70+", {"pos": "FW", "ovr": 70, "icon": 8223508}),
+    98000009: ("Best 30 +5", {"top": 30, "grade": 5, "icon": 45097}), 98000010: ("Best 20 +5", {"top": 20, "grade": 5, "icon": 45012}),
+    98000011: ("Best 7 +5", {"top": 7, "grade": 5, "icon": 8334}), 98000012: ("'09 Best 10", {"top": 10, "season": 9, "icon": 45006}),
+    98000013: ("'07 Best 10", {"top": 10, "season": 7, "icon": 82214356}), 98000014: ("'06 Best 10", {"top": 10, "season": 6, "icon": 45004}),
+}
+PACKS.update(REWARD_PACKS)
 PACK_BUNCHES = (1, 10)  # buy 1 or 10 (10 packs at a fixed price 5% off: product_price)
 _PACK_POOL = {}
 
@@ -4664,7 +4689,8 @@ def shop_list(st):
     """GET /shop/list: every Shop tab's products (ShopController filters them by shopcategory);
     the ones hidden on the admin page and packs without a card (a season not installed) are left out."""
     on = lambda i: i not in SHOP_HIDDEN
-    return ([shop_entry(i) for i in PACKS if on(i) and pack_pool(i)] + [shop_entry(i, "USE") for i in ITEMS if on(i)]
+    return ([shop_entry(i) for i in PACKS if on(i) and i not in REWARD_PACKS and pack_pool(i)]
+            + [shop_entry(i, "USE") for i in ITEMS if on(i)]
             + [shop_entry(i, "PACKAGE") for i in PACKAGES if i not in CHAIN_STEPS and on(i)]
             + [shop_entry(i, "MILEAGE", MP_SHOPID + i) for i in MP_SHOP if on(i)]
             + [shop_entry(i, "MONTHLYPACK") for i in MONTHLY if on(i)]
@@ -5209,6 +5235,570 @@ def bag_apply(st, entry):
     coach["bag"].remove(entry)
 
 
+# Manager level rewards (issue #35: "When level up got nothing", FO3's table at
+# fifaaddict.com/fo3level_rewards.php): the EP and items of every level 2..100 go to the Bag
+# ("Hadiah naik level") as the manager reaches it. The post-match screen shows them in its level-up
+# popup (PostMatchRewardDefaultScene.showCoachLevelUpPopup: GET /coach/me/level/reward, a list of
+# item tiles; CoachLevelUpPopup) and the coming levels' behind its info icon (setLevelUpRewards:
+# GET /static/db/REWARDS/coachlevelup {"<level>": {coachlevel, items}}, CoachLevelUpRewardsPopup).
+# Items this server has no use for are left out (staff packs, Red Ball, locker room and reward boost
+# coupons, EXP transfer); the EXP capsules are the nearest of ours (LV5 1,000, LV7 5,000, LV10 the
+# LV.10 one, LV17+ Max). EP follows the Ekonomi tab's player prices, like the missions'.
+LEVEL_EP = (50_000,) * 6 + (60_000, 70_000, 80_000, 90_000, 110_000, 120_000, 130_000, 140_000, 150_000, 160_000,
+            170_000, 180_000, 200_000, 210_000, 220_000, 230_000, 240_000, 260_000, 270_000, 280_000, 300_000,
+            310_000, 330_000, 340_000, 360_000, 380_000, 390_000, 410_000, 430_000, 450_000, 470_000, 500_000,
+            520_000, 540_000, 560_000, 590_000, 610_000, 640_000, 670_000, 690_000, 720_000, 800_000, 900_000,
+            1_000_000, 1_100_000, 1_200_000, 1_300_000, 1_400_000, 990_000, 1_030_000, 1_070_000, 1_120_000,
+            *range(1_900_000, 4_000_000, 100_000), *range(4_900_000, 19_000_000, 1_000_000),
+            *range(20_900_000, 29_000_000, 2_000_000))  # levels 2..100
+_TOP300, _TOP100, _BEST50, _BEST30, _BEST20, _BEST10, _BEST7 = 82214007, 98000001, 98000002, 8223562, 98000003, 98000004, 98000005
+_DF70, _MF70, _FW70, _B30P5, _B20P5, _B7P5 = 98000006, 98000007, 98000008, 98000009, 98000010, 98000011
+_SIM, _TEAM, _ALL = 2001, 3001, 92000000
+LEVEL_ITEMS = {  # level: ((itemid, count), ...); the levels left out give EP only
+    2: ((_TOP300, 2), (_ALL, 5), (_SIM, 3)), 3: ((_TOP100, 2), (_ALL, 5)), 4: ((_TOP300, 2), (_SIM, 3)),
+    5: ((_TOP300, 2), (_TEAM, 1)), 6: ((_TOP300, 2), (_SIM, 3)), 7: ((_TOP300, 2), (6001, 2)), 8: ((_TOP300, 2),),
+    9: ((_TOP300, 2),), 10: ((_TOP100, 1), (_SIM, 20), (_TEAM, 1)), 11: ((_TOP100, 1), (6002, 2)),
+    12: ((_TOP100, 1), (28004, 1), (6004, 2)), 13: ((_TOP100, 1), (28002, 1)), 14: ((_TOP100, 1), (28003, 1)),
+    15: ((_TOP100, 1), (28001, 1)), 16: ((_TOP100, 1), (8223603, 1)), 17: ((_TOP100, 1), (8223603, 1)),
+    18: ((_TOP100, 2), (8223603, 2)), 41: ((_BEST30, 5), (_DF70, 3)), 43: ((_BEST30, 6), (_DF70, 3)),
+    44: ((_BEST30, 6), (_MF70, 3)), 45: ((_BEST10, 1), (_MF70, 3)), 46: ((_BEST10, 1), (_MF70, 3)),
+    47: ((_BEST10, 1), (_FW70, 3)), 48: ((_BEST10, 1), (_FW70, 3)), 49: ((_BEST10, 1), (_FW70, 3)),
+    51: ((_BEST10, 1),), 52: ((_BEST10, 2),), 53: ((_BEST10, 2),), 54: ((_BEST10, 2),), 55: ((_BEST10, 2),),
+    60: ((_BEST10, 2), (98000012, 3), (_BEST50, 5)), 61: ((_BEST10, 2), (98000013, 3), (_BEST50, 6)),
+    62: ((_BEST10, 2), (_BEST50, 8)), 63: ((_BEST7, 2), (45004, 2)), 64: ((_BEST7, 2), (45004, 2)),
+    65: ((_BEST7, 2), (45004, 4)), 66: ((_BEST7, 2), (45004, 4), (_SIM, 20)), 67: ((_BEST7, 2), (45004, 5)),
+    68: ((_BEST7, 2), (98000014, 1), (45004, 5)), 69: ((_BEST7, 2), (_BEST50, 4)), 70: ((_BEST7, 2), (_BEST50, 4)),
+    71: ((_BEST7, 2), (_BEST50, 4)), 72: ((_BEST7, 2), (_BEST50, 5)), 73: ((_BEST7, 2), (_BEST30, 5)),
+    74: ((_BEST7, 2), (_BEST30, 5)), 75: ((_BEST7, 2), (_BEST30, 5)), 76: ((_BEST7, 2), (_BEST30, 6)),
+    77: ((_BEST7, 2), (_BEST30, 6), (_SIM, 20)), 78: ((_BEST7, 2), (_BEST30, 7)), 79: ((_B30P5, 2), (_BEST50, 1)),
+    80: ((_B30P5, 2), (_BEST50, 2)), **{lv: ((_B20P5, 2),) for lv in range(81, 100)},
+    90: ((_B20P5, 2), (6003, 1)), 93: ((_B20P5, 2), (6003, 1)), 100: ((_B7P5, 1), (6003, 1)),
+}
+
+
+def level_reward_items(level):
+    """[{itemid, count}] of reaching manager level `level`: its EP (x the player price setting),
+    then its items (one the admin page removed is skipped)."""
+    ep = int(LEVEL_EP[level - 2] * ECONOMY["players"]) if 2 <= level <= len(LEVEL_EP) + 1 else 0
+    return ([{"itemid": EP_ITEM, "count": ep}] if ep else []) + \
+           [{"itemid": i, "count": n} for i, n in LEVEL_ITEMS.get(level, ()) if i in PACKS or i in ITEMS]
+
+
+def coach_gain_exp(st, n):
+    """gain_exp for my manager: each level he reaches puts its reward in the Bag and in the
+    level-up popup's list (coach["levelreward"])."""
+    coach = my_coach(st)
+    prev, cur = gain_exp(coach, n, coach_need, COACH_MAX_LEVEL)
+    for level in range(prev["level"] + 1, cur["level"] + 1):
+        items = level_reward_items(level)
+        if items:
+            bag_add(st, f"Hadiah naik level Lv.{level}", items, msg=f"Level manajer naik ke {level}.")
+            coach.setdefault("levelreward", []).extend(items)
+    return prev, cur
+
+
+def ep_level_reward(query, body):
+    """GET /coach/me/level/reward: what the last level-ups gave (summed by item), once."""
+    st = _state()
+    got = my_coach(st).pop("levelreward", [])
+    if got:
+        _save(st)
+    total = {}
+    for it in got:
+        total[it["itemid"]] = total.get(it["itemid"], 0) + it["count"]
+    return _json([{"itemid": i, "count": n, "staticdata": item_def(i)} for i, n in total.items()])
+
+
+def ep_level_reward_table(query, body):
+    """GET /static/db/REWARDS/coachlevelup: every level's reward, for the coming levels' list."""
+    return _json({str(lv): {"coachlevel": lv, "items": [{**it, "staticdata": item_def(it["itemid"])}
+                                                        for it in level_reward_items(lv)]}
+                  for lv in range(2, COACH_MAX_LEVEL + 1)})
+
+
+# --------------------------------------------------------------------------- #
+# Staff (user: "Aktifkan kembali staff", fifaaddict.com/fo3staff.php): Tim > Manajemen Staff and its
+# tabs Staff yang dimiliki (the role frames), Latihan (upgrade), Rekrut (packs) and Pembinaan
+# (study). CoachProxy reads it all from /coach/me team (staff_team) once the account has
+# features.teammanagement.staffmanagement, and /static/db/STAFF (staff_static) once at boot. A
+# staff in a role frame with contract left (life, in matches) boosts the starters of its position
+# group, a MEDICAL, PREMIUM or FRONT one every starter: the client adds it to its squad lists
+# (TeamColorController.applyStaffBoostStat; xi_ratings does the same for summary.ovr) and native
+# recomputes it in a match from side.team.staffroles + staffs (0x93e230, which checks neither
+# contract nor status: match_side sends the working ones only). Names and the pools of boost
+# 1 / 2 / 3 are fifaaddict's (its ids 10xx..40xx and 9117..9122 are the client's 11xx..41xx and
+# 9500..9505, the set the client cache has pictures of). Garena's grades, EXP, fees and contracts
+# are lost: the numbers below are the server's own. "Boost mental status" (condition) is left out:
+# the client leaves it to the server, and native's scale for a player's condition is unknown.
+STAFF_FIT = ("MEDICAL", "PREMIUM", "FRONT")  # boost every starter (the others: their own group)
+_SB3 = {"FW": "ballcontrol reactions finishing sprintspeed strength positioning acceleration",
+        "MF": "dribbling shortpassing strength sprintspeed reactions acceleration positioning",
+        "DF": "strength positioning reactions sprintspeed acceleration", "GK": "gkdiving gkpositioning gkreflexes",
+        "FRONT": "jumping finishing strength agility acceleration"}
+_SHEAD = (  # 9021..9033 (fifaaddict's made-up-name twins of 9001..9013): boost 1, boost 2 pool
+    ("strength", "sprintspeed penalties finishing shotpower freekickaccuracy"),
+    ("sprintspeed", "longpassing shortpassing crossing agility acceleration"),
+    ("sprintspeed", "dribbling ballcontrol agility curve acceleration"),
+    ("longpassing", "headingaccuracy jumping positioning longshots vision"),
+    ("reactions", "positioning aggression jumping interceptions curve"),
+    ("strength", "slidingtackle interceptions vision positioning longpassing"),
+    ("finishing", "positioning volleys shotpower freekickaccuracy agility"),
+    ("aggression", "standingtackle longpassing jumping headingaccuracy ballcontrol"),
+    ("standingtackle", "slidingtackle positioning vision jumping headingaccuracy"),
+    ("headingaccuracy", "positioning volleys jumping agility reactions"),
+    ("ballcontrol", "shortpassing longpassing vision dribbling freekickaccuracy"),
+    ("longshots", "crossing marking vision interceptions longpassing"),
+    ("shotpower", "standingtackle aggression interceptions crossing longpassing"))
+_SFRONT = (  # 9500..9505 (fifaaddict 9117..9122): boost 1 pool, boost 2 pool
+    ("shotpower finishing jumping volleys aggression strength positioning reactions",
+     "longshots volleys vision shotpower aggression finishing dribbling ballcontrol positioning reactions stamina balance curve"),
+    ("marking interceptions reactions sprintspeed acceleration slidingtackle standingtackle dribbling",
+     "longpassing shortpassing aggression marking crossing interceptions dribbling ballcontrol reactions stamina balance slidingtackle standingtackle"),
+    ("longshots agility ballcontrol reactions stamina sprintspeed acceleration vision",
+     "longpassing longshots vision shortpassing aggression finishing dribbling ballcontrol positioning reactions stamina balance agility"),
+    ("ballcontrol balance agility interceptions reactions marking slidingtackle standingtackle",
+     "jumping aggression strength positioning headingaccuracy longpassing interceptions vision shortpassing dribbling ballcontrol agility"),
+    ("finishing dribbling ballcontrol positioning reactions sprintspeed strength acceleration",
+     "longshots jumping volleys vision headingaccuracy shortpassing aggression shotpower dribbling ballcontrol positioning stamina strength"),
+    ("longpassing vision shortpassing positioning balance dribbling ballcontrol agility",
+     "longpassing longshots vision shortpassing aggression reactions dribbling ballcontrol positioning stamina balance agility"))
+
+
+def _staff_kind(pos, first, b1s, b2s, b3, expect=1):
+    """{stfid: (position, (boost 1, 2, 3 pools), gradeexpect id)} of the staff first, first + 1, ...
+    (b1s: each one's boost 1 pool; b2s: (pool, how many staff in a row have it), ...)."""
+    b2 = [p.split() for p, n in b2s for _ in range(n)]
+    return {first + i: (pos, (tuple(b.split()), tuple(b2[i]), tuple(b3.split())), expect) for i, b in enumerate(b1s)}
+
+
+# stfid: (position, (boost 1, 2, 3 pools), gradeexpect id); a helper (Staff pembantu, only ever an
+# upgrade material) has no pools
+STAFF_CATALOGUE = {
+    **_staff_kind("FW", 1101, ("dribbling", "dribbling", "freekickaccuracy", "shotpower", "crossing") * 2,
+                  (("longpassing longshots jumping volleys vision", 5), ("shortpassing agility headingaccuracy aggression", 5)), _SB3["FW"]),
+    **_staff_kind("MF", 2101, ("longpassing", "standingtackle", "ballcontrol", "longshots", "aggression", "freekickaccuracy") * 2,
+                  (("headingaccuracy finishing marking vision", 6), ("shotpower crossing interceptions", 6)), _SB3["MF"]),
+    **_staff_kind("DF", 3101, ("marking", "standingtackle", "slidingtackle", "interceptions", "jumping", "shortpassing",
+                               "headingaccuracy") * 2,
+                  (("aggression longpassing crossing", 7), ("dribbling ballcontrol vision", 7)), _SB3["DF"]),
+    **_staff_kind("GK", 4101, ("gkhandling", "gkkicking") * 2, (("jumping longpassing", 2), ("positioning reactions", 2)), _SB3["GK"]),
+    **_staff_kind("MEDICAL", 5001, ("stamina", "balance"), (("stamina balance", 2),), "stamina balance"),
+    **_staff_kind("MEDICAL", 9507, ("sprintspeed", "jumping", "dribbling", "agility", "reactions"), (("stamina balance", 5),),
+                  "stamina balance ovr", expect=2),
+    **_staff_kind("PREMIUM", 9021, [b for b, _ in _SHEAD], [(p, 1) for _, p in _SHEAD], "ovr", expect=2),
+    **_staff_kind("FRONT", 9500, [b for b, _ in _SFRONT], [(p, 1) for _, p in _SFRONT], _SB3["FRONT"]),
+    **{4901 + i: (pos, None, 1) for i, pos in enumerate(("FW", "MF", "DF", "GK", "MEDICAL"))},
+}
+STAFF_SLOTS = ("FW", "MF", "DF", "PREMIUM", "GK", "MEDICAL", "FRONT")  # role frames role00..06 (role03: the centre), all open
+STAFF_MAX_GRADE, STAFF_LIFE, STAFF_MAX = 10, 50, 30  # half stars; contract matches (config.max_staff_life); staff a manager keeps
+STAFF_GRADEUP = tuple(100 * g for g in range(1, STAFF_MAX_GRADE))  # EXP from grade g to g + 1 (exptable gradeupto)
+# what reaching grade g adds to boosts 1 / 2 / 3 (gradeexpect): boost 1 +1 a grade (1 at 0.5 star,
+# 10 at 5 stars, as the one figure found: a fitness coach's stamina +9 at 4.5 and +10 at 5 stars),
+# boost 2 from 1.5 stars (+1 every other grade, 4), boost 3 from 3 stars (3); an OVR boost 3 (head
+# coaches, the special fitness coaches; OVR is every stat) +1 at 3 and at 5 stars only
+STAFF_EXPECT = {1: {g: (1, g % 2, int(g >= 6 and g % 2 == 0)) for g in range(2, STAFF_MAX_GRADE + 1)},
+                2: {g: (1, g % 2, int(g in (6, 10))) for g in range(2, STAFF_MAX_GRADE + 1)}}
+STAFF_MATERIAL_EXP = (30, 50, 80, 120)  # x the material's grade: other position, same, a helper of another, of the same
+STAFF_ENHANCE_EP = 2_000  # x the material's grade (enhancefee)
+STAFF_JACKPOT = (0.1, 0.5)  # chance of Latihan's bonus EXP, and its size (x the materials' EXP)
+STAFF_CONTRACT_EP = 100  # x grade, per match a recontract adds
+_ALL5, _ALL7 = ("FW", "MF", "DF", "GK", "MEDICAL"), ("FW", "MF", "DF", "GK", "MEDICAL", "FRONT", "PREMIUM")
+# Rekrut: recruitid: (STAFFPACK_NAME_n, STAFFPACK_DESC_n, EP, positions, grades, helper chance, icon:
+# a staff picture of the cache, the client has no pack art). The client's names and descriptions
+# do not pair by number (DESC_2 is the FW pack's text, DESC_5 the ALL one's); 8 and 10 are test data.
+STAFF_PACKS = {
+    2: (2, 5, 50_000, _ALL5, (2, 5), 0.2, 2103), 3: (3, 2, 50_000, ("FW",), (2, 5), 0.2, 1105),
+    4: (4, 3, 50_000, ("MF",), (2, 5), 0.2, 2103), 5: (5, 4, 50_000, ("DF",), (2, 5), 0.2, 3108),
+    6: (6, 6, 50_000, ("GK",), (2, 5), 0.2, 4103), 7: (7, 7, 150_000, _ALL5, (3, 6), 0.2, 3108),
+    13: (13, 13, 300_000, ("MEDICAL",), (2, 6), 0, 9507), 9: (9, 9, 600_000, _ALL7, (2, 10), 0.2, 9027),
+    11: (11, 11, 1_500_000, ("FRONT",), (6, 10), 0, 9501),
+    12: (12, 12, 3_000_000, ("MEDICAL", "FRONT", "PREMIUM"), (6, 10), 0, 9027)}
+# the free row: ALL staff pack (0.5~2.0 star) once a day for logging in, once for 3 matches played
+STAFF_FREE_ID, STAFF_FREE_MATCHES = 1, 3
+STAFF_FREE_PACK = (1, 1, 0, _ALL5, (1, 4), 0.2, 1105)
+# Pembinaan (STAFF_STUDY_LOCAINFO01..06): lid: (boost it changes, None = Europe's random +1..3 on one,
+# positions, lowest grade, EP, matches). Each repeat at a place doubles its fee, up to the max.
+STAFF_STUDY = {"1": (0, ("FW", "DF"), 1, 20_000, 5), "2": (0, ("MF",), 1, 20_000, 5),
+               "3": (1, ("MF", "DF"), 3, 30_000, 5), "4": (1, ("FW",), 3, 30_000, 5),
+               "5": (2, ("FW", "MF", "DF", "GK", "MEDICAL", "FRONT"), 6, 50_000, 5), "6": (None, _ALL7, 1, 50_000, 10)}
+STAFF_STUDY_FEE_X, STAFF_STUDY_FEE_MAX = 2, 1_000_000
+
+
+def staff_ep(n):
+    """EP of a staff price, on the Ekonomi tab's player price setting."""
+    return nice_price(n * ECONOMY["players"])
+
+
+def staff_helper(s):
+    return STAFF_CATALOGUE[s["stfid"]][1] is None
+
+
+def staff_grow(s, g, rng=random):
+    """s reaches grade g: its boosts grow by gradeexpect, and a new one takes a stat of its pool."""
+    s["grade"] = g
+    pos, pools, expect = STAFF_CATALOGUE[s["stfid"]]
+    for k, n in enumerate(STAFF_EXPECT[expect][g] if pools else ()):
+        if n and k < len(s["effect"]):
+            s["effect"][k]["amount"] += n
+        elif n:
+            s["effect"].append({"effect": rng.choice(pools[k]), "amount": n})
+
+
+def staff_make(sid, grade, rng=random):
+    """A new staff sid of grade `grade`, its boosts grown from 0.5 star."""
+    s = {"_id": new_iid(), "stfid": sid, "grade": 1, "exp": 0, "life": STAFF_LIFE, "status": None,
+         "effect": [{"effect": rng.choice(STAFF_CATALOGUE[sid][1][0]), "amount": 1}] if STAFF_CATALOGUE[sid][1] else []}
+    for g in range(2, grade + 1):
+        staff_grow(s, g, rng)
+    return s
+
+
+def staff_new(pack, rng=random):
+    """A staff out of a Rekrut pack: one of its positions, a staff of it (or that position's helper),
+    a grade of its range (each half star up 0.6 times as likely)."""
+    positions, (lo, hi), helper = pack[3], pack[4], pack[5]
+    pos = rng.choice(positions)
+    ids = [i for i, c in STAFF_CATALOGUE.items() if c[0] == pos and c[1]]
+    helpers = [i for i, c in STAFF_CATALOGUE.items() if c[0] == pos and not c[1]]
+    sid = helpers[0] if helpers and rng.random() < helper else rng.choice(ids)
+    return staff_make(sid, rng.choices(range(lo, hi + 1), [0.6 ** (g - lo) for g in range(lo, hi + 1)])[0], rng)
+
+
+def staff_gain(s, n, rng=random):
+    """n EXP into s (Latihan): each grade it reaches grows its boosts; at 5 stars EXP stays 0."""
+    s["exp"] += n
+    while s["grade"] < STAFF_MAX_GRADE and s["exp"] >= STAFF_GRADEUP[s["grade"] - 1]:
+        s["exp"] -= STAFF_GRADEUP[s["grade"] - 1]
+        staff_grow(s, s["grade"] + 1, rng)
+    if s["grade"] >= STAFF_MAX_GRADE:
+        s["exp"] = 0
+
+
+def staff_out(s):
+    """A staff as coach.team.staffs holds it. Never `id`: the client names it (commonname, a
+    language key) only without one; effect must be an array or the whole coach feed stops."""
+    pos, pools, _ = STAFF_CATALOGUE[s["stfid"]]
+    g = s["grade"]
+    return {"_id": s["_id"], "stfid": s["stfid"], "commonname": f"STAFF_NAME_{s['stfid']}", "position": pos, "grade": g,
+            "exp": s["exp"], "gradeupto": STAFF_GRADEUP[g - 1] if g < STAFF_MAX_GRADE else 0, "life": s["life"],
+            "status": s.get("status"), "material": not pools, "effect": [dict(e) for e in s["effect"]],
+            **({"study": copy.deepcopy(s["study"])} if s.get("study") else {})}
+
+
+def staff_slots(raw):
+    """The staff _id in each role frame (None: empty)."""
+    return (list(raw.get("staffslots") or []) + [None] * len(STAFF_SLOTS))[:len(STAFF_SLOTS)]
+
+
+def staff_team(raw):
+    """The staff fields of my coach.team: staffroles = one entry per role frame of role set 1
+    (staffroleidx; nothing in the client switches sets), staffsmc = my matches played (a study is
+    done matchcount of them after its mcdate)."""
+    return {"staffs": [staff_out(s) for s in raw.get("staffs") or []], "staffroleidx": 1, "maxstaff": STAFF_MAX,
+            "staffroles": [{"roleidx": 1, "slotidx": i + 1, "open": True, "staffid": sid}
+                           for i, sid in enumerate(staff_slots(raw))],
+            "staffsmc": int(raw.get("staffsmc") or 0)}
+
+
+def staff_working(team):
+    """The staffs (staff_out) of a team's role frames that work: appointed, with contract left."""
+    by, out = {s["_id"]: s for s in team.get("staffs") or []}, {}
+    for r in team.get("staffroles") or []:
+        s = by.get(r.get("staffid"))
+        if s and s.get("status") == "appointed" and s.get("life", 0) > 0:
+            out[s["_id"]] = s
+    return list(out.values())
+
+
+def staff_stat(s):
+    """{stat: boost} of a staff (CoachProxy.staffStatCheck)."""
+    out = {}
+    for e in s["effect"]:
+        out[e["effect"]] = out.get(e["effect"], 0) + e["amount"]
+    return out
+
+
+def staff_match(team):
+    """side.team staffroles + staffs of my match side: the working staff only, each with its stat;
+    both lists the same length (native walks staffroles up to len(staffs))."""
+    work = staff_working(team)
+    return {"staffroles": [{"roleidx": 1, "slotidx": i + 1, "open": True, "staffid": s["_id"]} for i, s in enumerate(work)],
+            "staffs": [dict(s, stat=staff_stat(s)) for s in work]}
+
+
+def staff_static():
+    """/static/db/STAFF, cached by the client from boot. Without `study` CoachProxy skips config
+    (maxstaff stays 0); stafflist must hold every stfid once a staff exists (else the coach feed
+    throws); Latihan predicts from exptable / materialexp / enhancefee / gradeexpect (staff_gain and
+    ep_staff_enhance agree); a study place's location must be a frame of the Pembinaan map."""
+    grades = range(1, STAFF_MAX_GRADE + 1)
+    return {"config": {"max_staff_open_count": 3, "max_staff_life": STAFF_LIFE, "default_staff_count": STAFF_MAX,
+                       "max_staff_studyfee": staff_ep(STAFF_STUDY_FEE_MAX), "multiply_study_fee": STAFF_STUDY_FEE_X},
+            "slots": {"1": [{"slot": i + 1, "position": p, "enabled": True, "lv": 0} for i, p in enumerate(STAFF_SLOTS)]},
+            "stafflist": {str(i): {"material": not c[1], "enablemax": False, "expectid": c[2]} for i, c in STAFF_CATALOGUE.items()},
+            "exptable": {str(g): {"totalexp": sum(STAFF_GRADEUP[:g - 1]), "gradeupto": (STAFF_GRADEUP + (0,))[g - 1]} for g in grades},
+            "materialexp": {str(g): [n * g for n in STAFF_MATERIAL_EXP] for g in grades},
+            "enhancefee": {str(g): {"fee": staff_ep(STAFF_ENHANCE_EP * g)} for g in grades},
+            "gradeexpect": {str(e): {str(g): {"effects": list(v)} for g, v in t.items()} for e, t in STAFF_EXPECT.items()},
+            "study": {lid: {"location": f"LOCATION_NAME_0{lid}", "grade": g, "fee": staff_ep(fee), "matchcount": n,
+                            "position": list(pos), "boosttype": "enhance" if k is None else "change",
+                            "effectstring": f"STAFF_STUDY_EXPECTATION0{4 if k is None else k + 1}"}
+                      for lid, (k, pos, g, fee, n) in STAFF_STUDY.items()}}
+
+
+def my_staff(st):
+    """(my raw team, its staff list)."""
+    team = st["teams"][str(_default_slot(st))]
+    return team, team.setdefault("staffs", [])
+
+
+def staff_find(staffs, sid):
+    return next((s for s in staffs if s["_id"] == sid), None)
+
+
+def staff_reply(st, **extra):
+    """A staff change: the screens redraw from the /coach/me resource only."""
+    return _json({"result": True, **extra, "resources": coach_me_resources(st, _default_slot(st))})
+
+
+def staff_fail(reason):
+    """reason is a language key the screens show (never DEFCON_ENTIRE_USER: a connection error)."""
+    return _json({"result": False, "reason": reason})
+
+
+def staff_free_state(team, now=None):
+    """Today's free Rekrut pack {day, matches, claimed}, new at WIB midnight ("Reset setiap hari 0")."""
+    if (team.get("staffrecruit") or {}).get("day") != today_wib(now):
+        team["staffrecruit"] = {"day": today_wib(now), "matches": 0, "claimed": []}
+    return team["staffrecruit"]
+
+
+def ep_staff_recruit_list(query, body):
+    """GET /staff/recruit: a top-level array; "free" rows show one line per eventlist key (an object:
+    STAFF_FREEPACK_<KEY>_*), whose enable is the button."""
+    st = _state()
+    team = st["teams"].get(str(_default_slot(st)))
+    if team is None:
+        return _json([])
+    f = staff_free_state(team)
+    row = lambda rid, p, kind: {"recruitid": rid, "recruittype": kind, "icon": f"staffpack_{p[6]}",
+                                "staffpack_name": f"STAFFPACK_NAME_{p[0]}", "staffpack_desc": f"STAFFPACK_DESC_{p[1]}"}
+    n = min(f["matches"], STAFF_FREE_MATCHES)
+    return _json([dict(row(rid, p, "normal"), ep=staff_ep(p[2]), item=0) for rid, p in STAFF_PACKS.items()] + [
+        dict(row(STAFF_FREE_ID, STAFF_FREE_PACK, "free"), eventlist={
+            "login": {"count": 1, "targetcount": 1, "enable": "login" not in f["claimed"]},
+            "pcmatch": {"count": n, "targetcount": STAFF_FREE_MATCHES,
+                        "enable": n >= STAFF_FREE_MATCHES and "pcmatch" not in f["claimed"]}})])
+
+
+def ep_staff_recruit(rid, query, body):
+    """POST /staff/recruit/<recruitid> {feetype: "ep"} or {eventtype: login | pcmatch}: one staff
+    (the popup asks once per card), appended last: the popup shows staffs[length - 1] when the
+    /coach/me resource comes, and stalls with no way out if a "result: true" brings none."""
+    req = json.loads(body or b"{}")
+    st = _state(); team, staffs = my_staff(st)
+    if len(staffs) >= STAFF_MAX:
+        return staff_fail("ITEM_INVENTORY_ERROR_STAFF_FULL_INFO")
+    if int(rid) == STAFF_FREE_ID:
+        f, k = staff_free_state(team), req.get("eventtype")
+        if k not in ("login", "pcmatch") or k in f["claimed"] or (k == "pcmatch" and f["matches"] < STAFF_FREE_MATCHES):
+            return staff_fail("STAFF_GET_FREEPACKCOMPLETE")
+        f["claimed"].append(k)
+        pack = STAFF_FREE_PACK
+    else:
+        pack = STAFF_PACKS.get(int(rid))
+        if pack is None:
+            return staff_fail("ITEM_USE_ERROR")
+        if my_coach(st).get("ep", START_EP) < staff_ep(pack[2]):
+            return staff_fail("STAFF_NOT_ENOUGH_GAMEMONEY")
+        add_ep(st, -staff_ep(pack[2]))
+    staffs.append(staff_new(pack))
+    _save(st)
+    return staff_reply(st)
+
+
+def ep_staff_appoint(sid, query, body):
+    """PUT /staff/appoint/<_id> {slot}: into role frame slot (1-based) of its position, taking the
+    place of the one there; DELETE: out of its frame. The frames redraw from the resource only."""
+    req = json.loads(body or b"{}")
+    st = _state(); team, staffs = my_staff(st)
+    s, slots = staff_find(staffs, sid), staff_slots(team)
+    if s is None:
+        return staff_fail("ITEM_USE_ERROR")
+    if req.get("_method") == "DELETE":
+        team["staffslots"], s["status"] = [None if x == sid else x for x in slots], None
+        _save(st)
+        return staff_reply(st, staffid=sid)
+    i = int(req.get("slot") or 0) - 1
+    if not 0 <= i < len(STAFF_SLOTS) or staff_helper(s) or s.get("status") == "studying" \
+            or STAFF_CATALOGUE[s["stfid"]][0] != STAFF_SLOTS[i]:
+        return staff_fail("ITEM_USE_ERROR")
+    prev = staff_find(staffs, slots[i]) if slots[i] != sid else None
+    slots = [None if x == sid else x for x in slots]
+    if prev:
+        prev["status"] = None
+    slots[i], s["status"], team["staffslots"] = sid, "appointed", slots
+    _save(st)
+    who = lambda x: {"_id": x["_id"], "id": x["_id"], "status": x["status"]}
+    return staff_reply(st, appointed={"appointedstaff": who(s), "prevstaff": prev and who(prev)})
+
+
+def ep_staff_fire(sid, query, body):
+    """DELETE /staff/<_id>: Hapus (offered for a staff with nothing to do only)."""
+    req = json.loads(body or b"{}")
+    st = _state(); _, staffs = my_staff(st)
+    s = staff_find(staffs, sid)
+    if req.get("_method") != "DELETE" or s is None or s.get("status"):
+        return staff_fail("ITEM_USE_ERROR")
+    staffs.remove(s)
+    _save(st)
+    return staff_reply(st)
+
+
+def staff_contract_fee(s):
+    return staff_ep(STAFF_CONTRACT_EP * s["grade"] * (STAFF_LIFE - s["life"]))
+
+
+def ep_staff_recontract_preview(query, body):
+    """PUT /staff/recontract/preview {staffs: [_id]}: each one's fee back to a full contract (the
+    popup reads boost without a guard; no VIP or PC discount here). Also after Rank and quick
+    matches, for staff with 5 matches or fewer left."""
+    ids = set(json.loads(body or b"{}").get("staffs") or [])
+    rows = [{"id": s["_id"], "base": staff_contract_fee(s), "availablematchcount": STAFF_LIFE - s["life"],
+             "contractfee": staff_contract_fee(s)} for s in my_staff(_state())[1] if s["_id"] in ids]
+    return _json({"result": True, "total": sum(r["contractfee"] for r in rows), "staffs": rows, "boostfactor": 0,
+                  "boost": {"igr": 0, "vip": 0, "discountlimit": 0}})
+
+
+def ep_staff_recontract(query, body):
+    """PUT /staff/recontract {staffs: [_id]}: back to STAFF_LIFE matches, for their fees."""
+    ids = set(json.loads(body or b"{}").get("staffs") or [])
+    st = _state(); _, staffs = my_staff(st)
+    picked = [s for s in staffs if s["_id"] in ids and s["life"] < STAFF_LIFE]
+    fee = sum(staff_contract_fee(s) for s in picked)
+    if not picked:
+        return staff_fail("PLAYER_RECONTRACT_ERROR_POPUP_TITLE")
+    if my_coach(st).get("ep", START_EP) < fee:
+        return staff_fail("STAFF_NOT_ENOUGH_GAMEMONEY")
+    add_ep(st, -fee)
+    for s in picked:
+        s["life"] = STAFF_LIFE
+    _save(st)
+    return staff_reply(st)
+
+
+def staff_material_exp(target, m):
+    """EXP material m gives target (the Latihan popup's sum: materialexp[grade][same position + 2 x helper])."""
+    same = STAFF_CATALOGUE[m["stfid"]][0] == STAFF_CATALOGUE[target["stfid"]][0]
+    return STAFF_MATERIAL_EXP[int(same) + 2 * int(staff_helper(m))] * m["grade"]
+
+
+def ep_staff_enhance(tid, query, body):
+    """PUT /staff/enhance/<target _id> {materials: [_id] x 1..10}: the materials (free staff, gone
+    after) go into the target's EXP for enhancefee EP each. jackpot: bonus EXP on top of what the
+    popup predicted (it plays its bonus scene, then shows the staff as the resource has it)."""
+    req = json.loads(body or b"{}")
+    st = _state(); _, staffs = my_staff(st)
+    t = staff_find(staffs, tid)
+    mats = [staff_find(staffs, m) for m in dict.fromkeys(req.get("materials") or [])]
+    if t is None or staff_helper(t) or t.get("status") == "studying" or t["grade"] >= STAFF_MAX_GRADE \
+            or not 1 <= len(mats) <= 10 or any(m is None or m is t or m.get("status") for m in mats):
+        return staff_fail("STAFF_TRAINING_ERROR_POPUP_INFO")
+    fee = sum(staff_ep(STAFF_ENHANCE_EP * m["grade"]) for m in mats)
+    if my_coach(st).get("ep", START_EP) < fee:
+        return staff_fail("STAFF_NOT_ENOUGH_GAMEMONEY")
+    gain = sum(staff_material_exp(t, m) for m in mats)
+    jackpot = random.random() < STAFF_JACKPOT[0]
+    staff_gain(t, gain + (int(gain * STAFF_JACKPOT[1]) if jackpot else 0))
+    for m in mats:
+        staffs.remove(m)
+    add_ep(st, -fee)
+    _save(st)
+    return staff_reply(st, jackpot=jackpot)
+
+
+def staff_study_pool(s, k):
+    """What a study may turn boost k of s into: that boost's stats over the staff of its position
+    (OVR only for one whose own pool has it), less the one it has."""
+    pos, pools, _ = STAFF_CATALOGUE[s["stfid"]]
+    out = {x for c in STAFF_CATALOGUE.values() if c[0] == pos and c[1] for x in c[1][k]}
+    out -= {s["effect"][k]["effect"]} | ({"ovr"} - set(pools[k]))
+    return sorted(out)
+
+
+def staff_study_fee(s, lid):
+    """The client's sum: min(max_staff_studyfee, fee x multiply_study_fee ^ studies of s at lid)."""
+    n = len(((s.get("study") or {}).get("history") or {}).get(lid, []))
+    return min(staff_ep(STAFF_STUDY_FEE_MAX), staff_ep(STAFF_STUDY[lid][3]) * STAFF_STUDY_FEE_X ** n)
+
+
+def ep_staff_study(lid, query, body):
+    """PUT /staff/study/<lid> {staffs: [_id]}: a free staff goes to place lid (one at a time) for its
+    matchcount matches; the result is rolled now (the tab reads study.boost before the return)."""
+    req = json.loads(body or b"{}")
+    st = _state(); team, staffs = my_staff(st)
+    s, place = staff_find(staffs, (req.get("staffs") or [None])[0]), STAFF_STUDY.get(lid)
+    if s is None or place is None or s.get("status") or staff_helper(s) or s["grade"] < place[2] \
+            or STAFF_CATALOGUE[s["stfid"]][0] not in place[1] \
+            or any(x.get("status") == "studying" and x["study"]["lid"] == lid for x in staffs):
+        return staff_fail("STAFF_STUDY_DISABLE")
+    k = place[0]
+    if k is None:
+        k = random.randrange(len(s["effect"]))
+        boost = {"boosttype": "enhance", "effectidx": k, "inc": random.choices((1, 2, 3), (6, 3, 1))[0]}
+    else:
+        pool = staff_study_pool(s, k) if k < len(s["effect"]) else []
+        if not pool:
+            return staff_fail("STAFF_STUDY_DISABLE")
+        boost = {"boosttype": "change", "effectidx": k, "effect": random.choice(pool)}
+    fee = staff_study_fee(s, lid)
+    if my_coach(st).get("ep", START_EP) < fee:
+        return staff_fail("STAFF_EP_NOTENOUGH")
+    add_ep(st, -fee)
+    study = s.setdefault("study", {})
+    # prevboost: the boost last applied (green while away); never missing for a staff away
+    study.update(lid=lid, mcdate=int(team.get("staffsmc") or 0), prevboost=study.get("boost") or {"effectidx": -1}, boost=boost)
+    study.setdefault("history", {}).setdefault(lid, []).append(w3c(time.time()))
+    s["status"] = "studying"
+    _save(st)
+    return staff_reply(st)
+
+
+def ep_staff_study_complete(lid, query, body):
+    """PUT /staff/study/<lid>/complete: back from place lid once its matches are played, the boost
+    applied (Europe's + replaces the last one Europe gave: "boost sebelumnya akan di reset"). The
+    return popup reads staffs as {_id: staff}."""
+    st = _state(); team, staffs = my_staff(st)
+    s = next((x for x in staffs if x.get("status") == "studying" and x["study"]["lid"] == lid), None)
+    if s is None or int(team.get("staffsmc") or 0) - s["study"]["mcdate"] < STAFF_STUDY[lid][4]:
+        return staff_fail("STAFF_STUDY_DISABLE")
+    study = s["study"]; b = study["boost"]
+    if b["boosttype"] == "change":
+        s["effect"][b["effectidx"]]["effect"] = b["effect"]
+    else:
+        old = study.pop("bonus", None)
+        if old:
+            s["effect"][old["effectidx"]]["amount"] -= old["inc"]
+        s["effect"][b["effectidx"]]["amount"] += b["inc"]
+        study["bonus"] = {"effectidx": b["effectidx"], "inc": b["inc"]}
+    s["status"] = None
+    _save(st)
+    return staff_reply(st, staffs={s["_id"]: staff_out(s)})
+
+
+def staff_after_match(st):
+    """A match of mine played to the end (no simulations, as the free pack's rule says): the study
+    counter moves on, each staff in a role frame plays a match of its contract, the free pack counts it."""
+    team = st["teams"].get(str(_default_slot(st)))
+    if team is None:
+        return
+    team["staffsmc"] = int(team.get("staffsmc") or 0) + 1
+    for s in team.get("staffs") or []:
+        if s.get("status") == "appointed":
+            s["life"] = max(0, s["life"] - 1)
+    staff_free_state(team)["matches"] += 1
+
+
 def bag_reply(st):
     return _json({"result": True, "overdueitems": [],
                   "resources": coach_me_resources(st, _default_slot(st)) + [{"uri": "/bag", "body": bag_list(st)}]})
@@ -5587,7 +6177,19 @@ VM_TAGS = ("FC", "10", "99", "07", "Gol", "Striker", "Juara", "Master", "Pro", "
 # manager's squad changes day by day (vm_team). All of it is seeded by manager and day: nothing
 # is stored, every server run sees the same crowd on the same day.
 VM_EPOCH = calendar.timegm((2026, 11, 1, 0, 0, 0))
-VM_MAX = 300  # the crowd stops growing here (VM_WORDS x VM_TAGS make 800 names)
+VM_MAX = 1000  # the crowd stops growing here (user: "max player ai online 1000")
+# The rest of the population beside the first crowd (VM_EXTRA): there from day 0 with this
+# season's record so far, like the first crowd, so the rankings and the Rank searches hold some
+# 1,000 managers while the first crowd (the friends) and the newcomers keep their ids and names.
+# Ids from vm2000; names from VM_WORDS2 x VM_TAGS2 (950, none of the first pool's, none holding a
+# word the chat overlay masks: "Captain" has "tai").
+VM_EXTRA, VM_EXTRA_ID = 850, 2000
+VM_WORDS2 = ("Bromo", "Rinjani", "Toba", "Lombok", "Sumba", "Flores", "Ambon", "Borneo", "Celebes", "Danang",
+             "Halong", "Dalat", "Manila", "Penang", "Malaka", "Johor", "Sabah", "Brunei", "Yangon", "Lion",
+             "Eagle", "Hawk", "Bear", "Shark", "Dragon", "Thunder", "Blaze", "Comet", "Meteor", "Nova",
+             "Orion", "Zeus", "Apollo", "Kaiser", "Sultan", "Pendekar", "Satria", "Jagoan", "Surya", "Arjuna",
+             "Badak", "Buaya", "Merpati", "Pinisi", "Keris", "Topan", "Gelora", "Senayan", "Mustang", "Jaguar")
+VM_TAGS2 = tuple(t for t in VM_TAGS if t != "Captain")
 VM_JOIN = (0, 1, 1, 2, 3)  # managers who join on one day (one is drawn)
 VM_JOIN_TIER = (0.7, 0.25, 0.05)  # a newcomer's tier odds: mostly beginners
 VM_LIFE = (0.12, 0.08, 0.03)  # a day's odds: a transfer, an upgrade try, a starter's level up
@@ -5600,9 +6202,10 @@ def vm_day(t=None):
 
 def virtual_managers():
     """The crowd now: [{_id, name, level, teamid, grade, elo [i], wins [i], losses [i],
-    forfeits [i]}], the first crowd strongest tier last, then the newcomers (vm_base and
-    vm_newcomers, then this season's games so far: vm_crowd). One clock read: a call across
-    midnight on the 1st must not pair next month with this month's last day."""
+    forfeits [i]}], the first crowd strongest tier last, the rest of the population, then the
+    newcomers (vm_base, vm_extra and vm_newcomers, then this season's games so far: vm_crowd).
+    One clock read: a call across midnight on the 1st must not pair next month with this month's
+    last day."""
     now = time.time()
     t = time.gmtime(now)
     return vm_crowd(ladder_season(now)[0], t.tm_mday, t.tm_hour)
@@ -5621,29 +6224,72 @@ def vm_crowd(sid, day, hour):
     Elo odds tilted by his own skill (+-60), so the ratings, the records and the rankings move
     through the day. A newcomer is there from the hour he joined and plays from then on; one who
     joined in an earlier season starts this one at his first rating with no games. Seeded by
-    manager, season and day: nothing is stored, the same hour always gives the same crowd."""
-    first = vm_day(calendar.timegm((sid // 100, sid % 100, 1, 0, 0, 0)))  # crowd day of the season's day 1
+    manager, season and day: nothing is stored, the same hour always gives the same crowd. The
+    days before today come from vm_crowd_start; an hour plays only today's games."""
+    first = vm_season_first(sid)
     today = first + day - 1
-    joined = {m["_id"]: (jd, jh) for jd, jh, m in vm_newcomers(today) if (jd, jh) <= (today, hour)}
-    out = copy.deepcopy(vm_base() + [m for _, _, m in vm_newcomers(today) if m["_id"] in joined])
+    joined = {m["_id"]: (jd, jh) for jd, jh, m in vm_newcomers(today)}
+    out = copy.deepcopy(vm_crowd_start(sid, day) + [m for jd, jh, m in vm_newcomers(today) if jd == today and jh <= hour])
     for vm in out:
-        jd, jh = joined.get(vm["_id"], (None, 0))
-        skill = random.Random(f"{vm['_id']}/skill").randint(-60, 60)
-        for d in range(1 if jd is None else max(1, jd - first + 1), day + 1):
-            rnd = random.Random(f"{vm['_id']}/{sid}/{d}")
-            for i in range(LADDER_COUNT):
-                for _ in range(rnd.choice(VM_GAMES)):
-                    at, opp = rnd.choice(VM_HOURS), vm["elo"][i] + rnd.randint(-80, 80)
-                    won = rnd.random() < 1 / (1 + 10 ** ((opp - vm["elo"][i] - skill) / 400))
-                    if first + d - 1 == jd and at < jh:  # before he joined
-                        continue
-                    if d == day and i in (0, 3):  # today's 1on1 / VS Manager hours: his presence (vm_status)
-                        vm.setdefault("hours", []).append(at)
-                    if d < day or at <= hour:  # today's later games are drawn but not played yet
-                        expect = 1 / (1 + 10 ** ((opp - vm["elo"][i]) / 400))
-                        vm["elo"][i] = max(LADDER_START, round(vm["elo"][i] + LADDER_K * (won - expect)))
-                        vm["wins" if won else "losses"][i] += 1
+        vm_play(vm, sid, day, first, joined.get(vm["_id"]), hour)
     return out
+
+
+VM_SEASON = {}  # "crowd": (sid, day, the crowd at the start of that season day), see vm_crowd_start
+
+
+def vm_season_first(sid):
+    """The crowd day of season sid's day 1."""
+    return vm_day(calendar.timegm((sid // 100, sid % 100, 1, 0, 0, 0)))
+
+
+def vm_crowd_start(sid, day):
+    """The crowd at the start of season day `day`, its days 1..day-1 played: kept for the season and
+    moved on a day at a time (VM_SEASON), as replaying a month of 1,000 managers every hour took
+    0.4 s (now: once per server run; a new day ~40 ms, a new hour ~20 ms, all under STATE_LOCK).
+    Season day 1 starts with the first crowd and the rest with their
+    records, and the newcomers of earlier seasons at their first rating; a day's newcomers come in
+    on their day. Never changed in place: a copy is moved on."""
+    first = vm_season_first(sid)
+    s, d0, crowd = VM_SEASON.get("crowd") or (None, 0, None)
+    if s != sid or d0 > day:
+        d0, crowd = 1, copy.deepcopy(vm_base() + vm_extra() + [m for _, _, m in vm_newcomers(first - 1)])
+    elif d0 < day:
+        crowd = copy.deepcopy(crowd)
+    news = vm_newcomers(first + day - 2) if day > 1 else []
+    joined = {m["_id"]: (jd, jh) for jd, jh, m in news}
+    for d in range(d0, day):
+        crowd += copy.deepcopy([m for jd, _, m in news if jd == first + d - 1])
+        for vm in crowd:
+            vm_play(vm, sid, d, first, joined.get(vm["_id"]))
+    VM_SEASON["crowd"] = (sid, day, crowd)
+    return crowd
+
+
+@functools.lru_cache(maxsize=None)
+def vm_skill(vid):
+    return random.Random(f"{vid}/skill").randint(-60, 60)
+
+
+def vm_play(vm, sid, d, first, joined=None, hour=None):
+    """His Rank games of season day d, seeded by manager, season and day (the draw order is the
+    record): a game before his join hour on his join day (joined = (crowd day, hour UTC)) never
+    happened. With `hour` (today's) the later ones are drawn but not played yet, and today's 1on1 /
+    VS Manager hours are kept: his presence (vm_status)."""
+    rnd, skill = random.Random(f"{vm['_id']}/{sid}/{d}"), vm_skill(vm["_id"])
+    jd, jh = joined or (None, 0)
+    for i in range(LADDER_COUNT):
+        for _ in range(rnd.choice(VM_GAMES)):
+            at, opp = rnd.choice(VM_HOURS), vm["elo"][i] + rnd.randint(-80, 80)
+            won = rnd.random() < 1 / (1 + 10 ** ((opp - vm["elo"][i] - skill) / 400))
+            if first + d - 1 == jd and at < jh:  # before he joined
+                continue
+            if hour is not None and i in (0, 3):
+                vm.setdefault("hours", []).append(at)
+            if hour is None or at <= hour:
+                expect = 1 / (1 + 10 ** ((opp - vm["elo"][i]) / 400))
+                vm["elo"][i] = max(LADDER_START, round(vm["elo"][i] + LADDER_K * (won - expect)))
+                vm["wins" if won else "losses"][i] += 1
 
 
 @functools.lru_cache(maxsize=None)
@@ -5688,18 +6334,31 @@ def vm_base():
     return out
 
 
+@functools.lru_cache(maxsize=None)
+def vm_extra():
+    """The rest of the population (VM_EXTRA managers, VM_TIERS shares, ids from VM_EXTRA_ID),
+    there from day 0 with this season's record so far, like the first crowd."""
+    rnd = random.Random(f"{VM_SEED}/extra")
+    names = rnd.sample([w + t for w in VM_WORDS2 for t in VM_TAGS2], VM_EXTRA)
+    out = []
+    for tier, (share, *_) in enumerate(VM_TIERS):
+        for _ in range(round(share * VM_EXTRA) if tier < 2 else VM_EXTRA - len(out)):
+            out.append(vm_make(rnd, VM_EXTRA_ID + len(out), names[len(out)], tier))
+    return out
+
+
 @functools.lru_cache(maxsize=4)
 def vm_newcomers(day):
     """[(join day, join hour UTC, manager)] of the managers who joined on crowd days 1..day:
     VM_JOIN a day, tiers by VM_JOIN_TIER, a name nobody has, ids after the first crowd's, until
-    the crowd holds VM_MAX."""
+    the crowd (the first one, the rest of the population and them) holds VM_MAX."""
     taken = {m["name"] for m in vm_base()}
     free = sorted(w + t for w in VM_WORDS for t in VM_TAGS if w + t not in taken)
     out = []
     for d in range(1, day + 1):
         rnd = random.Random(f"vmjoin/{d}")
         for _ in range(rnd.choice(VM_JOIN)):
-            if VM_COUNT + len(out) >= VM_MAX:
+            if VM_COUNT + VM_EXTRA + len(out) >= VM_MAX:
                 return out
             tier = rnd.choices(range(len(VM_TIERS)), VM_JOIN_TIER)[0]
             name = free.pop(rnd.randrange(len(free)))
@@ -5707,16 +6366,149 @@ def vm_newcomers(day):
     return out
 
 
+VmCard = collections.namedtuple("VmCard", "ovr spid pid team nation height born rep pace power tech passing "
+                                           "defence shooting gk stamina")
+
+
 @functools.lru_cache(maxsize=None)
 def vm_card_pool():
-    """{role (POS_ROLE of preferredposition1): [(client rating, spid, playerid)]} of every Market
-    card, any season: what a virtual manager's squad is drawn from."""
+    """{role (POS_ROLE of preferredposition1): [VmCard]} of every Market card, any season: what a
+    virtual manager's squad is drawn from (rating, ids, club, nation, height, birth year, reputation
+    and the stat groups the squad themes rank by)."""
     pool = {}
+    born = "CAST(substr(p.birthdate, instr(p.birthdate, ' ') - 4, 4) AS INTEGER)"
     with closing(_db()) as c:
-        for spid, pid, pos, ovr in c.execute(f"SELECT p.spid, p.playerid, p.preferredposition1, {POSOVR} FROM players p"):
+        for r in c.execute(f"""SELECT p.spid, p.playerid, p.preferredposition1, {POSOVR}, p.teamid, p.nationality,
+                p.height, {born}, p.internationalrep, (p.sprintspeed + p.acceleration) / 2,
+                (p.strength + p.jumping + p.headingaccuracy) / 3, (p.dribbling + p.ballcontrol + p.agility) / 3 + 3 * p.skillmoves,
+                (p.shortpassing + p.vision + p.longpassing) / 3, (p.standingtackle + p.marking + p.interceptions) / 3,
+                (p.finishing + p.shotpower + p.longshots) / 3, (p.gkreflexes + p.gkdiving) / 2, p.stamina FROM players p"""):
+            spid, pid, pos, *rest = r
             if 0 <= pos < POS_SUB and on_market(spid):
-                pool.setdefault(POS_ROLE[pos], []).append((ovr, spid, pid))
+                pool.setdefault(POS_ROLE[pos], []).append(VmCard(rest[0], spid, pid, *rest[1:]))
     return pool
+
+
+# Squad themes (user: "Virtual manager tambah variasi dalam pemilihan skuad: ada yang ikuti meta,
+# klub tertentu, negara tertentu, pemain tertentu, team color tertentu, stats tertentu"). Each
+# manager builds around one theme (VM_THEMES by tier, seeded by his id, kept for good):
+#   free    any card near his rating (the squads as they were)
+#   club    a top club (user: "Klub dan negara top saja"; his own when it is one): its players now
+#           or formerly (the club team color)
+#   nation  a top nation (the nation team color)
+#   color   one of the game's special team colors: a card season or a named set (tc_special_sets)
+#   star    a card of one famous player (reputation 4+), the rest his top club's or nation's mates
+#   meta    the stats that win games in FO3 by role (VM_META: pace up front, size and strength at the back)
+#   stat    one stat group (VM_STAT_THEMES): pace, power, technique, passing, defence, shooting, youth, old school
+# A theme takes cards near his rating only (+-VM_THEME_WIDTH: no stronger squads), a slot it cannot
+# fill takes any card, and a club, nation, color or star theme must fill VM_THEME_MIN of his XI.
+VM_THEMES = (("free", 30, 15, 5), ("club", 25, 20, 15), ("nation", 15, 15, 15), ("color", 5, 15, 20),
+             ("star", 5, 10, 10), ("meta", 5, 10, 20), ("stat", 15, 15, 15))  # (theme, beginner, intermediate, advanced)
+VM_THEME_WIDTH, VM_THEME_MIN = 8, 9
+VM_TOP_CLUBS = (243, 241, 240, 11, 10, 5, 9, 1, 18, 21, 22, 45, 47, 44, 52, 48, 73)  # Real Madrid .. PSG
+VM_TOP_NATIONS = (54, 52, 45, 21, 18, 14, 27, 34, 38, 7, 60, 10)  # Brazil .. Croatia
+VM_STAT_THEMES = ("pace", "power", "tech", "passing", "defence", "shooting", "youth", "veteran")
+# The meta by role, from FO3's own press (Inven, Gamemeca 2013-2018): "physical online" before the
+# Impact Engine (Nov 2015: strength, height, heading), pace for everyone after it; a tall, strong,
+# finishing striker; wingers with pace and a shot (cutting in); a CAM who passes and shoots; a CM
+# with stamina and passing; a tall, heavy CDM; CBs with pace, strength, height and marking; an
+# aggressive full back with pace; a tall keeper.
+_FB = {"pace": 1.5, "defence": 1, "stamina": 0.5}
+_CB = {"pace": 1, "power": 1, "height": 1, "defence": 1}
+_ST = {"pace": 1, "shooting": 1, "power": 1, "height": 0.5}
+VM_META = {"GK": {"gk": 2, "height": 1.5}, "SW": _CB, "CB": _CB, "FB": _FB, "WB": _FB,
+           "DM": {"power": 1, "height": 1, "defence": 1, "stamina": 0.5}, "CM": {"stamina": 1, "passing": 1, "pace": 0.5},
+           "WM": {"pace": 1, "passing": 0.5, "stamina": 0.5, "shooting": 0.5}, "AM": {"passing": 1, "shooting": 1, "power": 0.5},
+           "W": {"pace": 1.5, "shooting": 1, "tech": 0.5}, "CF": _ST, "ST": _ST}
+# the cards rankers fielded (same sources): Drogba, Ibrahimovic, C. Ronaldo, Pogba, Yaya Toure, Rio
+# Ferdinand, Hummels, Rojo, Neuer, Henry, Ronaldinho, Vieira, Gullit, Rijkaard, van Basten, Crespo,
+# van Nistelrooy, Maldini, van der Sar, Effenberg, Kompany, Ronaldo (R9), Courtois, Messi and
+# Neymar after the new engine: a meta squad takes them when they are near his rating
+VM_META_ICONS = frozenset((31432, 41236, 20801, 195864, 20289, 7289, 178603, 201862, 167495, 1625, 28130, 1419, 214100,
+                           214098, 192181, 7512, 10264, 1109, 51539, 215558, 139720, 37576, 192119, 158023, 190871))
+
+
+def vm_score(c, role, kind):
+    """How well card c (VmCard) fits a meta or stat theme in role (higher is better)."""
+    feat = lambda k: (c.height - 170) * 2 if k == "height" else getattr(c, k)
+    if kind == "meta":
+        return sum(w * feat(k) for k, w in VM_META[role].items()) + 40 * (c.pid in VM_META_ICONS)
+    if kind in ("youth", "veteran"):
+        return c.born if kind == "youth" else -c.born
+    return feat("gk") + feat("height") / 2 if role == "GK" else feat(kind)  # a keeper is picked as a keeper
+
+
+@functools.lru_cache(maxsize=None)
+def vm_theme_keys():
+    """{theme: candidate keys}: the top clubs and nations, the special team colors with 40 or more
+    Market cards."""
+    sets = tc_special_sets()
+    return {"club": list(VM_TOP_CLUBS), "nation": list(VM_TOP_NATIONS),
+            "color": sorted(cid for cid, (spids, _) in sets.items() if len(spids & market_spids()) >= 40)}
+
+
+@functools.lru_cache(maxsize=512)
+def vm_theme_pool(kind, key):
+    """{role: [VmCard]} of the cards a club / nation / color theme takes."""
+    hist = tc_static()[1]
+    fits = {"club": lambda c: c.team == key or key in hist.get(c.pid, ()), "nation": lambda c: c.nation == key,
+            "color": lambda c: c.spid in tc_special_sets()[key][0]}[kind]
+    return {role: [c for c in cs if fits(c)] for role, cs in vm_card_pool().items()}
+
+
+def vm_theme_cover(kind, key, roles, centre):
+    """XI slots (roles) a club / nation / color theme fills near the rating centre."""
+    pool = vm_theme_pool(kind, key)
+    return sum(min(n, sum(abs(c.ovr - centre) <= VM_THEME_WIDTH for c in pool.get(role, ())))
+               for role, n in collections.Counter(roles).items())
+
+
+@functools.lru_cache(maxsize=4096)
+def vm_theme(vid, centre, roles, teamid):
+    """(theme, key) of a manager's squad (VM_THEMES), seeded by his id: drawn by his tier (by his
+    rating centre) until one fits his XI roles near his rating; else free."""
+    rnd = random.Random(f"{vid}/theme")
+    tier = 0 if centre < 69 else 1 if centre < 76 else 2
+    keys = vm_theme_keys()
+    fills = lambda kind, key: vm_theme_cover(kind, key, roles, centre) >= VM_THEME_MIN
+    for _ in range(6):
+        kind = rnd.choices([t for t, *_ in VM_THEMES], [w[tier] for _, *w in VM_THEMES])[0]
+        if kind in ("free", "meta"):
+            return kind, None
+        if kind == "stat":
+            return kind, rnd.choice(VM_STAT_THEMES)
+        if kind == "star":
+            pool = vm_card_pool()
+            stars = sorted({c.pid for role in set(roles) for c in pool.get(role, ())
+                            if c.rep >= 4 and centre - 4 <= c.ovr <= centre + 10})
+            for pid in rnd.sample(stars, min(8, len(stars))):
+                c = next(c for cs in pool.values() for c in cs if c.pid == pid)
+                for mates in rnd.sample([("club", c.team), ("nation", c.nation)], 2):
+                    if mates[1] in keys[mates[0]] and fills(*mates):
+                        return kind, (pid, *mates)
+            continue
+        first = [teamid] if kind == "club" and teamid in VM_TOP_CLUBS else []
+        for key in first + rnd.sample(keys[kind], min(12, len(keys[kind]))):
+            if fills(kind, key):
+                return kind, key
+    return "free", None
+
+
+def vm_theme_cards(theme, role, centre, used):
+    """The cards his theme takes for a slot in role (none: any card near his rating)."""
+    kind, key = theme
+    if kind == "free":
+        return []
+    pool = (vm_theme_pool(*key[1:]) if kind == "star" else vm_theme_pool(kind, key)
+            if kind in ("club", "nation", "color") else vm_card_pool())
+    for width in (4, VM_THEME_WIDTH):
+        cand = [c for c in pool.get(role, ()) if abs(c.ovr - centre) <= width and c.pid not in used]
+        if cand and kind in ("meta", "stat"):  # the best fifth of the cards near his rating
+            cand.sort(key=lambda c: -vm_score(c, role, key if kind == "stat" else kind))
+            return cand[:max(3, len(cand) // 5)]
+        if cand:
+            return cand
+    return []
 
 
 # A virtual manager's playing style (issue #30). The match reads side.<x>.tactics[squad.tactic or 0]
@@ -5766,7 +6558,7 @@ def vm_team(vid, day=None):
 def vm_origin(vid, day):
     """(join day, record) of manager vid as he joined the crowd (vm_base: day 0), or None."""
     return next(((jd, m) for jd, _, m in vm_newcomers(day) if m["_id"] == vid),
-                next(((0, m) for m in vm_base() if m["_id"] == vid), None))
+                next(((0, m) for m in vm_base() + vm_extra() if m["_id"] == vid), None))
 
 
 @functools.lru_cache(maxsize=512)
@@ -5790,26 +6582,39 @@ def vm_squad(vid, day):
     top = 2 + (max(vm["elo"]) - LADDER_START) * 6 // 780  # his cards' levels: 1..top
     gmax, lmax = min(10, vm["grade"] + 2), min(PLAYER_MAX_LEVEL, top + 3)
     pool = vm_card_pool()
+    xi = slots or club["squad"]["positions"]
+    roles = tuple(POS_ROLE[s["pos"]] for s in xi)
+    theme = vm_theme(vid, centre, roles, vm["teamid"])  # his squad theme (VM_THEMES)
+    star = theme[1][0] if theme[0] == "star" else None
 
     def card(slot, r, used):
-        """(slot, rating, spid, playerid, grade, level): a new card for slot near his rating."""
+        """(slot, rating, spid, playerid, grade, level): a new card for slot near his rating, of
+        his theme when it has one."""
         role = POS_ROLE[slot["pos"]] if slot["pos"] < POS_SUB else r.choice(("CB", "CM", "ST", "W", "FB"))
-        for width in (4, 8, 16, 99):
-            cand = [c for c in pool.get(role, ()) if abs(c[0] - centre) <= width and c[2] not in used]
+        cand = vm_theme_cards(theme, role, centre, used)
+        for width in () if cand else (4, 8, 16, 99):
+            cand = [c for c in pool.get(role, ()) if abs(c.ovr - centre) <= width and c.pid not in used]
             if cand:
                 break
-        ovr, spid, pid = r.choice(cand)
+        c = r.choice(cand)
         grade = max(1, min(gmax, vm["grade"] + rc.choice((-1, 0, 0, 1))))
-        return [slot, ovr, spid, pid, grade, rc.randint(1, top)]
+        return [slot, c.ovr, c.spid, c.pid, grade, rc.randint(1, top)]
 
     chosen = []
-    for slot in (slots or club["squad"]["positions"]) + [{"pos": POS_SUB}] * 7:
+    for slot in xi + [{"pos": POS_SUB}] * 7:
         chosen.append(card(slot, rnd, {c[3] for c in chosen}))
+    if star and star not in {c[3] for c in chosen}:  # his favourite player: his best card near his rating
+        cards = [(c, k) for k, role in enumerate(roles) for c in pool.get(role, ())
+                 if c.pid == star and centre - 4 <= c.ovr <= centre + 10]
+        if cards:
+            c, k = max(cards, key=lambda x: (x[0].ovr, -x[1]))
+            chosen[k][1:4] = [c.ovr, c.spid, c.pid]
     for d in range(joined + 1, day + 1):
         r = random.Random(f"{vid}/life/{d}")
-        if r.random() < VM_LIFE[0]:  # a transfer: one out, one in (the Market)
+        if r.random() < VM_LIFE[0]:  # a transfer: one out, one in (the Market); never his star
             k = r.randrange(len(chosen))
-            chosen[k] = card(chosen[k][0], r, {c[3] for c in chosen})
+            if chosen[k][3] != star:
+                chosen[k] = card(chosen[k][0], r, {c[3] for c in chosen})
         if r.random() < VM_LIFE[1]:  # an upgrade try
             c = chosen[r.randrange(len(chosen))]
             if c[4] < gmax:
@@ -5828,24 +6633,54 @@ def vm_squad(vid, day):
     return {"teamid": vm["teamid"], "squad": squad, "players": players, "formations": club.get("formations", [])}
 
 
+VM_STAFF_ORDER = ("FW", "MF", "DF", "GK", "MEDICAL", "PREMIUM", "FRONT")  # the role frames a manager fills as he rises
+
+
+def vm_staff(vm):
+    """A virtual manager's staff (user: "harus mempunyai staff sesuai dengan level nya"): one role
+    frame more every 12 levels (VM_STAFF_ORDER: an FW coach at level 1, all 7 from level 72), each a
+    staff of that position of about grade 1 + level / 12 (+-1 half star; 5 stars near level 100),
+    seeded by his id, always under contract. The staff fields of a raw team (staff_team)."""
+    rng, level = random.Random(f"{vm['_id']}/staff"), vm["level"]
+    staffs, slots = [], [None] * len(STAFF_SLOTS)
+    for k, pos in enumerate(VM_STAFF_ORDER[:min(len(VM_STAFF_ORDER), 1 + level // 12)]):
+        sid = rng.choice([i for i, c in STAFF_CATALOGUE.items() if c[0] == pos and c[1]])
+        s = staff_make(sid, max(1, min(STAFF_MAX_GRADE, 1 + level // 12 + rng.choice((-1, 0, 0, 1)))), rng)
+        s.update(_id=f"{vm['_id']}st{k}", status="appointed")
+        staffs.append(s)
+        slots[STAFF_SLOTS.index(pos)] = s["_id"]
+    return {"staffs": staffs, "staffslots": slots}
+
+
+def vm_colors_staff(team, vm):
+    """A virtual manager's owned_team with what boosts his starters in a match (user: "Virtual
+    manager harus dapat bonus team color saat bertanding"): the team colors his XI meets, as mine,
+    and his staff (an AI club stays without: a whole club would have its +4 for free)."""
+    team["teamcolors"] = active_teamcolors(team)
+    team.update(staff_match(staff_team(vm_staff(vm))))
+    return team
+
+
 def vm_side(vm):
-    """match.side for a virtual manager: his squad (each card at its grade and level), his
-    style's tactic, his name on it (not "COM")."""
+    """match.side for a virtual manager: his squad (each card at its grade and level) with its
+    team colors and his staff, his style's tactic, his name on it (not "COM")."""
     side = match_side(copy.deepcopy(vm_team(vm["_id"])), vm["teamid"], tactics=[style_tactic(vm_style(vm))])
+    vm_colors_staff(side["team"], vm)
     side["players"] = [{"id": vm["_id"], "name": vm["name"], "levelinfo": {"level": vm["level"], "exp": 0}}]
     return side
 
 
 def vm_ovr(vid, day=None):
-    """A virtual manager's FW / MF / DF ratings: team_summary of his squad (grades and levels
-    in)."""
+    """A virtual manager's FW / MF / DF ratings: team_summary of his squad (grades and levels in)
+    with his team colors and staff, as my own summary counts mine."""
     return vm_ratings(vid, vm_day() if day is None else day)
 
 
 @functools.lru_cache(maxsize=512)
 def vm_ratings(vid, day):
     team = vm_squad(vid, day)
-    ovr = team_summary(owned_team(copy.deepcopy(team)), team["teamid"]).get("ovr") or {}
+    owned = vm_colors_staff(owned_team(copy.deepcopy(team)), vm_origin(vid, day)[1])
+    ovr = team_summary(owned, team["teamid"]).get("ovr") or {}
     return {k: ovr.get(k, 0) for k in ("FW", "MF", "DF")}
 
 
@@ -6629,6 +7464,9 @@ ROUTES = [
     (re.compile(r"/room/\d+/back"), ep_room_back),
     (re.compile(r"/static/db/SORTLEAGUE/(\d+)"), lambda n, q, b: _json(json.loads(ep_sortleague(q, b)[1]).get(n, []))),
     (re.compile(r"/static/db/SORTTEAM/(\d+)"), lambda l, q, b: _json(json.loads(ep_sortteam(q, b)[1]).get(l, []))),
+    (re.compile(r"/staff/recruit/(\d+)"), ep_staff_recruit), (re.compile(r"/staff/appoint/(\w+)"), ep_staff_appoint),
+    (re.compile(r"/staff/study/(\w+)/complete"), ep_staff_study_complete), (re.compile(r"/staff/study/(\w+)"), ep_staff_study),
+    (re.compile(r"/staff/enhance/(\w+)"), ep_staff_enhance), (re.compile(r"/staff/([0-9a-f]{24})"), ep_staff_fire),
 ]
 
 
@@ -6712,6 +7550,9 @@ ENDPOINTS.update({
     "/static/info/teamcolor": ep_teamcolor,
     "/shop/list": lambda q, b: _json(shop_list(_state())), "/shop/list/STSHOP": ep_stshop,
     "/shop/list/clear": lambda q, b: _json({"changed": SHOP_CHANGED}),
+    "/coach/me/level/reward": ep_level_reward, "/static/db/REWARDS/coachlevelup": ep_level_reward_table,
+    "/static/db/STAFF": lambda q, b: _json(staff_static()), "/staff/recruit": ep_staff_recruit_list,
+    "/staff/recontract/preview": ep_staff_recontract_preview, "/staff/recontract": ep_staff_recontract,
     # the Shop's limited stock, polled each minute while it is open (ShopController.onRemainedChange
     # takes an array; {} raised "Kesalahan UI telah terjadi"): nothing is limited here
     "/shop/remained/limited": lambda q, b: _json([]), "/shop/remained/limited/STSHOP": lambda q, b: _json([]),

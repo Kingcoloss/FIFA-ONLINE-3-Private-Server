@@ -127,6 +127,8 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
 - **Chỉ số FW / MF / DF của đội khớp với cầu thủ** (issue #18): ở màn hình đội hình và sảnh, đó là trung bình
   chỉ số mà danh sách cầu thủ hiển thị (chỉ số ở vị trí của cầu thủ cộng cấp nâng cấp, level và team color).
   Trước đây tính từ chỉ số thẻ gốc, thấp hơn khoảng 12.
+  Trước trận (Giải đấu, Cúp, Rank) danh sách cầu thủ không tính team color, nên các thanh chỉ số ở đó cũng
+  không tính; phần thưởng vẫn có hiệu lực trong trận.
 - **Các tab Rekor liga** (issue #19): bảng xếp hạng đã hiện (tab bị lỗi vì thiếu bảng `league2difficulty`, bảng này
   giờ cũng quyết định đội lên hạng hay xuống hạng cuối mùa). Rekorku liệt kê số trận, điểm, bàn thắng, kiến tạo,
   đường chuyền, tắc bóng và cứu thua của từng cầu thủ trong các trận đã đá của mùa, còn Rekor gabungan hiện đội hình
@@ -163,8 +165,8 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
 - **Multiple > Rank: các HLV khác và trận đấu thật** (issue #30): màn hình xếp hạng trước đây dừng ở lỗi UI
   vì máy chủ không gửi hạng đấu, phần thưởng và thành tích ladder. Giờ màn hình mở được, và các HLV ảo lấp
   đầy bảng xếp hạng: top 3 (VS Manager Top) và xếp hạng bạn bè gồm 20 người, mỗi người có tên, câu lạc bộ,
-  hạng đấu và thành tích thay đổi dần trong ngày khi họ thi đấu. Lúc đầu có 100 HLV, mỗi ngày thêm 0-3 người
-  mới, tối đa 300. Mỗi người đá theo lối chơi riêng (kiểm soát bóng, phản công, pressing tầm cao, bóng dài,
+  hạng đấu và thành tích thay đổi dần trong ngày khi họ thi đấu. Lúc đầu có 100 HLV, thêm 850 người khác, rồi mỗi
+  ngày thêm 0-3 người mới, tối đa 1.000. Mỗi người đá theo lối chơi riêng (kiểm soát bóng, phản công, pressing tầm cao, bóng dài,
   dựng xe buýt hoặc tấn công tổng lực: sơ đồ, chiến thuật và cách chạy chỗ) trong bộ áo của câu lạc bộ mình,
   với thẻ ngẫu nhiên từ mọi câu lạc bộ và mùa giải quanh rating của họ, mỗi thẻ có cấp thẻ riêng (từ +1 với
   người mới đến +6 trở lên) và level riêng. Ngày qua ngày, họ mua bán thẻ, nâng cấp thẻ (nâng cấp thất bại
@@ -203,6 +205,14 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   ngữ, tổng cộng 2.700 câu: chào hỏi và chuyện bóng đá lúc giao bóng, phản ứng khi ghi bàn, sút hỏng và cứu
   thua, trêu đùa khi bạn gõ chat, và nhận xét về kết quả. Không câu nào chứa từ mà bộ lọc chat của game sẽ che
   (bộ lọc còn che cả từ nằm bên trong từ dài hơn).
+- **HLV ảo xây đội hình theo cách riêng** (issue #30): mỗi người có một chủ đề đội hình cố định: thẻ bất kỳ
+  gần rating của họ; một CLB hàng đầu (Real Madrid, Barcelona, Atletico, hai đội Manchester, Chelsea,
+  Liverpool, Arsenal, Tottenham, Bayern, Dortmund, Juventus, Milan, Inter, Roma, Napoli, PSG) với cầu thủ
+  hiện tại hoặc từng khoác áo; một đội tuyển hàng đầu (Brazil, Argentina, Tây Ban Nha, Đức, Pháp, Anh, Ý,
+  Hà Lan, Bồ Đào Nha, Bỉ, Uruguay, Croatia); một team color của game (một mùa thẻ hoặc một bộ có tên); một
+  ngôi sao cùng đồng đội CLB hoặc đồng hương; meta; hoặc một chỉ số (tốc độ, thể lực, kỹ thuật, chuyền,
+  phòng ngự, dứt điểm, cầu thủ trẻ, cầu thủ thế hệ cũ). HLV càng mạnh càng hay theo meta và team color.
+  Chủ đề chỉ lấy thẻ gần rating của họ nên đội hình không mạnh hơn vì nó.
 - **Cài đặt trước trận** (issue #31): các nút chọn trên màn hình cài đặt trận của Multiple > Rank đã dùng
   được cho sân (70 sân có đủ dữ liệu trong client), thời gian trong ngày (ban ngày hoặc ban đêm), thời
   tiết (quang đãng, mưa, tuyết, âm u: thành hoàng hôn nếu là ban đêm), thời lượng trận (6, 8, 10 hoặc 12
@@ -239,6 +249,24 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   VN vào cạnh phần bình luận tiếng Anh của client này (`eng_us`) và chỉ để tiếng Việt làm ngôn ngữ bình luận
   trong `data\loc\locale.big` (có lưu bản sao lưu); sau đó game đọc bình luận từ `vie_vn`. `--remove` trả lại
   bình luận tiếng Anh.
+- **Thưởng lên cấp HLV** (issue #35): mỗi cấp HLV từ 2 đến 100 nhận phần thưởng lên cấp của FO3 (bảng trên
+  fifaaddict): EP cùng vật phẩm như gói Top 300, Top 100 và Best, gói giải đấu 65+ và GK 65+, phiếu mô phỏng giải
+  đấu, phiếu đổi đội và EXP capsule. Phần thưởng vào Bag ("Hadiah naik level Lv.N"); màn hình sau trận hiện chúng
+  trong cửa sổ lên cấp, và biểu tượng thông tin liệt kê phần thưởng các cấp tiếp theo. Vật phẩm FO3 mà máy chủ
+  không dùng (gói staff, Red Ball, phiếu phòng thay đồ và tăng thưởng, chuyển EXP) bị bỏ qua. Thưởng EP theo giá cầu
+  thủ ở tab Kinh tế.
+- **Staff** (Tim > Manajemen Staff): hệ thống staff của FO3 hoạt động trở lại. *Rekrut* (tuyển): gói staff
+  bằng EP (Basic FW / MF / DF / GK / ALL, Pro, Premium, Giám đốc kỹ thuật, Premium Medical) và mỗi ngày một
+  gói ALL miễn phí khi đăng nhập, thêm một gói khi chơi đủ 3 trận. *Staff yang dimiliki* (staff đang có): 7 ô
+  vai trò (FW, MF, DF, HLV trưởng, GK, HLV thể lực, Giám đốc kỹ thuật); staff ở đúng ô tăng chỉ số cho các cầu
+  thủ đá chính thuộc nhóm vị trí đó (HLV thể lực, HLV trưởng và Giám đốc kỹ thuật: mọi cầu thủ đá chính) trong
+  danh sách đội hình và trong trận, với hợp đồng 50 trận gia hạn bằng EP. *Latihan* (huấn luyện): dùng staff
+  khác để nâng cấp (0.5 đến 5 sao) và tăng chỉ số cho một staff. *Pembinaan* (tu nghiệp): gửi staff ra nước
+  ngoài 5-10 trận để đổi hoặc tăng một chỉ số. Tên và chỉ số tăng theo danh sách fo3staff của fifaaddict; cấp,
+  giá và hợp đồng do máy chủ tự đặt (số liệu của Garena đã mất), và giá EP theo giá cầu thủ ở tab Kinh tế.
+  Client chỉ có ảnh của 7 staff; `python -I tools/fa_faces.py --staffs` thêm ảnh còn lại từ fifaaddict.
+  Quản lý ảo thi đấu với team color của họ như bạn, và có staff theo cấp (thêm một ô vai trò mỗi 12
+  cấp).
 - **Mở được hộp ngẫu nhiên** (Kotak Platinum và các hộp khác, issue #12): màn hình hộp liệt kê phần thưởng
   từ `staticdata.availables`, trước đây bị thiếu, nên mọi hộp đều lỗi khi bấm "Gunakan" (dùng).
 - **Thẻ mới vào Tim Cadangan**: thẻ từ gói, giao dịch, Market, Bag hoặc trang quản trị hiện "-" ở cột Tim
@@ -317,8 +345,8 @@ Chưa làm: chơi online với người khác (xếp hạng PvP, giao hữu, Kin
 | `gen_teams.py` | Đội hình khởi đầu và tóm tắt CLB từ `gamedata/fifadb.sqlite`. |
 | `tools/eatrax_song.py` | Đặt một bài hát lên đầu nhạc menu EA Trax dưới dạng EALayer3, thay TrackID 1 (sửa `data_0.big` / `data_1.big` bằng cách ghi nối thêm; `--restore` khôi phục bản gốc). Làm game crash sau trận, xem lỗi đã biết. |
 | `tools/fa_sync.py` | Đồng bộ giá từ fifaaddict.com. |
-| `tools/fo4_season.py` | Thêm thẻ 26 LIVE và 25 LIVE của FIFA Online 4 (dữ liệu fifaaddict, chỉ số tính là +0) thành hai mùa mới với biểu tượng mùa của FO4: `fetch`, `collect` + `import`, `build`, `install` (ghi đè các mục trong `data_0.big` tại chỗ vì kích thước tệp không được đổi, và ghi nối thêm vào `Label.big`; `restore` khôi phục cả hai). |
-| `tools/fa_faces.py` | Thêm ảnh mặt nhỏ của cầu thủ còn thiếu trong bộ nhớ đệm của client (fifaaddict có cùng loại PNG 128x128); `--crests` thêm logo CLB còn thiếu (đa số CLB không có trong bộ nhớ đệm nên game hiện logo mặc định). Chạy tiếp được nếu bị ngắt, `--remove` hoàn tác. |
+| `tools/fo4_season.py` | Thêm thẻ 26 LIVE và 25 LIVE của FIFA Online 4 (dữ liệu fifaaddict, chỉ số tính là +0) thành hai mùa mới với biểu tượng mùa của FO4: `fetch`, `collect` + `import`, `build`, `install` (ghi đè các mục trong `data_0.big` tại chỗ vì kích thước tệp không được đổi, và ghi nối thêm vào `Label.big` và `Module.big`; `restore` khôi phục tất cả). `hud` chỉ vá `Module.big`, cho client đã cài mùa giải từ trước: ô tên cầu thủ trong trận trước đây hiện huy hiệu '17 cho mọi thẻ 2017 và FO4, giờ hiện mùa của chính thẻ đó. |
+| `tools/fa_faces.py` | Thêm ảnh mặt nhỏ của cầu thủ còn thiếu trong bộ nhớ đệm của client (fifaaddict có cùng loại PNG 128x128); `--crests` thêm logo CLB còn thiếu (đa số CLB không có trong bộ nhớ đệm nên game hiện logo mặc định); `--staffs` thêm ảnh staff (bộ nhớ đệm chỉ có 7 trong 71 staff máy chủ phát). Chạy tiếp được nếu bị ngắt, `--remove` hoàn tác. |
 | `tools/draft_icons.py` | Vẽ biểu tượng Shop cho các gói draft (bộ nhớ đệm của client không có ảnh draft) vào `assets/externalAssets/shop/`, máy chủ gửi các ảnh này trước ảnh của client; `<icon> <tag> <picks>` vẽ thêm một biểu tượng cho gói tạo trên trang admin. Cần Pillow. |
 | `tools/re/` | Công cụ hỗ trợ dịch ngược: `bigdir.py` (bảng lưu trữ BIg4), `refpack.py` (codec RefPack), `eadb.py` (bảng cơ sở dữ liệu "DB" của EA), `abc*.py` (phân tích / tìm kiếm / khai thác cấu trúc bytecode AS3), `gfxx.py` (SWF giao diện), `memgrab.py`, `dbwin.py` (đầu ra debug của client), `relay_emu.py` (bộ mã hóa gói relay PvP và relay thử nghiệm), `gamectl.ps1` (điều khiển cửa sổ client khi kiểm thử). |
 | `blaze.py`, `server.py`, `test_client.py`, `analyze_capture.py` | Khung EA Blaze (Fire/TDF) và máy chủ kiểm thử loopback từ giai đoạn đầu của dự án; sau đó hóa ra client dùng REST + messenger. |

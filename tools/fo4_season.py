@@ -8,6 +8,7 @@ fifa online 4".
     python tools/fo4_season.py import FILE             its output -> gamedata/fo4_cards.json
     python tools/fo4_season.py build                   cards -> gamedata/fifadb.sqlite
     python tools/fo4_season.py install [--game DIR]    fifadb + season icons -> the client
+    python tools/fo4_season.py hud [--game DIR]        only the match HUD's season icons (Module.big)
     python tools/fo4_season.py restore [--game DIR]    put the client files back
     python tools/fo4_season.py selftest
 
@@ -643,6 +644,234 @@ def label_with_icons(gfx, dds, icons):
     return b"CFX" + gfx[3:4] + (len(body) + 8).to_bytes(4, "little") + zlib.compress(body, 9), bytes(dds)
 
 
+# --- the match HUD's season icons: data/ui/libs/Module.big -------------------------------------
+# User: "Icon session baru tidak muncul di game play" / "benar harusnya 26". Every SeasonIcon shows
+# gotoAndStop(PlayerListUtil.getSeason(spid) + "season"), and getSeason gives a spid of season 0
+# (a bare player id) CURRENT_SEASON (curseason, '17). In a match native hands the overlays (the
+# NIB name boxes, kicker and shootout boards) the id of the card's row in its engine DB
+# (fifa_ng_db players, looked up by spid, else by player id); its playerid field has 27 bits, so a
+# '17 or FO4 card (88 / 300 / 325 x 1e6 + pid) is there by player id only and every one of them
+# showed '17. The patch puts this at the start of getSeason (after its pushscope):
+#     if (0 < spid < SEASON_MULTIPLIER && MatchProxy.instance)
+#         for side in "left", "right":  (getPlayersDataProvider: a DataProvider, an Array of the
+#             for p in that side's players:   side's team.players as the match resource has them)
+#                 if (p.spid % SEASON_MULTIPLIER == spid) { spid = p.spid; goto done }
+# so a match card gets its own season ('17 cards still show curseason) and anything else is as
+# before. Branches in AVM2 are relative, so the old code behind the prefix needs no fixing.
+MODULE_BIG, MODULE_GFX = "data/ui/libs/Module.big", "data/ui/libs/Module.gfx"
+
+
+def _u30(v):
+    out = bytearray()
+    while True:
+        b, v = v & 0x7F, v >> 7
+        out.append(b | (0x80 if v else 0))
+        if not v:
+            return bytes(out)
+
+
+class _Abc:
+    """An ABC block parsed far enough to append strings / multinames and to swap a method body:
+    the offsets of those sections, the names, the classes' traits and the bodies' spans."""
+
+    def __init__(self, d, p):
+        self.d, self.p, self.at = d, p, p + 4
+        assert d[p:p + 4] == b"\x10\x00\x2e\x00", "not an ABC block"
+        n = self.u30(); [self.u30() for _ in range(max(0, n - 1))]  # ints
+        n = self.u30(); [self.u30() for _ in range(max(0, n - 1))]  # uints
+        n = self.u30(); self.at += 8 * max(0, n - 1)  # doubles
+        self.str_count_at = self.at
+        n = self.u30(); self.strs = [""]
+        self.str_start = self.at
+        for _ in range(max(0, n - 1)):
+            ln = self.u30(); self.strs.append(d[self.at:self.at + ln].decode("utf-8", "replace")); self.at += ln
+        self.str_end = self.at
+        n = self.u30(); self.ns = [None] + [(self.u8(), self.u30()) for _ in range(max(0, n - 1))]
+        n = self.u30()
+        for _ in range(max(0, n - 1)):
+            [self.u30() for _ in range(self.u30())]
+        self.mn_count_at = self.at
+        n = self.u30(); self.mn = [None]
+        self.mn_start = self.at
+        for _ in range(max(0, n - 1)):
+            k = self.u8()
+            if k in (0x07, 0x0D, 0x09, 0x0E):
+                self.mn.append((k, self.u30(), self.u30()))
+            elif k in (0x0F, 0x10, 0x1B, 0x1C):
+                self.mn.append((k, self.u30()))
+            elif k in (0x11, 0x12):
+                self.mn.append((k,))
+            elif k == 0x1D:
+                q, c = self.u30(), self.u30(); self.mn.append((k, q, [self.u30() for _ in range(c)]))
+            else:
+                raise ValueError(f"multiname kind {k:#x}")
+        self.mn_end = self.at
+        for _ in range(self.u30()):  # methods
+            pc = self.u30(); self.u30(); [self.u30() for _ in range(pc)]; self.u30(); fl = self.u8()
+            if fl & 0x08:
+                for _ in range(self.u30()):
+                    self.u30(); self.u8()
+            if fl & 0x80:
+                [self.u30() for _ in range(pc)]
+        for _ in range(self.u30()):  # metadata
+            self.u30(); [self.u30() for _ in range(2 * self.u30())]
+        n = self.u30(); self.classes = []
+        for _ in range(n):
+            name = self.u30(); self.u30(); fl = self.u8()
+            if fl & 0x08:
+                self.u30()
+            [self.u30() for _ in range(self.u30())]
+            self.u30(); self.classes.append([self.name(name), self.traits()])
+        for c in self.classes:
+            self.u30(); c.append(self.traits())  # [name, instance traits, static traits]
+        for _ in range(self.u30()):  # scripts
+            self.u30(); self.traits()
+        self.bodies = {}
+        for _ in range(self.u30()):
+            start = self.at
+            m = self.u30(); head = [self.u30() for _ in range(4)]
+            ln = self.u30(); code = (self.at, self.at + ln); self.at += ln
+            exc = [[self.u30() for _ in range(5)] for _ in range(self.u30())]
+            tr = self.at; self.traits()
+            self.bodies[m] = (start, self.at, head, code, exc, (tr, self.at))
+        self.end = self.at
+
+    def u8(self):
+        self.at += 1
+        return self.d[self.at - 1]
+
+    def u30(self):
+        r = sh = 0
+        while True:
+            b = self.d[self.at]; self.at += 1
+            r |= (b & 0x7F) << sh; sh += 7
+            if not b & 0x80:
+                return r
+
+    def name(self, i):
+        m = self.mn[i]
+        return self.strs[m[2]] if m[0] in (0x07, 0x0D) else self.strs[m[1]] if m[0] in (0x09, 0x0E) else None
+
+    def traits(self):
+        out = []
+        for _ in range(self.u30()):
+            name = self.name(self.u30()); k = self.u8(); kind = k & 0x0F
+            if kind in (0, 6):
+                self.u30(); self.u30()
+                if self.u30():
+                    self.u8()
+                ref = None
+            elif kind in (1, 2, 3, 4, 5):
+                self.u30(); ref = self.u30()
+            else:
+                raise ValueError(f"trait kind {kind}")
+            if k & 0x40:
+                [self.u30() for _ in range(self.u30())]
+            out.append((name, kind, ref))
+        return out
+
+    def qname(self, ns, name):
+        """Index of the QName ns::name, if the pool has it."""
+        return next((i for i, m in enumerate(self.mn) if m and m[0] == 0x07 and m[1] == ns and self.name(i) == name), None)
+
+
+def _asm(ops):
+    """Bytecode of ops: bytes, ("@", label) or (branch opcode, label) with an s24 to the label."""
+    pos, at = 0, {}
+    for op in ops:
+        if isinstance(op, bytes):
+            pos += len(op)
+        elif op[0] == "@":
+            at[op[1]] = pos
+        else:
+            pos += 4
+    out = bytearray()
+    for op in ops:
+        if isinstance(op, bytes):
+            out += op
+        elif op[0] != "@":
+            out += bytes([op[0]]) + (at[op[1]] - (len(out) + 4)).to_bytes(3, "little", signed=True)
+    return bytes(out)
+
+
+def match_seasons_abc(d, p):
+    """(start, end, new bytes) of the ABC block at p (PlayerListUtil's) with getSeason patched,
+    or None when it has the patch already."""
+    a = _Abc(d, p)
+    pub = next(i for i, n in enumerate(a.ns) if n and n[0] == 0x16 and a.strs[n[1]] == "")
+    cls = next(c for c in a.classes if c[0] == "PlayerListUtil")
+    m = next(ref for name, kind, ref in cls[2] if name == "getSeason" and kind == 1)
+    start, end, head, (c0, c1), exc, (t0, t1) = a.bodies[m]
+    code = a.d[c0:c1]
+    assert code[:2] == b"\xd0\x30", "getSeason does not start with getlocal0, pushscope"
+    if "getPlayersDataProvider" in a.strs:
+        return None
+    # names it uses: the class's own SEASON_MULTIPLIER, MatchProxy (fok.net), instance, length,
+    # p.spid (a multiname over the open namespaces) and arr[i] (a runtime multiname)
+    mult, inst, length = (a.qname(pub, n) for n in ("SEASON_MULTIPLIER", "instance", "length"))
+    proxy = next(i for i, x in enumerate(a.mn) if x and x[0] == 0x07 and a.name(i) == "MatchProxy"
+                 and a.strs[a.ns[x[1]][1]] == "fok.net")
+    spid = next(i for i, x in enumerate(a.mn) if x and x[0] == 0x09 and a.name(i) == "spid")
+    late = next(i for i, x in enumerate(a.mn) if x and x[0] == 0x1B)
+    assert None not in (mult, inst, length), "PlayerListUtil's names moved"
+    new_strs = ["left", "right", "getPlayersDataProvider"]
+    s0 = len(a.strs)
+    s_left, s_right, s_get = s0, s0 + 1, s0 + 2
+    get = len(a.mn)  # the new QName public::getPlayersDataProvider
+    L, prop = lambda n: b"\x62" + _u30(n), lambda op, i: bytes([op]) + _u30(i)
+    ops = [b"\xd1\x24\x00", (0x16, "done"),  # if (spid <= 0) done
+           b"\xd1" + prop(0x5D, mult) + prop(0x66, mult), (0x18, "done"),  # if (spid >= SEASON_MULTIPLIER) done
+           prop(0x5D, proxy) + prop(0x66, proxy) + prop(0x66, inst) + b"\x82\x63" + _u30(7),
+           L(7), (0x12, "done")]  # local7 = MatchProxy.instance; if (!local7) done
+    for side, s in (("left", s_left), ("right", s_right)):
+        ops += [L(7) + prop(0x2C, s) + prop(0x46, get) + b"\x01\x82\x63" + _u30(4),  # local4 = local7.getPlayersDataProvider(side)
+                L(4), (0x12, f"next{side}"), b"\x24\x00\x63" + _u30(5),  # if (!local4) next; local5 = 0
+                ("@", f"loop{side}"), b"\x09" + L(5) + L(4) + prop(0x66, length), (0x18, f"next{side}"),  # while (local5 < local4.length)
+                L(4) + L(5) + prop(0x66, late) + prop(0x66, spid) + b"\x82\x63" + _u30(6),  # local6 = local4[local5].spid
+                L(6) + prop(0x5D, mult) + prop(0x66, mult) + b"\xa4\xd1", (0x14, f"inc{side}"),  # if (local6 % MULT != spid) inc
+                L(6) + b"\x73\xd5", (0x10, "done"),  # spid = int(local6); done
+                ("@", f"inc{side}"), b"\xc2" + _u30(5), (0x10, f"loop{side}"), ("@", f"next{side}")]
+    ops.append(("@", "done"))
+    prefix = _asm(ops)
+    code = code[:2] + prefix + code[2:]
+    body = (_u30(m) + _u30(max(head[0], 3)) + _u30(max(head[1], 8)) + _u30(head[2]) + _u30(head[3])
+            + _u30(len(code)) + code + _u30(len(exc))
+            + b"".join(_u30(v + (len(prefix) if k < 3 else 0)) for e in exc for k, v in enumerate(e))
+            + a.d[t0:t1])
+    strs = b"".join(_u30(len(s.encode())) + s.encode() for s in new_strs)
+    out = (a.d[p:a.str_count_at] + _u30(len(a.strs) + len(new_strs)) + a.d[a.str_start:a.str_end] + strs
+           + a.d[a.str_end:a.mn_count_at] + _u30(len(a.mn) + 1) + a.d[a.mn_start:a.mn_end]
+           + b"\x07" + _u30(pub) + _u30(s_get)
+           + a.d[a.mn_end:start] + body + a.d[end:a.end])
+    return p, a.end, out
+
+
+def module_with_match_seasons(gfx):
+    """Module.gfx (CFX) with PlayerListUtil.getSeason patched, or None when it has the patch."""
+    import zlib
+    assert gfx[:3] == b"CFX", gfx[:3]
+    body = zlib.decompress(gfx[8:])
+    r = _Bits(body, 0); r.u(4 * r.u(5)); p = r.end() + 4
+    while p < len(body):  # the DoABC tag (82: flags, name, ABC) that holds PlayerListUtil
+        h = int.from_bytes(body[p:p + 2], "little"); code, ln, hdr = h >> 6, h & 0x3F, 2
+        if ln == 0x3F:
+            ln, hdr = int.from_bytes(body[p + 2:p + 6], "little"), 6
+        q = p + hdr
+        abc = body.index(b"\x00", q + 4) + 1 if code == 82 else None
+        if abc is not None and any(c[0] == "PlayerListUtil" for c in _Abc(body, abc).classes):
+            hit = match_seasons_abc(body, abc)
+            if hit is None:
+                return None
+            _, end, new = hit
+            assert end == q + ln, "the ABC block does not end its tag"
+            payload = body[q:abc] + new
+            body = body[:p] + (((82 << 6) | 0x3F).to_bytes(2, "little") + len(payload).to_bytes(4, "little")
+                               + payload + body[q + ln:])
+            return b"CFX" + gfx[3:4] + (len(body) + 8).to_bytes(4, "little") + zlib.compress(body, 9)
+        p = q + ln
+    raise SystemExit(f"{MODULE_GFX}: PlayerListUtil not found (unknown client version)")
+
+
 # --- install / restore -------------------------------------------------------------------------
 # The client reads cards from data_0.big data/db2/fifadb.db.db2 and, per UI language, names /
 # club names / league names from data/db2/<lang>.db.db2 (PlayerListUtil: "SELECT * FROM names
@@ -660,18 +889,30 @@ LOCALES = ("chi", "eng", "ind", "kor", "tha", "vie")
 ICON_URL = "https://open.api.nexon.com/static/fconline/meta/seasonid.json"
 
 
-def _originals(game):
-    """Put data_0.big and Label.big back as they were before the first install."""
+def _original(path):
+    """Put a client file back as it was before the first install (the first one copies it)."""
     os.makedirs(BACKUP, exist_ok=True)
-    out = []
-    for path in (os.path.join(game, "data", "data_0.big"), os.path.join(game, LABEL_BIG)):
-        copy = os.path.join(BACKUP, os.path.basename(path))
-        if os.path.isfile(copy):
-            shutil.copyfile(copy, path)
-        else:
-            shutil.copyfile(path, copy)
-        out.append(path)
-    return out
+    copy = os.path.join(BACKUP, os.path.basename(path))
+    if os.path.isfile(copy):
+        shutil.copyfile(copy, path)
+    else:
+        shutil.copyfile(path, copy)
+    return path
+
+
+def _originals(game):
+    """data_0.big, Label.big and Module.big as they were before the first install."""
+    return [_original(os.path.join(game, p)) for p in (os.path.join("data", "data_0.big"), LABEL_BIG, MODULE_BIG)]
+
+
+def _patch_module(module):
+    """The match HUD's season icons into Module.big (module_with_match_seasons), checked."""
+    import bigdir
+    new = module_with_match_seasons(bigdir.read(module, MODULE_GFX))
+    if new is not None:
+        bigdir.patch(module, {MODULE_GFX: new})
+    assert module_with_match_seasons(bigdir.read(module, MODULE_GFX)) is None
+    return new is not None
 
 
 def _sqlite(plain, edit):
@@ -814,7 +1055,7 @@ def cmd_install(a):
     from extract_fifadb import decrypt
     if _game_running():
         raise SystemExit("close the game first (fifazf.exe is running)")
-    data0, label = _originals(a.game)
+    data0, label, module = _originals(a.game)
     room = {n: size for n, off, size, usize in bigdir.entries(data0)}
     names = locale_additions()
     files, want = {}, {}
@@ -849,6 +1090,7 @@ def cmd_install(a):
     assert bigdir.read(data0, NG_ENTRY) == ng
     gfx, dds = label_with_icons(bigdir.read(label, LABEL_GFX), bigdir.read(label, LABEL_DDS), _icons())
     bigdir.patch(label, {LABEL_GFX: gfx, LABEL_DDS: (refpack(dds), len(dds))})
+    _patch_module(module)
     # check what the client will read
     for entry, plain_db in want.items():
         assert bytes(decrypt(bigdir.read(data0, entry))[16:]) == plain_db[16:], entry
@@ -862,6 +1104,15 @@ def _plain(shipped):
     db = decrypt(bytes(shipped))
     db[:16] = b"SQLite format 3\x00"
     return bytes(db)
+
+
+def cmd_hud(a):
+    """The match HUD's season icons alone, for a client the seasons were installed into before
+    them (install does it too): Module.big from its backup copy (made now if there is none)."""
+    if _game_running():
+        raise SystemExit("close the game first (fifazf.exe is running)")
+    _patch_module(_original(os.path.join(a.game, MODULE_BIG)))
+    print(f"{MODULE_BIG}: the match HUD shows each card's own season (backup in {BACKUP})")
 
 
 def cmd_restore(a):
@@ -899,6 +1150,16 @@ def cmd_selftest(a=None):
     px = [(0, 230, 100, 255)] * 8 + [(60, 64, 70, 255)] * 7 + [(0, 0, 0, 0)]
     b = _bc3(px)
     assert len(b) == 16 and b[0] == 255 and b[1] == 0
+    assert _u30(127) == b"\x7f" and _u30(128) == b"\x80\x01" and _u30(300) == b"\xac\x02"
+    assert _asm([b"\x09", ("@", "a"), (0x10, "a"), (0x12, "b"), b"\x02", ("@", "b")]) == b"\x09\x10\xfc\xff\xff\x12\x01\x00\x00\x02"
+    module = os.path.join(r"D:\FO3ID\32795", MODULE_BIG)
+    if os.path.exists(module):  # the getSeason patch against the client's Module.gfx, in memory
+        import bigdir
+        gfx = bigdir.read(module, MODULE_GFX)
+        new = module_with_match_seasons(gfx)
+        if new is not None:  # an unpatched client: the patched one parses and is patched
+            assert module_with_match_seasons(new) is None and len(new) > len(gfx)
+        print("Module.gfx getSeason patch ok" + (" (installed)" if new is None else ""))
     print("fo4_season selftest ok")
 
 
@@ -912,11 +1173,11 @@ def main():
     sub.add_parser("import").add_argument("file")
     sub.add_parser("build")
     sub.add_parser("selftest")
-    for name in ("install", "restore"):
+    for name in ("install", "hud", "restore"):
         sub.add_parser(name).add_argument("--game", default=r"D:\FO3ID\32795")
     a = ap.parse_args()
     {"fetch": cmd_fetch, "collect": cmd_collect, "import": cmd_import, "build": cmd_build,
-     "install": cmd_install, "restore": cmd_restore, "selftest": cmd_selftest}[a.cmd](a)
+     "install": cmd_install, "hud": cmd_hud, "restore": cmd_restore, "selftest": cmd_selftest}[a.cmd](a)
 
 
 if __name__ == "__main__":
