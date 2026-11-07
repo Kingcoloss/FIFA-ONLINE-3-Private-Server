@@ -37,7 +37,7 @@ Tested in the real client (Indonesian UI):
   (+1 to every attribute per level), manager LV.1-100.
 - Game sound and the EA Trax menu music. `tools/eatrax_song.py` puts your own song first in it,
   but the game then crashes after matches (see the known issue below).
-- Admin web page on http://127.0.0.1:8088/ (EP, players, packs, gifts, daily rewards, match rewards, AI chat, Shop, log)
+- Admin web page on http://127.0.0.1:8088/ (EP, players, packs, gifts, daily rewards, match rewards, match settings, economy, AI chat, Shop, log)
   with a language switch (issue #15): Bahasa Indonesia, English, 简体中文, ไทย, Tiếng Việt, 한국어;
   the browser remembers the choice.
 - Real club kits in matches (kit id = `teamid << 5 | type`; the old `<< 10` gave a checkerboard).
@@ -185,6 +185,24 @@ Added, passing the tests but not yet checked in the client:
   notification naming the buyer; Batal and Ulang work) and list cards of their own beside the +1..+3
   stock, other grades too, a little under the market price, with the Kuantitas changing every hour.
   The card window's Market Price tab draws the last 30 days' price.
+- **Economy settings** (issue #30): the admin page's new Ekonomi tab makes the game as hard as you
+  like: player and pack price multipliers, a new manager's EP, the Shop's free switch, and a dynamic
+  Market. There each player's price drifts day by day (up to about 13% either way), virtual managers
+  now and then list bargains, and you may ask up to 110% of the price (buyers take longer), so buying
+  low and selling high pays. Presets: Easy (as before: free Shop, fixed prices), Realistic (a paid
+  Shop at the cards' worth, the dynamic Market, 300,000 starting EP) and Hard (prices x2, 100,000
+  EP). Match EP stays on the Match rewards tab.
+- **Pre-match settings** (issue #31): Multiple > Rank's game setting screen has working steppers for
+  the stadium (the 70 stadiums the client has complete), the time of day (day or night), the weather
+  (clear, rain, snow, overcast: dusk at night), the match length (6, 8, 10 or 12 minutes) and the ball
+  (9 balls). The last choice is kept for the next matches, Liga and Cup included; their pre-match
+  screen only shows the values, so the admin page's new Match settings tab sets them too, also as
+  "home team's stadium" or "random". The server fixes two labels in the client's Indonesian strings
+  (day read "Waktu", overcast "Malam"); Liga/Cup's screen still calls overcast "Salju".
+- **Keyboard and gamepad keep their own control preset** (issue #32): Opsi > Kontrol holds one
+  preset, for the device in use, and puts the other device back to its first preset when you switch.
+  The server now remembers each device's last preset and restores it after Konfirmasi (the screen
+  shows it the next time it opens; matches use it from kick-off).
 - **Random boxes open** (Kotak Platinum and the rest, issue #12): the box screen lists its prizes
   from `staticdata.availables`, which was missing, so every box failed at "Gunakan".
 - **New cards join Tim Cadangan**: a card from a pack, a trade, the Market, the Bag or the admin

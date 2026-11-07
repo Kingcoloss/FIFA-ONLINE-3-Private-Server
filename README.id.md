@@ -39,7 +39,7 @@ Diuji di client asli (UI bahasa Indonesia):
   per level), manager LV.1-100.
 - Suara game dan musik menu EA Trax. `tools/eatrax_song.py` menaruh lagumu sendiri di urutan
   pertama, tapi game lalu crash setelah pertandingan (lihat masalah yang diketahui di bawah).
-- Halaman admin web di http://127.0.0.1:8088/ (EP, pemain, pak, hadiah, hadiah harian, hadiah match, chat AI, Shop, log)
+- Halaman admin web di http://127.0.0.1:8088/ (EP, pemain, pak, hadiah, hadiah harian, hadiah match, pengaturan match, ekonomi, chat AI, Shop, log)
   dengan pilihan bahasa (issue #15): Bahasa Indonesia, English, 简体中文, ไทย, Tiếng Việt, 한국어;
   browser mengingat pilihannya.
 - Jersey klub asli di pertandingan (kit id = `teamid << 5 | type`; `<< 10` yang lama menghasilkan
@@ -197,6 +197,27 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   dan ikut menjual kartu mereka sendiri di samping stok +1..+3, juga dengan grade lain, sedikit di
   bawah harga pasar, dengan Kuantitas yang berubah tiap jam. Tab Market Price di jendela kartu
   menampilkan grafik harga 30 hari terakhir.
+- **Pengaturan ekonomi** (issue #30): tab Ekonomi yang baru di halaman admin membuat game sesulit
+  yang kamu mau: pengali harga pemain dan pak, EP awal manajer baru, opsi Shop gratis, dan pasar
+  dinamis. Di pasar dinamis, harga tiap pemain di Market naik-turun dari hari ke hari (sampai
+  sekitar 13%), manajer virtual sesekali menjual kartu dengan harga miring, dan kamu boleh memasang
+  harga sampai 110% dari harga pasar (kartunya lebih lama terjual), jadi beli murah lalu jual mahal
+  itu menguntungkan. Preset: Santai (seperti sebelumnya: Shop gratis, harga tetap), Realistis (Shop
+  berbayar seharga nilai kartunya, pasar dinamis, EP awal 300.000), dan Sulit (harga x2,
+  EP awal 100.000). EP dari match tetap diatur di tab Hadiah match.
+- **Pengaturan sebelum match** (issue #31): layar pengaturan game di Multiple > Rank punya stepper
+  yang berfungsi untuk stadion (70 stadion yang datanya lengkap di client), waktu (siang atau
+  malam), cuaca (cerah, hujan, salju, mendung: senja di malam hari), durasi match (6, 8, 10, atau
+  12 menit), dan bola (9 bola). Pilihan terakhir tetap berlaku di match berikutnya, termasuk di Liga
+  dan Cup; layar sebelum match di keduanya hanya menampilkan nilainya, jadi semuanya juga bisa
+  diatur di tab Pengaturan match yang baru di halaman admin, dengan opsi tambahan
+  "Kandang tim tuan rumah" atau "Acak". Server memperbaiki dua label di teks bahasa Indonesia client
+  (siang dulu tertulis "Waktu", mendung "Malam"); layar Liga/Cup masih menyebut mendung "Salju".
+- **Keyboard dan gamepad tetap memakai preset kontrolnya sendiri** (issue #32): Opsi > Kontrol hanya
+  menyimpan satu preset, untuk perangkat yang sedang dipakai, dan mengembalikan perangkat lainnya ke
+  preset pertamanya saat kamu berganti perangkat. Sekarang server mengingat preset terakhir tiap
+  perangkat dan memulihkannya setelah Konfirmasi (layar itu menampilkannya saat dibuka lagi; match
+  memakainya sejak kick-off).
 - **Kotak acak bisa dibuka** (Kotak Platinum dan lainnya, issue #12): layar kotak menampilkan
   hadiahnya dari `staticdata.availables`, yang belum ada, jadi tiap kotak gagal saat "Gunakan".
 - **Kartu baru masuk Tim Cadangan**: kartu dari pak, trade, Market, Bag, atau halaman admin tampil

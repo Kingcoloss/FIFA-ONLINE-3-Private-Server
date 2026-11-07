@@ -25,7 +25,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PAGE = os.path.join(HERE, "admin", "index.html")
 POS_NAMES = "GK SW RWB RB RCB CB LCB LB LWB RDM CDM LDM RM RCM CM LCM LM RAM CAM LAM RF CF LF RW RS ST LS LW".split()
 API = {}
-READ_ONLY = {"summary", "players", "search", "packs", "daily", "match_rewards", "vm_chat", "log", "shop"}  # the rest must be POST + header
+READ_ONLY = {"summary", "players", "search", "packs", "daily", "match_rewards", "vm_chat", "prematch", "economy", "log", "shop"}  # the rest must be POST + header
 hc = None  # the http_config module, set by start() (or by tests)
 
 
@@ -335,6 +335,51 @@ def vm_chat_set(p):
     with open(hc.VM_CHAT_FILE, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=1)
     return cfg
+
+
+@api("prematch")
+def prematch(p):
+    return {**hc.match_prefs(hc._state()), "halfLengths": list(hc.HALF_LENGTHS),
+            "stadiums": [{"id": s["id"], "name": s["name"]} for s in hc.stadium_choices()],
+            "balls": [{"id": b, "name": n} for b, n in hc.ball_names().items()]}
+
+
+@api("prematch_set")
+def prematch_set(p):
+    """The next matches' stadium / time of day / weather / length (issue #31): Liga and Cup have no
+    control for them in the game, Rank's game setting screen does and saves its choice here too."""
+    prefs = {}
+    for k, ok in hc.MATCH_PREFS.items():
+        v = p.get(k)
+        v = int(v) if isinstance(v, str) and v.isdigit() else v
+        if isinstance(v, bool) or v not in ok:
+            raise AdminError("e_pm_value")
+        prefs[k] = v
+    st = hc._state()
+    st["matchprefs"] = prefs
+    hc._save(st)
+    return hc.match_prefs(st)
+
+
+@api("economy")
+def economy(p):
+    return {**hc.ECONOMY, "shopfree": hc.SHOP_FREE}
+
+
+@api("economy_set")
+def economy_set(p):
+    """The economy (issue #30: harder, configurable): player and pack price multipliers, a new
+    manager's EP, the dynamic Market, and the Shop's free switch (the Shop tab's too)."""
+    try:
+        cfg = {"players": float(p.get("players")), "packs": float(p.get("packs")), "start_ep": int(p.get("start_ep"))}
+    except (TypeError, ValueError):
+        raise AdminError("e_eco_value")
+    if not (0.1 <= cfg["players"] <= 100 and 0.1 <= cfg["packs"] <= 100 and 0 <= cfg["start_ep"] <= 10 ** 12):
+        raise AdminError("e_eco_value")
+    new = hc.set_economy({**cfg, "dynamic": bool(p.get("dynamic"))})
+    if "shopfree" in p:
+        shop_free({"free": p["shopfree"]})
+    return {**new, "shopfree": hc.SHOP_FREE}
 
 
 @api("scouts_reset")
@@ -769,6 +814,8 @@ I18N = {
         e_unknown_kind="jenis produk tidak dikenal", e_product_missing="produk tidak ditemukan", e_not_changed="produk ini tidak diubah",
         e_in_use="masih dipakai oleh {0}", e_list_item="{0}: item {1} tidak cocok di sini", e_chain_packages="paket berantai hanya berisi paket",
         nav_chat="Chat AI", chat_title="Chat manajer virtual", chat_lead="Lawan Rank (manajer virtual) mengirim pesan di chat match: saat kick-off, saat ada gol di kedua sisi, tembakan meleset, penyelamatan kiper, dan saat kamu mengetik chat. Komentarnya tentang hasil akhir muncul sebagai banner saat kembali ke layar Rank. Tiap manajer punya kepribadian sendiri (ramah, kompetitif, lucu, percaya diri, usil). Tersimpan di {0}; berlaku mulai pesan berikutnya.", chat_on="Aktifkan chat AI", chat_lang="Bahasa pesan", chat_saved="Pengaturan chat AI disimpan.", e_chat_lang="bahasa chat tidak dikenal",
+        nav_prematch="Pengaturan match", pm_title="Pengaturan match", pm_lead="Stadion, waktu, cuaca dan durasi untuk match berikutnya (Liga, Cup, Rank). Di Multiple > Rank semuanya juga bisa diganti di layar pengaturan match, dan pilihan itu ikut tersimpan di sini; layar Liga dan Cup hanya menampilkannya. Mendung: berawan di siang hari, senja di malam hari (layar Liga/Cup menuliskannya \"Salju\").", pm_stadium="Stadion", pm_tod="Waktu", pm_weather="Cuaca", pm_length="Durasi", pm_home="Kandang tim tuan rumah", pm_random="Acak", pm_day="Siang", pm_night="Malam", pm_dry="Cerah", pm_rain="Hujan", pm_snow="Salju", pm_overcast="Mendung", pm_minutes="{0} menit", pm_ball="Bola", pm_saved="Pengaturan match disimpan.", e_pm_value="nilai pengaturan match tidak valid",
+        nav_economy="Ekonomi", eco_title="Ekonomi", eco_lead="Harga dan EP untuk semua manajer. Santai = seperti biasa (Shop gratis). Realistis: Shop berbayar (harga pack = nilai kartu di dalamnya) dan pasar dinamis. Sulit: harga pemain dan pack x2, EP awal kecil. Pasar dinamis: harga tiap pemain naik-turun setiap hari, manajer virtual kadang menjual murah, dan kamu boleh memasang harga sampai 110% (lebih lama terjual): beli murah, jual mahal. EP dari match diatur di tab Hadiah match; EP awal berlaku untuk manajer baru.", eco_preset="Preset", eco_custom="Kustom", eco_easy="Santai (seperti biasa)", eco_real="Realistis", eco_hard="Sulit", eco_shopfree="Shop gratis (0 EP)", eco_players="Harga pemain (x)", eco_packs="Harga pack (x)", eco_start="EP awal manajer baru", eco_dynamic="Pasar dinamis (harga naik-turun, bisa untung dari jual-beli)", eco_saved="Pengaturan ekonomi disimpan.", e_eco_value="nilai ekonomi tidak valid (pengali 0.1-100, EP awal 0 atau lebih)",
     ),
     "en": dict(
         ep_balance="EP balance", language="Language", menu="Admin menu",
@@ -848,6 +895,8 @@ I18N = {
         e_unknown_kind="unknown product kind", e_product_missing="product not found", e_not_changed="this product was not changed",
         e_in_use="still used by {0}", e_list_item="{0}: item {1} does not fit here", e_chain_packages="a chained package holds packages only",
         nav_chat="AI chat", chat_title="Virtual managers' chat", chat_lead="Rank opponents (virtual managers) post in the match chat: at kick-off, on goals both ways, missed shots, keeper saves, and when you type in chat. Their word on the result shows as a banner back on the Rank screen. Each manager has a personality (friendly, competitive, funny, confident, playful). Saved in {0}; used from the next message.", chat_on="AI chat on", chat_lang="Message language", chat_saved="AI chat settings saved.", e_chat_lang="unknown chat language",
+        nav_prematch="Match settings", pm_title="Match settings", pm_lead="Stadium, time of day, weather and length for the next matches (Liga, Cup, Rank). In Multiple > Rank they can also be changed on the game setting screen, and that choice is saved here too; the Liga and Cup screens only show them. Overcast: cloudy by day, dusk at night (the Liga/Cup screen labels it \"Salju\").", pm_stadium="Stadium", pm_tod="Time of day", pm_weather="Weather", pm_length="Length", pm_home="Home team's stadium", pm_random="Random", pm_day="Day", pm_night="Night", pm_dry="Clear", pm_rain="Rain", pm_snow="Snow", pm_overcast="Overcast", pm_minutes="{0} min", pm_ball="Ball", pm_saved="Match settings saved.", e_pm_value="invalid match setting",
+        nav_economy="Economy", eco_title="Economy", eco_lead="Prices and EP for every manager. Easy = as always (free Shop). Realistic: a paid Shop (a pack costs the worth of its cards) and the dynamic Market. Hard: player and pack prices x2, little starting EP. Dynamic Market: each player's price moves every day, virtual managers sometimes sell cheap, and you may ask up to 110% (it sells slower): buy low, sell high. Match EP is set on the Match rewards tab; starting EP is for new managers.", eco_preset="Preset", eco_custom="Custom", eco_easy="Easy (as always)", eco_real="Realistic", eco_hard="Hard", eco_shopfree="Free Shop (0 EP)", eco_players="Player prices (x)", eco_packs="Pack prices (x)", eco_start="A new manager's EP", eco_dynamic="Dynamic Market (prices move, trading can pay)", eco_saved="Economy settings saved.", e_eco_value="invalid economy setting (multipliers 0.1-100, starting EP 0 or more)",
     ),
     "zh": dict(
         lang_name="简体中文", locale="zh-CN",
@@ -928,6 +977,8 @@ I18N = {
         e_unknown_kind="未知的商品种类", e_product_missing="找不到该商品", e_not_changed="该商品没有被修改过",
         e_in_use="仍被 {0} 使用", e_list_item="{0}：物品 {1} 不能放在这里", e_chain_packages="连锁礼包只能包含礼包",
         nav_chat="AI 聊天", chat_title="虚拟经理聊天", chat_lead="排位对手（虚拟经理）会在比赛聊天中发言：开球时、双方进球时、射门偏出时、门将扑救时，以及你输入聊天时。对比赛结果的评论会在回到排位画面时以横幅显示。每位经理都有自己的性格（友好、好胜、搞笑、自信、调皮）。保存在 {0}；从下一条消息开始生效。", chat_on="启用 AI 聊天", chat_lang="消息语言", chat_saved="AI 聊天设置已保存。", e_chat_lang="未知的聊天语言",
+        nav_prematch="比赛设置", pm_title="比赛设置", pm_lead="下一场比赛（联赛、杯赛、排位）的球场、时间、天气和时长。在 Multiple > Rank 的比赛设置画面也可以修改，修改结果也会保存在这里；联赛和杯赛画面只显示这些设置。阴天：白天为多云，夜晚为黄昏（联赛/杯赛画面会显示为“Salju”）。", pm_stadium="球场", pm_tod="时间", pm_weather="天气", pm_length="时长", pm_home="主队球场", pm_random="随机", pm_day="白天", pm_night="夜晚", pm_dry="晴", pm_rain="雨", pm_snow="雪", pm_overcast="阴天", pm_minutes="{0} 分钟", pm_ball="足球", pm_saved="比赛设置已保存。", e_pm_value="无效的比赛设置",
+        nav_economy="经济", eco_title="经济", eco_lead="所有经理的价格与 EP。轻松 = 保持原样（商店免费）。真实：商店收费（卡包价格 = 卡包内球员的价值）并开启动态市场。困难：球员和卡包价格 x2，初始 EP 很少。动态市场：每位球员的价格每天涨跌，虚拟经理有时会低价出售，你可以把售价定到 110%（卖出更慢）：低买高卖。比赛 EP 在“比赛奖励”页设置；初始 EP 只对新经理有效。", eco_preset="预设", eco_custom="自定义", eco_easy="轻松（保持原样）", eco_real="真实", eco_hard="困难", eco_shopfree="商店免费（0 EP）", eco_players="球员价格（倍）", eco_packs="卡包价格（倍）", eco_start="新经理的初始 EP", eco_dynamic="动态市场（价格涨跌，买卖可以获利）", eco_saved="经济设置已保存。", e_eco_value="无效的经济设置（倍率 0.1-100，初始 EP 不小于 0）",
     ),
     "th": dict(
         lang_name="ไทย", locale="th-TH",
@@ -1008,6 +1059,8 @@ I18N = {
         e_unknown_kind="ไม่รู้จักประเภทสินค้านี้", e_product_missing="ไม่พบสินค้า", e_not_changed="สินค้านี้ยังไม่เคยถูกแก้ไข",
         e_in_use="ยังถูกใช้โดย {0}", e_list_item="{0}: ใส่ไอเทม {1} ที่นี่ไม่ได้", e_chain_packages="แพ็กเกจต่อเนื่องใส่ได้เฉพาะแพ็กเกจ",
         nav_chat="แชท AI", chat_title="แชทของผู้จัดการเสมือน", chat_lead="คู่แข่งแรงก์ (ผู้จัดการเสมือน) จะพิมพ์ในแชทระหว่างแมตช์: ตอนเริ่มเกม เมื่อมีการทำประตูของทั้งสองฝ่าย ยิงพลาด ผู้รักษาประตูเซฟ และเมื่อคุณพิมพ์แชท ความเห็นต่อผลการแข่งขันจะแสดงเป็นแบนเนอร์เมื่อกลับมาที่หน้าแรงก์ ผู้จัดการแต่ละคนมีนิสัยของตัวเอง (เป็นมิตร ชอบแข่งขัน ตลก มั่นใจ ขี้เล่น) บันทึกไว้ที่ {0} ใช้ตั้งแต่ข้อความถัดไป", chat_on="เปิดแชท AI", chat_lang="ภาษาของข้อความ", chat_saved="บันทึกการตั้งค่าแชท AI แล้ว", e_chat_lang="ไม่รู้จักภาษาแชทนี้",
+        nav_prematch="ตั้งค่าแมตช์", pm_title="ตั้งค่าแมตช์", pm_lead="สนาม ช่วงเวลา สภาพอากาศ และความยาวของแมตช์ถัดไป (ลีก คัพ แรงก์) ใน Multiple > Rank เปลี่ยนได้ที่หน้าตั้งค่าแมตช์เช่นกัน และตัวเลือกนั้นจะถูกบันทึกที่นี่ด้วย หน้าลีกและคัพแสดงค่าเท่านั้น ครึ้มฟ้า: กลางวันมีเมฆมาก กลางคืนเป็นยามพลบค่ำ (หน้าลีก/คัพแสดงเป็น \"Salju\")", pm_stadium="สนาม", pm_tod="ช่วงเวลา", pm_weather="สภาพอากาศ", pm_length="ความยาว", pm_home="สนามของทีมเจ้าบ้าน", pm_random="สุ่ม", pm_day="กลางวัน", pm_night="กลางคืน", pm_dry="แจ่มใส", pm_rain="ฝนตก", pm_snow="หิมะ", pm_overcast="ครึ้มฟ้า", pm_minutes="{0} นาที", pm_ball="ลูกบอล", pm_saved="บันทึกการตั้งค่าแมตช์แล้ว", e_pm_value="ค่าการตั้งค่าแมตช์ไม่ถูกต้อง",
+        nav_economy="เศรษฐกิจ", eco_title="เศรษฐกิจ", eco_lead="ราคาและ EP ของผู้จัดการทุกคน ง่าย = เหมือนเดิม (ร้านค้าฟรี) สมจริง: ร้านค้าเสียเงิน (ราคาแพ็ค = มูลค่าการ์ดในแพ็ค) และตลาดแบบไดนามิก ยาก: ราคานักเตะและแพ็ค x2 และ EP เริ่มต้นน้อย ตลาดแบบไดนามิก: ราคานักเตะแต่ละคนขึ้นลงทุกวัน ผู้จัดการเสมือนบางครั้งขายถูก และคุณตั้งราคาได้ถึง 110% (ขายได้ช้าลง): ซื้อถูก ขายแพง EP จากแมตช์ตั้งได้ที่แท็บรางวัลหลังแมตช์ EP เริ่มต้นใช้กับผู้จัดการใหม่", eco_preset="พรีเซ็ต", eco_custom="กำหนดเอง", eco_easy="ง่าย (เหมือนเดิม)", eco_real="สมจริง", eco_hard="ยาก", eco_shopfree="ร้านค้าฟรี (0 EP)", eco_players="ราคานักเตะ (เท่า)", eco_packs="ราคาแพ็ค (เท่า)", eco_start="EP เริ่มต้นของผู้จัดการใหม่", eco_dynamic="ตลาดแบบไดนามิก (ราคาขึ้นลง ซื้อขายทำกำไรได้)", eco_saved="บันทึกการตั้งค่าเศรษฐกิจแล้ว", e_eco_value="ค่าการตั้งค่าเศรษฐกิจไม่ถูกต้อง (ตัวคูณ 0.1-100, EP เริ่มต้น 0 ขึ้นไป)",
     ),
     "vi": dict(
         lang_name="Tiếng Việt", locale="vi-VN",
@@ -1088,6 +1141,8 @@ I18N = {
         e_unknown_kind="không rõ loại sản phẩm", e_product_missing="không tìm thấy sản phẩm", e_not_changed="sản phẩm này chưa được sửa",
         e_in_use="vẫn đang được {0} dùng", e_list_item="{0}: không đặt được vật phẩm {1} ở đây", e_chain_packages="gói nối tiếp chỉ chứa gói quà",
         nav_chat="Chat AI", chat_title="Chat của HLV ảo", chat_lead="Đối thủ Rank (HLV ảo) nhắn trong khung chat của trận: lúc giao bóng, khi có bàn thắng của hai bên, sút trượt, thủ môn cản phá và khi bạn gõ chat. Lời bình về kết quả hiện thành banner khi quay lại màn hình Rank. Mỗi HLV có tính cách riêng (thân thiện, hiếu thắng, hài hước, tự tin, tinh nghịch). Lưu trong {0}; áp dụng từ tin nhắn tiếp theo.", chat_on="Bật chat AI", chat_lang="Ngôn ngữ tin nhắn", chat_saved="Đã lưu cài đặt chat AI.", e_chat_lang="ngôn ngữ chat không hợp lệ",
+        nav_prematch="Cài đặt trận", pm_title="Cài đặt trận đấu", pm_lead="Sân, thời gian, thời tiết và thời lượng cho các trận tiếp theo (Liga, Cup, Rank). Trong Multiple > Rank cũng đổi được ở màn hình cài đặt trận, và lựa chọn đó cũng được lưu tại đây; màn hình Liga và Cup chỉ hiển thị. Âm u: trời nhiều mây ban ngày, hoàng hôn ban đêm (màn hình Liga/Cup ghi là \"Salju\").", pm_stadium="Sân vận động", pm_tod="Thời gian", pm_weather="Thời tiết", pm_length="Thời lượng", pm_home="Sân của đội chủ nhà", pm_random="Ngẫu nhiên", pm_day="Ban ngày", pm_night="Ban đêm", pm_dry="Quang đãng", pm_rain="Mưa", pm_snow="Tuyết", pm_overcast="Âm u", pm_minutes="{0} phút", pm_ball="Bóng", pm_saved="Đã lưu cài đặt trận đấu.", e_pm_value="giá trị cài đặt trận đấu không hợp lệ",
+        nav_economy="Kinh tế", eco_title="Kinh tế", eco_lead="Giá và EP cho mọi HLV. Dễ = như trước (Shop miễn phí). Thực tế: Shop tính phí (giá gói = giá trị các thẻ bên trong) và thị trường biến động. Khó: giá cầu thủ và giá gói x2, EP ban đầu ít. Thị trường biến động: giá mỗi cầu thủ lên xuống mỗi ngày, HLV ảo đôi khi bán rẻ, và bạn có thể đặt giá đến 110% (bán chậm hơn): mua rẻ, bán đắt. EP từ trận đấu chỉnh ở tab Thưởng sau trận; EP ban đầu áp dụng cho HLV mới.", eco_preset="Mẫu", eco_custom="Tùy chỉnh", eco_easy="Dễ (như trước)", eco_real="Thực tế", eco_hard="Khó", eco_shopfree="Shop miễn phí (0 EP)", eco_players="Giá cầu thủ (x)", eco_packs="Giá gói (x)", eco_start="EP ban đầu của HLV mới", eco_dynamic="Thị trường biến động (giá lên xuống, mua bán có lãi)", eco_saved="Đã lưu cài đặt kinh tế.", e_eco_value="giá trị kinh tế không hợp lệ (hệ số 0.1-100, EP ban đầu từ 0 trở lên)",
     ),
     "ko": dict(
         lang_name="한국어", locale="ko-KR",
@@ -1168,6 +1223,8 @@ I18N = {
         e_unknown_kind="알 수 없는 상품 종류", e_product_missing="상품을 찾을 수 없습니다", e_not_changed="수정된 적 없는 상품입니다",
         e_in_use="아직 {0}에서 사용 중입니다", e_list_item="{0}: 아이템 {1}은(는) 여기에 넣을 수 없습니다", e_chain_packages="연속 패키지에는 패키지만 넣을 수 있습니다",
         nav_chat="AI 채팅", chat_title="가상 감독 채팅", chat_lead="랭크 상대(가상 감독)가 경기 채팅에 메시지를 보냅니다: 킥오프, 양 팀의 골, 빗나간 슈팅, 골키퍼 선방, 그리고 당신이 채팅을 입력할 때. 결과에 대한 한마디는 랭크 화면으로 돌아오면 배너로 표시됩니다. 감독마다 성격이 있습니다(친절함, 승부욕, 유머, 자신감, 장난기). {0}에 저장되며 다음 메시지부터 적용됩니다.", chat_on="AI 채팅 켜기", chat_lang="메시지 언어", chat_saved="AI 채팅 설정을 저장했습니다.", e_chat_lang="알 수 없는 채팅 언어",
+        nav_prematch="경기 설정", pm_title="경기 설정", pm_lead="다음 경기(리그, 컵, 랭크)의 경기장, 시간대, 날씨, 경기 시간입니다. Multiple > Rank에서는 경기 설정 화면에서도 바꿀 수 있고, 그 선택도 여기에 저장됩니다. 리그와 컵 화면은 표시만 합니다. 흐림: 낮에는 구름 낀 하늘, 밤에는 해질녘입니다(리그/컵 화면에는 \"Salju\"로 표시됨).", pm_stadium="경기장", pm_tod="시간대", pm_weather="날씨", pm_length="경기 시간", pm_home="홈 팀 경기장", pm_random="무작위", pm_day="낮", pm_night="밤", pm_dry="맑음", pm_rain="비", pm_snow="눈", pm_overcast="흐림", pm_minutes="{0}분", pm_ball="공", pm_saved="경기 설정을 저장했습니다.", e_pm_value="잘못된 경기 설정 값",
+        nav_economy="경제", eco_title="경제", eco_lead="모든 감독의 가격과 EP입니다. 쉬움 = 지금과 같음(상점 무료). 현실적: 유료 상점(팩 가격 = 들어 있는 카드의 가치)과 변동 시장. 어려움: 선수와 팩 가격 x2, 적은 시작 EP. 변동 시장: 선수 가격이 매일 오르내리고, 가상 감독이 가끔 싸게 팔며, 판매가를 110%까지 정할 수 있습니다(더 늦게 팔림): 싸게 사서 비싸게 파세요. 경기 EP는 경기 보상 탭에서, 시작 EP는 새 감독에게 적용됩니다.", eco_preset="프리셋", eco_custom="사용자 지정", eco_easy="쉬움(지금과 같음)", eco_real="현실적", eco_hard="어려움", eco_shopfree="상점 무료(0 EP)", eco_players="선수 가격(배)", eco_packs="팩 가격(배)", eco_start="새 감독의 시작 EP", eco_dynamic="변동 시장(가격 변동, 거래로 이익 가능)", eco_saved="경제 설정을 저장했습니다.", e_eco_value="잘못된 경제 설정 값(배율 0.1-100, 시작 EP 0 이상)",
     ),
 }
 

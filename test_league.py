@@ -31,6 +31,7 @@ def main():
     try:
         hc.STATE = os.path.join(tmp, "state.json")
         hc.SHOP_FILE = os.path.join(tmp, "shop.json"); hc.apply_shop({})  # the built-in Shop, not the live edits
+        hc.ECONOMY_FILE = os.path.join(tmp, "economy.json"); hc.ECONOMY = dict(hc.ECONOMY_DEFAULT)  # not the live one
         hc.MATCH_REWARD_FILE = os.path.join(tmp, "match_rewards.json")  # default match rewards; admin test writes here
         # a fresh account through the client's club creation (the live state may hold no manager)
         hc._save({"coaches": [], "defaultcoachid": "", "teams": {}})
@@ -81,6 +82,21 @@ def main():
         save_opt({"soundOption": {"BGM": 4}, "controlOption": {}})  # e.g. leaving a match
         assert acc_ctl() == mine and body(hc.ENDPOINTS["/account"]("", b""))["option"]["soundOption"]["BGM"] == 4
         save_opt({"soundOption": {"BGM": 10}, "controlOption": hc.CONTROL_DEFAULTS})
+        # issue #32: each device keeps its own preset. The Kontrol screen resets a device it switches to
+        # to preset 0 (Type 0); the server gives it back its last one
+        kb = lambda t, **k: dict(hc.CONTROL_DEFAULTS, Controller=0, Type=t, **k)
+        pad = lambda t, **k: dict(hc.CONTROL_DEFAULTS, Controller=1, Type=t, **k)
+        ctl_type = lambda o: body(save_opt({"controlOption": o}))["resources"][0]["body"]["controlOption"]["Type"]
+        assert ctl_type(kb(1)) == 1  # keyboard: FIFA Online 2 Baru
+        assert ctl_type(pad(0)) == 2  # to the pad: its DPAD saved above comes back
+        assert ctl_type(pad(1)) == 1  # the pad: Tipe W
+        assert ctl_type(kb(0)) == 1 and acc_ctl()["Type"] == 1  # back to the keyboard: FO2 Baru, at the next login too
+        assert ctl_type(pad(5)) == 1  # the beginner's guide flips Controller with the keyboard's Type: the pad's own
+        assert ctl_type(pad(0)) == 0  # preset 0 picked without switching: taken
+        assert ctl_type(kb(0, KeyAttType1=[69, 65, 68, 83, 81, 90, 67, 87])) == 0  # switched and remapped preset 0: taken
+        st = hc._state(); st["option"]["controlOption"] = pad(5); hc._save(st)  # saved before the fix
+        assert acc_ctl()["Type"] == 0 and hc._state()["controlType"] == {"0": 0, "1": 0}
+        save_opt({"controlOption": hc.CONTROL_DEFAULTS})
         assert "teamcolor" in body(hc.ENDPOINTS["/account"]("", b""))["features"]
         tc = body(hc.ENDPOINTS["/static/info/teamcolor"]("", b""))
         assert {hc.TC_CLUB, hc.TC_NATION} <= {c["teamcolorid"] for c in tc["teamColors"]}
@@ -605,10 +621,13 @@ def main():
         s, r = next((s, r) for s in sorted(hc.market_spids()) if hc.card_price(s) < 20000
                     for r in hc.market_rows(s) if r["grade"] >= 4 and r["price"] < ep() // 4)
         assert 0.955 * hc.card_price(s, r["grade"]) <= r["price"] <= hc.card_price(s, r["grade"])
-        ep2 = ep()
+        ep2, had = ep(), {hc.iid(p) for p in team()["players"]}
         for _ in range(r["count"]):
             assert buy(r)["result"]
         assert ep() == ep2 - r["count"] * r["price"] and buy(r)["reason"] == "NO_SUCH_OFFER"  # sold out this hour
+        st = hc._state(); t = st["teams"][str(hc._default_slot(st))]  # undone: the listings change by the hour,
+        t["players"] = [p for p in t["players"] if hc.iid(p) in had]  # and the reserves feed the trade tests below
+        hc.add_ep(st, ep2 - ep()); hc._save(st)
         assert buy({**rows[0], "price": rows[0]["price"] - 1})["reason"] == "NO_SUCH_OFFER"
         hist = body(hc.route(f"/transfer/{spid}/1/detail")("", b""))["history"]  # the price graph
         assert hist["basePrice"] == hc.card_price(spid) and len(hist["data"]) == hc.PRICE_DAYS
@@ -855,15 +874,15 @@ def main():
         # own (another slot's do not show, nor sell to this club); at most OFFERS_MAX listings; Batal
         # refuses a full club ("Exceed plyer limit")
         assert alarm["stackable"] is True
-        spare = [hc.iid(p) for p in team()["players"] if not hc.is_starter(team(), p) and hc.grade_of(p) > 0]
+        st = hc._state()  # two test cards (taken out again below: the reserves feed the trade tests)
+        spare = [hc.iid(hc.add_player(st["teams"][str(hc._default_slot(st))], spid, 1)) for _ in range(2)]; hc._save(st)
         assert sell(spare[0], 1)["result"]
         st = hc._state(); o = st["offers"][0]
         assert o["slot"] == hc._default_slot(st) and not any("slot" in x for x in mine())
         o["slot"] = 1 - o["slot"]; hc._save(st)
         assert mine() == [] and body(hc.route(f"/transfer/my/offer/waiting/{o['_id']}")("", b"{}"))["reason"] == "OFFER_NOT_EXIST_ERROR"
-        o["slot"] = 1 - o["slot"]; st["offers"] += [dict(o, _id=f"x{k}") for k in range(hc.OFFERS_MAX - 1)]
-        extra = hc.iid(hc.add_player(st["teams"][str(hc._default_slot(st))], spid, 1)); hc._save(st)
-        assert sell(extra, 1)["reason"] == "TRANSFERMARKET_MAX_REGISTERED"
+        o["slot"] = 1 - o["slot"]; st["offers"] += [dict(o, _id=f"x{k}") for k in range(hc.OFFERS_MAX - 1)]; hc._save(st)
+        assert sell(spare[1], 1)["reason"] == "TRANSFERMARKET_MAX_REGISTERED"
         st = hc._state(); st["offers"] = st["offers"][:1]; t = st["teams"][str(hc._default_slot(st))]
         filler = [dict(t["players"][-1], _id=f"fill{k}") for k in range(hc.MAX_PLAYERS - len(t["players"]))]
         t["players"] += filler; hc._save(st)
@@ -872,6 +891,8 @@ def main():
         t["players"] = [p for p in t["players"] if not str(p.get("_id", "")).startswith("fill")]; hc._save(st)
         assert body(hc.route(f"/transfer/my/offer/waiting/{o['_id']}")("", b"{}"))["result"] and mine() == []
         assert not os.path.exists(hc.STATE + ".tmp")  # saves are whole: a temp file, then a rename
+        st = hc._state(); t = st["teams"][str(hc._default_slot(st))]
+        t["players"] = [p for p in t["players"] if hc.iid(p) not in spare]; hc._save(st)
         # --- trade (Tukar v1): 2..10 reserves -> offers rated >= avg OVR + bonus, PC + VIP extra
         post = lambda path, req: body(hc.ENDPOINTS[path]("", json.dumps(req).encode()))
         with hc.closing(hc._db()) as c:
@@ -1186,6 +1207,84 @@ def main():
         # the Rank opponents' chat: on/off and language (gamedata/vm_chat.json)
         assert A("vm_chat")["enabled"] and A("vm_chat")["lang"] == "id" and refused("vm_chat_set", enabled=True, lang="xx")
         assert A("vm_chat_set", enabled=False, lang="vi") == hc.vm_chat_cfg() == {"enabled": False, "lang": "vi"}
+        # issue #31, pre-match settings: Rank's game setting screen has the steppers (its stadium list is
+        # GET /stadium/list, a change is PUT /match/<id>/gamesettings); Liga and Cup only show the values,
+        # which come from the last choice (also set here, on the admin page)
+        stads = body(hc.ENDPOINTS["/stadium/list"]("", b""))
+        assert len(stads) == len(hc.STADIUMS_SAFE) and {s["id"] for s in stads} == set(hc.STADIUMS_SAFE)
+        assert all(s["name"] and "(" not in s["name"] and s["todWeatherAvailables"] == {"1": [0, 1, 2, 3], "3": [0, 1, 2, 3]}
+                   for s in stads)
+        assert A("prematch")["stadium"] == hc.STADIUM_DEFAULT and A("prematch")["tod"] == 1 and len(A("prematch")["stadiums"]) == 70
+        assert {s["id"]: s["name"] for s in stads}[2] == hc.client_stadium_names().get("2", "Santiago Bernabeu")  # the client's names
+        assert [b["id"] for b in A("prematch")["balls"]] == list(hc.BALLS) and A("prematch")["ball"] == 0
+        assert refused("prematch_set", stadium=6, tod=1, weather=0, halfLength=30, ball=0)  # Camp Nou: no DB row in the client
+        assert refused("prematch_set", stadium=1, tod=4, weather=0, halfLength=30, ball=0)  # dusk: no light set
+        assert refused("prematch_set", stadium=1, tod=1, weather=0, halfLength=30, ball=88)  # a ball not offered
+        assert A("prematch_set", stadium="1", tod=3, weather=1, halfLength=60, ball=6) == dict(stadium=1, tod=3, weather=1, halfLength=60, ball=6)
+        mk = lambda: hc.new_match("Cup_PvE", hc.match_side(hc.roster_team(241), 241), hc.match_side(hc.roster_team(243), 243))
+        m = mk(); hc.apply_prematch(hc._state(), m); gs = m["gamesettings"]
+        assert (gs["stadium"], gs["tod"], gs["weather"], gs["halfLength"], gs["ball"]) == (1, 3, 1, 60, {"id": 6, "availables": list(hc.BALLS)})
+        assert gs["stadiumchange"] and gs["timechange"] and gs["weatherchange"] and gs["matchtimechange"]
+        A("prematch_set", stadium="home", tod="random", weather="random", halfLength=30, ball=0)
+        m = mk(); m["gamesettings"]["home"] = False; hc.apply_prematch(hc._state(), m, hc.random.Random(1)); gs = m["gamesettings"]
+        assert gs["stadium"] == (hc.club_stadium(243) if hc.club_stadium(243) in hc.STADIUMS_SAFE else hc.STADIUM_DEFAULT)
+        assert gs["tod"] in hc.TODS and gs["weather"] in hc.WEATHERS
+        for k in range(30):  # a random weather is clear, rain or overcast: snow only when picked
+            m2 = mk(); hc.apply_prematch(hc._state(), m2, hc.random.Random(k)); assert m2["gamesettings"]["weather"] != 2
+        st = hc._state(); st["match"] = m; hc._save(st)  # Rank's steppers: several keys may come in one body
+        put = lambda **b: body(hc.route(f"/match/{m['id']}/gamesettings")("", json.dumps({**b, "_method": "PUT"}).encode()))
+        r = put(stadium=137, tod=3, weather=2, halfLength=50, side=0, kit="away")
+        assert r["resources"][0]["uri"] == f"/match/{m['id']}" and r["resources"][0]["body"]["gamesettings"]["stadium"] == 137
+        gs = hc._state()["match"]["gamesettings"]
+        assert (gs["stadium"], gs["tod"], gs["weather"], gs["halfLength"], gs["kit"][0]) == (137, 3, 2, 50, "away")
+        put(stadium=6, tod=5, weather=7, halfLength=45, ball={"id": 88})  # not offered: ignored (no crash-prone value reaches native)
+        assert (hc._state()["match"]["gamesettings"]["stadium"], hc._state()["match"]["gamesettings"]["tod"]) == (137, 3)
+        put(ball={"id": 41})  # the ball stepper
+        assert hc._state()["match"]["gamesettings"]["ball"]["id"] == 41
+        assert A("prematch")["stadium"] == 137 and hc.match_prefs(hc._state()) == dict(stadium=137, tod=3, weather=2, halfLength=50, ball=41)
+        st = hc._state(); st.pop("match"); st.pop("matchprefs"); hc._save(st)
+        # issue #30's economy request: harder, configurable prices (admin Ekonomi tab). Easy = as it was
+        assert A("economy") == dict(hc.ECONOMY_DEFAULT, shopfree=hc.SHOP_FREE) and hc.SHOP_FREE
+        m88, p1, pk = 88158023, hc.card_price(88158023), next(iter(hc.PACKS))
+        pp1 = hc.pack_price(pk)
+        assert refused("economy_set", players=0, packs=1, start_ep=0) and refused("economy_set", players=1, packs="x", start_ep=0)
+        r = A("economy_set", players=2, packs=3, start_ep=5000, dynamic=False, shopfree=False)
+        assert r == dict(players=2.0, packs=3.0, start_ep=5000, dynamic=False, shopfree=False) and not hc.SHOP_FREE
+        assert hc.card_price(m88) == hc.sig3(p1 * 2) and abs(hc.pack_price(pk) - pp1 * 6) <= pp1 * 6 * 0.1  # caches dropped
+        assert json.load(open(hc.ECONOMY_FILE))["players"] == 2.0 and hc.load_economy() == hc.ECONOMY
+        live = hc.STATE; hc.STATE = os.path.join(tmp, "eco_state.json")  # a new manager starts with start_ep
+        hc._save({"coaches": [], "defaultcoachid": "", "teams": {}})
+        hc.ENDPOINTS["/coach/1"]("", json.dumps({"id": 241, "coachName": "Eco"}).encode())
+        assert hc._state()["coaches"][0]["ep"] == 5000
+        hc.STATE = live
+        # the dynamic Market: a player's price moves day by day (the same for every grade), the band
+        # goes to 110% (a slower buyer), the managers list bargains, the graph draws the real days
+        A("economy_set", players=1, packs=1, start_ep=1000000, dynamic=True, shopfree=True)
+        days = [hc.market_value(m88, 1, hc.VM_EPOCH + d * 86400 + 3600) for d in range(60)]
+        assert all(0.86 * p1 <= v <= 1.14 * p1 for v in days) and max(days) / min(days) > 1.1  # room to trade
+        lower, upper, v = hc.sell_band(m88, 1)
+        assert v == hc.market_value(m88, 1) and upper == hc.nice_price(v * hc.MARKET_ASK_MAX) and lower == v * 8 // 10
+        assert hc.market_rows(m88)[0]["price"] == v
+        lows = [r["price"] / hc.market_value(s, r["grade"]) for s in sorted(hc.market_spids())[:400] for r in hc.market_rows(s)[3:]]
+        assert lows and min(lows) < 0.95 and all(0.85 <= x <= 1.03 for x in lows)  # bargains now and then
+        o = {"_id": "t", "spid": m88, "grade": 1, "price": upper}
+        now = time.time(); hc.vm_buyer(o, now)
+        assert 300 * 48 * 0.6 * 0.9 <= o["buyat"] - now <= 300 * 48 * 1.4 * 1.1  # ~4 h at 110%
+        hist = body(hc.route(f"/transfer/{m88}/1/detail")("", b""))["history"]
+        assert hist["basePrice"] == v and hist["data"][-1][1] == hc.market_value(m88, 1, hc.VM_EPOCH + hc.vm_day() * 86400 + 43200)
+        A("economy_set", players=1, packs=1, start_ep=1000000, dynamic=False, shopfree=True)
+        assert hc.card_price(m88) == p1 and hc.pack_price(pk) == pp1 and hc.market_value(m88, 1) == p1 and hc.SHOP_FREE
+        # the client's string pack is served with the setting screens' labels fixed: day "Siang" (was
+        # "Waktu"), weather 3 "Mendung" (was "Malam"); built once, the rest untouched
+        src = hc.asset_path(hc.LANG_PACK)
+        if src:
+            hc.LANG_FIXED = os.path.join(tmp, "language_ind.big")
+            out = hc.language_pack(src)
+            fixed, orig = (json.loads(hc.client_big(f, hc.LANG_ENTRY).decode("utf-8-sig")) for f in (out, src))
+            assert out == hc.LANG_FIXED and (fixed["COMMON_TIME_DAY"], fixed["COMMON_WEATHER_DUSK"]) == ("Siang", "Mendung")
+            assert {k: v for k, v in fixed.items() if k not in ("COMMON_TIME_DAY", "COMMON_WEATHER_DUSK")} == \
+                {k: v for k, v in orig.items() if k not in ("COMMON_TIME_DAY", "COMMON_WEATHER_DUSK")}
+            assert hc.language_pack(src) == out and hc.cdn_file(hc.LANG_PACK)[1] == open(out, "rb").read()
         assert A("summary")["coach"]["ep"] == 1500 and A("summary")["players"] == len(team()["players"])
         assert any(r["spid"] == 88158023 and r["ovr"] == 80 for r in A("search", q="Messi")["rows"])
         roster = lambda: {p["id"]: p for p in A("players")["players"]}

@@ -144,6 +144,8 @@
     <button role="tab" data-tab="shop" data-i18n="nav_shop"></button>
     <button role="tab" data-tab="harian" data-i18n="nav_harian"></button>
     <button role="tab" data-tab="match" data-i18n="nav_match"></button>
+    <button role="tab" data-tab="prematch" data-i18n="nav_prematch"></button>
+    <button role="tab" data-tab="economy" data-i18n="nav_economy"></button>
     <button role="tab" data-tab="chat" data-i18n="nav_chat"></button>
     <button role="tab" data-tab="scout" data-i18n="nav_scout"></button>
     <button role="tab" data-tab="log" data-i18n="nav_log"></button>
@@ -283,6 +285,33 @@
       <div class="row">
         <button class="b" id="mrAdd" data-i18n="add_prize"></button>
         <button class="b primary" id="mrSave" data-i18n="save"></button>
+      </div>
+    </section>
+
+    <section id="prematch" hidden>
+      <h2 data-i18n="pm_title"></h2>
+      <p class="lead" data-i18n="pm_lead"></p>
+      <div class="row">
+        <label class="f"><span data-i18n="pm_stadium"></span><select id="pmStadium"></select></label>
+        <label class="f"><span data-i18n="pm_tod"></span><select id="pmTod"></select></label>
+        <label class="f"><span data-i18n="pm_weather"></span><select id="pmWeather"></select></label>
+        <label class="f"><span data-i18n="pm_length"></span><select id="pmLength"></select></label>
+        <label class="f"><span data-i18n="pm_ball"></span><select id="pmBall"></select></label>
+        <button class="b primary" id="pmSave" data-i18n="save"></button>
+      </div>
+    </section>
+
+    <section id="economy" hidden>
+      <h2 data-i18n="eco_title"></h2>
+      <p class="lead" data-i18n="eco_lead"></p>
+      <div class="row">
+        <label class="f"><span data-i18n="eco_preset"></span><select id="ecoPreset"></select></label>
+        <label class="check"><input type="checkbox" id="ecoShopFree"> <span data-i18n="eco_shopfree"></span></label>
+        <label class="f"><span data-i18n="eco_players"></span><input type="number" id="ecoPlayers" min="0.1" max="100" step="0.1"></label>
+        <label class="f"><span data-i18n="eco_packs"></span><input type="number" id="ecoPacks" min="0.1" max="100" step="0.1"></label>
+        <label class="f"><span data-i18n="eco_start"></span><input type="number" id="ecoStart" min="0" step="1000"></label>
+        <label class="check"><input type="checkbox" id="ecoDynamic"> <span data-i18n="eco_dynamic"></span></label>
+        <button class="b primary" id="ecoSave" data-i18n="save"></button>
       </div>
     </section>
 
@@ -439,6 +468,21 @@ const loaders = {
       ${Object.keys(label).map(f => `<td><input type="number" min="0" step="${f === "ep" ? 100 : 10}" value="${d.result[k][f]}" data-f="${f}" aria-label="${esc(t("mr_" + k))} ${esc(label[f])}"></td>`).join("")}</tr>`).join("");
     $("#mrCards").innerHTML = d.cards.map(r => rowHtml("prizes", r)).join("");
     mrChances();
+  },
+  async prematch() {
+    const d = await api("prematch");
+    const opts = (rows, cur) => rows.map(([v, l]) => `<option value="${v}"${String(v) === String(cur) ? " selected" : ""}>${esc(l)}</option>`).join("");
+    $("#pmStadium").innerHTML = opts([["home", t("pm_home")], ["random", t("pm_random")], ...d.stadiums.map(s => [s.id, s.name])], d.stadium);
+    $("#pmTod").innerHTML = opts([[1, t("pm_day")], [3, t("pm_night")], ["random", t("pm_random")]], d.tod);
+    $("#pmWeather").innerHTML = opts([[0, t("pm_dry")], [1, t("pm_rain")], [2, t("pm_snow")], [3, t("pm_overcast")], ["random", t("pm_random")]], d.weather);
+    $("#pmLength").innerHTML = opts(d.halfLengths.map(h => [h, t("pm_minutes", h / 5)]), d.halfLength);
+    $("#pmBall").innerHTML = opts(d.balls.map(b => [b.id, b.name]), d.ball);
+  },
+  async economy() {
+    const d = await api("economy");
+    $("#ecoPreset").innerHTML = ["custom", "easy", "real", "hard"].map(k => `<option value="${k}">${esc(t("eco_" + k))}</option>`).join("");
+    ecoFill({shopfree: d.shopfree, players: d.players, packs: d.packs, start_ep: d.start_ep, dynamic: d.dynamic});
+    $("#ecoPreset").value = Object.keys(ECO_PRESETS).find(k => JSON.stringify(ECO_PRESETS[k]) === JSON.stringify(ecoRead())) || "custom";
   },
   async chat() {
     const d = await api("vm_chat");
@@ -806,6 +850,31 @@ $("#mrSave").addEventListener("click", () => act(async () => {
   await api("match_rewards_set", {result, cards: readRows($("#mrCards"))});
   await loaders.match();
 }, t("mr_saved")));
+// the economy presets (issue #30): easy = this server as it always was
+const ECO_PRESETS = {
+  easy: {shopfree: true, players: 1, packs: 1, start_ep: 1000000, dynamic: false},
+  real: {shopfree: false, players: 1, packs: 1, start_ep: 300000, dynamic: true},
+  hard: {shopfree: false, players: 2, packs: 2, start_ep: 100000, dynamic: true},
+};
+const ecoRead = () => ({shopfree: $("#ecoShopFree").checked, players: Number($("#ecoPlayers").value),
+  packs: Number($("#ecoPacks").value), start_ep: Number($("#ecoStart").value), dynamic: $("#ecoDynamic").checked});
+function ecoFill(e) {
+  $("#ecoShopFree").checked = e.shopfree; $("#ecoPlayers").value = e.players; $("#ecoPacks").value = e.packs;
+  $("#ecoStart").value = e.start_ep; $("#ecoDynamic").checked = e.dynamic;
+}
+$("#ecoPreset").addEventListener("change", () => { const p = ECO_PRESETS[$("#ecoPreset").value]; if (p) ecoFill(p); });
+["#ecoShopFree", "#ecoPlayers", "#ecoPacks", "#ecoStart", "#ecoDynamic"].forEach(s =>
+  $(s).addEventListener("input", () => { $("#ecoPreset").value = "custom"; }));
+$("#ecoSave").addEventListener("click", () => act(async () => {
+  await api("economy_set", ecoRead());
+  await loaders.economy();
+}, t("eco_saved")));
+$("#pmSave").addEventListener("click", () => act(async () => {
+  const v = sel => { const x = $(sel).value; return /^\d+$/.test(x) ? Number(x) : x; };
+  await api("prematch_set", {stadium: v("#pmStadium"), tod: v("#pmTod"), weather: v("#pmWeather"),
+                             halfLength: v("#pmLength"), ball: v("#pmBall")});
+  await loaders.prematch();
+}, t("pm_saved")));
 $("#chatSave").addEventListener("click", () => act(async () => {
   await api("vm_chat_set", {enabled: $("#chatOn").checked, lang: $("#chatLang").value});
   await loaders.chat();

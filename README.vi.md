@@ -41,7 +41,7 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   cấp HLV / cầu thủ: EXP sau mỗi trận, cầu thủ LV.1-23 (+1 mọi chỉ số mỗi cấp), HLV LV.1-100.
 - Âm thanh game và nhạc menu EA Trax. `tools/eatrax_song.py` đặt bài hát của bạn lên đầu, nhưng sau đó
   game bị crash sau mỗi trận (xem lỗi đã biết bên dưới).
-- Trang quản trị web tại http://127.0.0.1:8088/ (EP, cầu thủ, gói, quà, quà hằng ngày, thưởng sau trận, chat AI, Cửa hàng, nhật ký)
+- Trang quản trị web tại http://127.0.0.1:8088/ (EP, cầu thủ, gói, quà, quà hằng ngày, thưởng sau trận, cài đặt trận, kinh tế, chat AI, Cửa hàng, nhật ký)
   có chọn ngôn ngữ (issue #15): Bahasa Indonesia, English, 简体中文, ไทย, Tiếng Việt, 한국어; trình duyệt
   nhớ lựa chọn.
 - Áo đấu CLB thật trong trận (kit id = `teamid << 5 | type`; kiểu cũ `<< 10` hiện thành ô bàn cờ).
@@ -183,6 +183,25 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   mua; Batal và Ulang dùng được) và tự đăng bán thẻ của mình bên cạnh lượng thẻ +1..+3 có sẵn, cả ở các cấp
   thẻ khác, với giá thấp hơn giá thị trường một chút, còn Kuantitas thay đổi mỗi giờ. Tab Market Price trong
   cửa sổ thẻ vẽ biểu đồ giá của 30 ngày gần nhất.
+- **Cài đặt kinh tế** (issue #30): tab Ekonomi (Kinh tế) mới trên trang quản trị cho bạn chỉnh độ khó của
+  game tùy ý: hệ số nhân giá cầu thủ và giá gói, EP ban đầu của HLV mới, tùy chọn Shop miễn phí và Market
+  biến động. Với Market biến động, giá mỗi cầu thủ lên xuống theo từng ngày (tăng hoặc giảm tối đa khoảng
+  13%), thỉnh thoảng HLV ảo đăng bán thẻ giá hời, và bạn có thể đặt giá bán đến 110% giá thị trường (nhưng
+  lâu có người mua hơn), nên mua rẻ bán đắt sẽ có lãi. Các mẫu có sẵn: Dễ (như trước: Shop miễn phí, giá cố
+  định), Thực tế (Shop tính phí theo giá trị các thẻ trong gói, Market biến động, 300.000 EP ban đầu) và Khó
+  (giá x2, 100.000 EP). EP nhận sau mỗi trận vẫn được chỉnh ở tab Thưởng sau trận.
+- **Cài đặt trước trận** (issue #31): các nút chọn trên màn hình cài đặt trận của Multiple > Rank đã dùng
+  được cho sân (70 sân có đủ dữ liệu trong client), thời gian trong ngày (ban ngày hoặc ban đêm), thời
+  tiết (quang đãng, mưa, tuyết, âm u: thành hoàng hôn nếu là ban đêm), thời lượng trận (6, 8, 10 hoặc 12
+  phút) và quả bóng (9 loại bóng). Lựa chọn gần nhất được giữ cho các trận tiếp theo, kể cả Liga và Cup;
+  màn hình trước trận của hai chế độ này chỉ hiện các giá trị, nên tab Cài đặt trận mới trên trang quản
+  trị cũng chỉnh được chúng, và còn chọn được "sân của đội chủ nhà" hoặc "ngẫu nhiên". Máy chủ sửa hai
+  nhãn trong chuỗi tiếng Indonesia của client: ban ngày từng ghi là "Waktu" (thời gian), âm u là "Malam"
+  (đêm); màn hình của Liga/Cup vẫn gọi âm u là "Salju" (tuyết).
+- **Bàn phím và tay cầm giữ preset điều khiển riêng** (issue #32): Opsi > Kontrol chỉ lưu một preset, cho
+  thiết bị đang dùng, và đưa thiết bị còn lại về preset đầu tiên khi bạn chuyển thiết bị. Giờ đây máy chủ
+  nhớ preset dùng gần nhất của từng thiết bị và khôi phục nó sau khi bấm Konfirmasi (màn hình hiện preset
+  đó ở lần mở tiếp theo; trận đấu dùng nó ngay từ lúc giao bóng).
 - **Mở được hộp ngẫu nhiên** (Kotak Platinum và các hộp khác, issue #12): màn hình hộp liệt kê phần thưởng
   từ `staticdata.availables`, trước đây bị thiếu, nên mọi hộp đều lỗi khi bấm "Gunakan" (dùng).
 - **Thẻ mới vào Tim Cadangan**: thẻ từ gói, giao dịch, Market, Bag hoặc trang quản trị hiện "-" ở cột Tim

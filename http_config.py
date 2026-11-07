@@ -104,6 +104,8 @@ def cdn_file(rel):
     f = asset_path(rel)
     if f is None:
         return None
+    if rel == LANG_PACK:  # with the game setting screens' labels fixed (issue #31)
+        f = language_pack(f)
     ctype = {".png": "image/png", ".jpg": "image/jpeg", ".swf": "application/x-shockwave-flash"}
     with open(f, "rb") as fh:
         return (ctype.get(os.path.splitext(f)[1].lower(), "application/octet-stream"), fh.read())
@@ -240,7 +242,8 @@ def ep_create_coach(slot, query, body):
         "_id": coach_id(slot), "slot": slot, "name": req.get("coachName", ""), "state": "active",
         # StartupCoachCreationScreen.initializeMyCoach reads teamvalue.val, levelinfo.level, summary
         "teamid": req.get("id"), "teamvalue": {"val": 0}, "levelinfo": {"level": 1}, "summary": {},
-        "appat": w3c(time.time())}]  # coach_me career.appat: the manager's start date
+        "appat": w3c(time.time()),  # coach_me career.appat: the manager's start date
+        "ep": ECONOMY["start_ep"]}]  # (managers made before keep START_EP, the default for no "ep")
     _save(st)
     return _json({"result": True})
 
@@ -326,6 +329,37 @@ CONTROL_DEFAULTS = {"Controller": 0, "Type": 0,
                     **{f"Joy{k}Type{i + 1}": (_JOY_MOV if k == "Mov" else _JOY)[i] for k in ("Att", "Def", "Mov") for i in range(3)}}
 
 
+# Each device's own preset (issue #32, user's report: keyboard "FO2 New", gamepad "Wing" kept
+# resetting each other). controlOption holds ONE Type, the preset of the device in use: keyboard
+# 0..7 (FO2, FO2 Baru, FO3, FO3 Tangan kiri; +4 = the same with "Pergantian pemain terpisah"),
+# gamepad 0..2 (Default, Tipe W, DPAD). The Kontrol screen remembers the other device's preset
+# only while it is open: its first device switch in a visit sets Type 0
+# (OptionControlSettingScreen.onControllerSelectorChanged, _lastTypeChoice -1). So the server keeps
+# st["controlType"] {device: last preset} and gives a device its preset back when a Konfirmasi
+# switched to it with that reset (Type 0 and its preset-0 keys untouched), or with a Type out of
+# its range (the beginner's guide flips Controller and keeps the other device's Type). The reply
+# carries it into OptionManager (the screen shows it next time; native gets it at the next match
+# start, ZoneManager.startBE -> applyControlSetting). controlOption itself keeps the client's shape:
+# native onOptionControlSettingChanged gets the whole object.
+CONTROL_TYPE_MAX = {0: 7, 1: 2}
+
+
+def remember_control_type(st, ctl, prev):
+    """ctl (a complete controlOption from the client) with this device's remembered preset when
+    the screen reset it (see CONTROL_TYPE_MAX); prev = the controlOption saved before."""
+    types = st.setdefault("controlType", {})
+    types.setdefault(str(prev["Controller"]), prev["Type"])
+    c, t = ctl["Controller"], ctl["Type"]
+    top = CONTROL_TYPE_MAX.get(c, 0)
+    keys = lambda o: [o.get(f"{'Key' if c == 0 else 'Joy'}{k}Type1") for k in ("Att", "Def", "Mov")]
+    reset = c != prev["Controller"] and t == 0 and keys(ctl) == keys(prev)  # not a remap of preset 0
+    if reset or not 0 <= t <= top:
+        t = types.get(str(c), 0)
+    t = t if 0 <= t <= top else 0
+    types[str(c)] = t
+    return {**ctl, "Type": t}
+
+
 def control_option_ok(c):
     """True if `c` has every controlOption field with the right shape (ints, non-empty int lists)."""
     def ok(v, want):
@@ -347,6 +381,9 @@ def account_option():
                                                  if isinstance(v, (int, float)) and math.isfinite(v)}}
     if not control_option_ok(opt.get("controlOption")):
         opt["controlOption"] = CONTROL_DEFAULTS
+    c = opt["controlOption"]
+    if not 0 <= c["Type"] <= CONTROL_TYPE_MAX.get(c["Controller"], 0):  # saved before issue #32's fix
+        opt["controlOption"] = {**c, "Type": (_state().get("controlType") or {}).get(str(c["Controller"]), 0)}
     return opt
 
 
@@ -372,6 +409,8 @@ def ep_account_option(query, body):
     old = st.get("option", {}).get("controlOption")
     st["option"] = {k: v for k, v in req.items() if k.endswith("Option") and k != "controlOption"}
     ctl = req.get("controlOption") if control_option_ok(req.get("controlOption")) else old
+    if ctl is not old:  # a new one from the client: each device keeps its own preset (issue #32)
+        ctl = remember_control_type(st, ctl, old if control_option_ok(old) else CONTROL_DEFAULTS)
     if ctl:
         st["option"]["controlOption"] = ctl
     _save(st)
@@ -495,6 +534,143 @@ def match_side(raw, teamid, user=None, tactics=None):
 # gamesettings.halfLength, in 1/10 minute per half (the game setting screen shows
 # halfLength/10*2 "menit"): 30 = a 6-minute match.
 HALF_LENGTH = int(os.environ.get("FO3_HALF_LENGTH", "30"))
+
+# Pre-match settings (issue #31): stadium, time of day, weather, match length. Native
+# ApplyGameSettings / PopulateGameSettings read gamesettings stadium, tod, weather, halfLength as
+# ints. Only Multiple > Rank's game setting screen has steppers for them (MultiplayGameSettingScreen,
+# each enabled by gamesettings stadiumchange / timechange / weatherchange / matchtimechange; the
+# stadium list is GET /stadium/list; a change is PUT /match/<id>/gamesettings); Liga and Cup show
+# them as labels only, so there they come from the player's last choice (st["matchprefs"], also
+# set on the admin page's Match tab). Values, from the client's archives and fifazf:
+# - a stadium needs its model, day + night textures, crowd placement, a stadiumdb entry and a DB
+#   row; native does not check the id (no DB row = light type 5, no files = a broken scene).
+STADIUMS_SAFE = (1, 2, 5, 13, 14, 26, 28, 29, 30, 32, 33, 34, 35, 41, 100, 112, 113, 115, 116, 135, 137,
+                 147, 149, 153, 156, 157, 158, 175, 176, 178, 179, 180, 181, 182, 183, 192, 193, 194, 195,
+                 196, 197, 212, 228, 229, 246, 247, 248, 249, 261, 262, 264, 265, 326, 327, 329, 330, 331,
+                 332, 333, 335, 336, 337, 341, 343, 344, 345, 347, 348, 349, 355)
+STADIUM_DEFAULT = 112  # the lobby's stadium: what every match used before
+# - tod picks the stadium's light set: 1 day, 3 night (every stadium has only these two; 0, 2, 4
+#   render as day, 5 has no files). The client's labels: 1 "Waktu" (its COMMON_TIME_DAY), 3 "Malam".
+TODS = (1, 3)
+# - weather: 0 clear, 1 rain, 2 snow, 3 overcast by day / dusk by night (every stadium renders
+#   all four). Labels: Rank's stepper 3 = "Malam"; Liga/Cup's screen shows 3 as "Salju".
+WEATHERS = (0, 1, 2, 3)
+WEATHERS_RANDOM = (0, 1, 3)  # "random": clear, rain or overcast (snow only when picked)
+HALF_LENGTHS = (30, 40, 50, 60)  # 6, 8, 10, 12 minutes: the Rank stepper's list
+# balls with a model (data_2.big ball_<id>.rx3; native plays ball 88 for a missing one), a name
+# (BALL_NAME_TYPE<id>) and a picture (externalAssets/balls/ball_<id>.png; 0 shows "not found")
+BALLS = (0, 6, 23, 34, 39, 40, 41, 45, 69)
+MATCH_PREFS = {"stadium": STADIUMS_SAFE + ("home", "random"), "tod": TODS + ("random",),
+               "weather": WEATHERS + ("random",), "halfLength": HALF_LENGTHS, "ball": BALLS}
+
+
+def match_prefs(st):
+    """The player's pre-match choices: stadium id | "home" (the home club's) | "random", tod |
+    "random", weather | "random", halfLength, ball. Unset = what every match had before (112, day,
+    clear, HALF_LENGTH, ball 0)."""
+    p = {"stadium": STADIUM_DEFAULT, "tod": TODS[0], "weather": 0, "halfLength": HALF_LENGTH, "ball": 0}
+    p.update({k: v for k, v in (st.get("matchprefs") or {}).items()
+              if not isinstance(v, bool) and v in MATCH_PREFS.get(k, ())})
+    return p
+
+
+def apply_prematch(st, match, rnd=random):
+    """A new match's stadium / tod / weather / halfLength from match_prefs, and the Rank screen's
+    steppers on. Call after gamesettings.home is set ("home" = the home side's club stadium)."""
+    p, gs = match_prefs(st), match["gamesettings"]
+    stadium = p["stadium"]
+    if stadium == "home":
+        stadium = club_stadium(match["side"]["left" if gs.get("home", True) else "right"]["team"]["teamid"])
+    elif stadium == "random":
+        stadium = rnd.choice(STADIUMS_SAFE)
+    pick = lambda v, opts: rnd.choice(opts) if v == "random" else v
+    gs.update(stadium=stadium if stadium in STADIUMS_SAFE else STADIUM_DEFAULT,
+              tod=pick(p["tod"], TODS), weather=pick(p["weather"], WEATHERS_RANDOM), halfLength=p["halfLength"],
+              ball={"id": p["ball"], "availables": list(BALLS)},  # ints: MatchProxy maps each to BALL_NAME_TYPE<id>
+              stadiumchange=True, timechange=True, weatherchange=True, matchtimechange=True)
+
+
+def ep_stadium_list(query, body):
+    """GET /stadium/list (MatchProxy.requestStadiumInfo, read once a session): the Rank stadium
+    stepper's list, [{id, name, todWeatherAvailables {"<tod>": [weather...]}}] (labelField name;
+    the tod and weather steppers are built from todWeatherAvailables)."""
+    return _json(stadium_choices())
+
+
+def stadium_choices():
+    """[{id, name, todWeatherAvailables}] of STADIUMS_SAFE by name: the client's own names (what the
+    Liga/Cup screen and the match intro show), else the DB's without its "(old name)" notes."""
+    names, db = client_stadium_names(), stadium_table()[0]
+    rows = [{"id": s, "name": names.get(str(s)) or re.sub(r"\s*\(.*\)$", "", (db.get(s) or {}).get("name") or f"Stadium {s}"),
+             "todWeatherAvailables": {str(t): list(WEATHERS) for t in TODS}} for s in STADIUMS_SAFE]
+    return sorted(rows, key=lambda r: r["name"].lower())
+
+
+def client_big(path, name):
+    """An entry of one of the client's BIg4 archives (tools/re/bigdir.py), or None."""
+    try:
+        if os.path.join(HERE, "tools", "re") not in sys.path:
+            sys.path.insert(0, os.path.join(HERE, "tools", "re"))
+        import bigdir
+        return bigdir.read(path, name)
+    except (OSError, KeyError, ValueError, ImportError) as e:
+        print(f"client archive {name}: {e!r}", flush=True)
+        return None
+
+
+@functools.lru_cache(maxsize=None)
+def ball_names():
+    """{ball id: the client's name (BALL_NAME_TYPE<id> in its language pack)} of BALLS."""
+    src = asset_path(LANG_PACK)
+    raw = client_big(src, LANG_ENTRY) if src else None
+    s = json.loads(raw.decode("utf-8-sig")) if raw else {}
+    return {b: s.get(f"BALL_NAME_TYPE{b}") or f"Ball {b}" for b in BALLS}
+
+
+@functools.lru_cache(maxsize=None)
+def client_stadium_names():
+    """{"<id>": name} of data/ui/localization/STADIUMNAMES_IND.json (Localization.STADIUMNAME)."""
+    raw = client_big(os.path.join(GAME, "data", "ui", "localization", "ind.big"), "data/ui/localization/STADIUMNAMES_IND.json")
+    return json.loads(raw.decode("utf-8-sig")) if raw else {}
+
+
+# The client's Indonesian strings come from the server at every start (externalAssets/
+# language_ind.big, one entry LANG_ENTRY). Two labels of the game setting screens are wrong there:
+# COMMON_TIME_DAY reads "Waktu" ("time") for day, and COMMON_WEATHER_DUSK reads "Malam" for weather
+# 3 (overcast by day, dusk by night). The server serves a copy with LANG_FIXES (built once, again
+# when the original changes; only those two keys use them). Liga/Cup's screen still shows weather 3
+# as "Salju": its code reuses the snow label.
+LANG_PACK, LANG_ENTRY = "externalAssets/language_ind.big", "data/ui/external/LANGUAGESTRING_IND.json"
+LANG_FIXES = {b'"COMMON_TIME_DAY": "Waktu"': b'"COMMON_TIME_DAY": "Siang"',
+              b'"COMMON_WEATHER_DUSK": "Malam"': b'"COMMON_WEATHER_DUSK": "Mendung"'}
+LANG_FIXED = os.path.join(HERE, "gamedata", "language_ind.big")
+LANG_LOCK = threading.Lock()
+
+
+def language_pack(src):
+    """The path to serve for the client's language pack at src: the fixed copy, or src itself
+    when it needs no fix (or the copy cannot be made)."""
+    with LANG_LOCK:
+        if os.path.isfile(LANG_FIXED) and os.path.getmtime(LANG_FIXED) >= os.path.getmtime(src):
+            return LANG_FIXED
+        raw = client_big(src, LANG_ENTRY)
+        fixed = raw
+        for old, new in LANG_FIXES.items():
+            fixed = fixed.replace(old, new) if fixed else fixed
+        if not raw or fixed == raw:
+            return src
+        try:
+            import bigdir  # client_big put tools/re on the path
+            tmp = LANG_FIXED + ".tmp"
+            os.makedirs(os.path.dirname(LANG_FIXED), exist_ok=True)
+            with open(src, "rb") as a, open(tmp, "wb") as b:
+                b.write(a.read())
+            bigdir.patch(tmp, {LANG_ENTRY: fixed})  # stored (not RefPacked), appended
+            os.replace(tmp, LANG_FIXED)
+            return LANG_FIXED
+        except (OSError, AssertionError) as e:
+            print(f"language pack fix: {e!r}", flush=True)
+            return src
 
 
 def new_match(mtype, left, right, **extra):
@@ -731,8 +907,9 @@ def stat_price(ovr):
 def card_price(spid, grade=1):
     """EP value from the card's rating and grade only (user: "fix harga yang tidak sesua
     statsnya"): fifaaddict's own prices put scarce seasons (Legend, EL, UL, WL, CC, LP...) at up
-    to 50,000x a card of the same rating, and some '17 cards rated 76 at 1,000 EP."""
-    return sig3(stat_price(card_ovr(spid)) * GRADE_PRICE[min(10, max(0, int(grade)))])  # +0 = 0 EP
+    to 50,000x a card of the same rating, and some '17 cards rated 76 at 1,000 EP. Times the admin
+    page's player price setting (ECONOMY "players")."""
+    return sig3(stat_price(card_ovr(spid)) * GRADE_PRICE[min(10, max(0, int(grade)))] * ECONOMY["players"])  # +0 = 0 EP
 
 
 def iid(p):
@@ -1376,6 +1553,60 @@ def team_kit(teamid):
 
 
 START_EP = 1000000
+
+# The economy (issue #30, the reporter: "make player prices and player card packs more expensive
+# and realistic ... configurable through the GM Admin Panel"). gamedata/economy.json, set on the
+# admin page's Ekonomi tab; the default is the easy game this server always had:
+#   players   x on every card's value (card_price: the Market, selling, team value, Tukar, packs)
+#   packs     x on the Shop's pack prices (when the Shop is not free: the Shop tab's switch)
+#   start_ep  the EP a new manager starts with
+#   dynamic   the Market moves (market_value): a card's price drifts day by day, managers list
+#             bargains and you may ask up to MARKET_ASK_MAX of the price, so buying low and selling
+#             high pays; off = a fixed Market where nothing is gained by trading back and forth
+ECONOMY_FILE = os.path.join(HERE, "gamedata", "economy.json")
+ECONOMY_DEFAULT = {"players": 1.0, "packs": 1.0, "start_ep": START_EP, "dynamic": False}
+
+
+def economy_clean(cfg):
+    """cfg's valid settings over ECONOMY_DEFAULT."""
+    out = dict(ECONOMY_DEFAULT)
+    for k in ("players", "packs"):
+        v = cfg.get(k)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and 0.1 <= v <= 100:
+            out[k] = float(v)
+    v = cfg.get("start_ep")
+    if isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 10 ** 12:
+        out["start_ep"] = v
+    if isinstance(cfg.get("dynamic"), bool):
+        out["dynamic"] = cfg["dynamic"]
+    return out
+
+
+def load_economy():
+    try:
+        with open(ECONOMY_FILE, encoding="utf-8") as f:
+            return economy_clean(json.load(f))
+    except (OSError, ValueError, AttributeError):
+        return dict(ECONOMY_DEFAULT)
+
+
+ECONOMY = load_economy()
+
+
+def set_economy(cfg):
+    """Save and apply new economy settings; the prices cached at the old ones are dropped."""
+    global ECONOMY
+    new = economy_clean(cfg)
+    os.makedirs(os.path.dirname(ECONOMY_FILE), exist_ok=True)
+    with open(ECONOMY_FILE, "w", encoding="utf-8") as f:
+        json.dump(new, f, indent=1)
+    ECONOMY = new
+    pack_price.cache_clear()
+    trade2_pool.cache_clear()
+    _T3_POOL.clear()
+    return new
+
+
 # Enums.VIP_DETAIL_*: NONE 0, VIP 1<<1, VVIP 1<<2, VVIP_SEA 1<<4
 VIP_DETAIL = 2
 VIP_UNTIL = 2051222400000  # 2035-01-01, ms
@@ -1851,6 +2082,7 @@ def league_match_body(st, req, playtype):
     gs = match["gamesettings"]
     gs["home"] = req["home"] == teamid  # I am always the left side
     gs["kit"] = ["home", "away"] if gs["home"] else ["away", "home"]
+    apply_prematch(st, match)
     # league level 10..24: the in-match overlay shows LEAGUE2_DIFFICULTY_<difficulty - 9>
     gs["difficulty"] = lg.get("difficultyselect", 10)
     # MatchProxy.leagueparam: LeagueCupGameSettingScreen.onPlaying reads leagueparam.matchtype
@@ -2272,17 +2504,31 @@ def ep_match_get(mid, query, body):
 
 
 def ep_match_gamesettings(mid, query, body):
-    """PUT /match/<id>/gamesettings {kit: home|away, side: 0 left|1 right} from the game setting
-    screen's kit steppers. gamesettings.kit is [left, right] (MatchController
-    .processMatchGamesettingsKitResource: mine = kit[mySide == left ? 0 : 1]); the updated match
-    resource brings the choice back, and native uses it at kick-off."""
+    """PUT /match/<id>/gamesettings from the game setting screen: {kit: home|away, side: 0 left|1
+    right} (the kit buttons; gamesettings.kit is [left, right], MatchController
+    .processMatchGamesettingsKitResource: mine = kit[mySide == left ? 0 : 1]), and on Rank's screen
+    {stadium}, {tod}, {weather}, {halfLength}, {ball: {id}} (its steppers; queued requests to one uri
+    merge, so one body can carry several). The steppers move only when the updated match resource
+    comes back; native uses gamesettings at kick-off. A stadium / tod / weather / length chosen here
+    is the player's choice for the next matches too (match_prefs, issue #31)."""
     req = json.loads(body or b"{}")
     st = _state(); match = st.get("match") or {}
     if match.get("id") != mid:  # e.g. a Training Ground match (not stored): as before
         return _json({"result": True})
+    gs = match["gamesettings"]
     if req.get("kit") in ("home", "away") and req.get("side") in (0, 1):
-        match["gamesettings"]["kit"][req["side"]] = req["kit"]
-        _save(st)
+        gs["kit"][req["side"]] = req["kit"]
+    for key, ok in (("stadium", STADIUMS_SAFE), ("tod", TODS), ("weather", WEATHERS), ("halfLength", HALF_LENGTHS)):
+        v = req.get(key)
+        v = int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) or str(v).isdigit() else None
+        if v in ok:
+            gs[key] = st.setdefault("matchprefs", {})[key] = v
+    ball = req.get("ball").get("id") if isinstance(req.get("ball"), dict) else None
+    if not isinstance(ball, bool) and ball in [b.get("id") if isinstance(b, dict) else b for b in gs["ball"]["availables"]]:
+        gs["ball"]["id"] = ball
+        if ball in BALLS:
+            st.setdefault("matchprefs", {})["ball"] = ball
+    _save(st)
     return _json({"result": True, "resources": [{"uri": f"/match/{mid}", "body": match}]})
 
 
@@ -2608,6 +2854,7 @@ def ep_cup_match(cupid, query, body):
     gs = match["gamesettings"]
     gs["home"] = home == teamid
     gs["kit"] = ["home", "away"] if gs["home"] else ["away", "home"]
+    apply_prematch(st, match)
     gs["difficulty"] = cup.get("difficulty", 0)  # AI level 0..4
     if cup["phases"][cup["current"]["phase"]]["system"] == "knock-out":
         # native maps drawMode 1/2/3 to end rules 9/6/7 (0 = a draw stands). 2 plays extra time
@@ -2682,6 +2929,40 @@ def market_factor(spid, grade, day):
     return 0.975 + 0.012 * math.sin(2 * math.pi * day / p1 + a) + 0.006 * math.sin(2 * math.pi * day / p2 + b) + noise
 
 
+# The dynamic Market (ECONOMY "dynamic", the admin page's Ekonomi tab; the reporter of issue #30:
+# "buy players at lower prices and resell them for a profit"): a player's price drifts day by day
+# (market_swing, the same for everyone), the managers' listings go from bargains to a little over
+# it (MARKET_BARGAIN), and a seller may ask up to MARKET_ASK_MAX of it, waiting longer for a buyer
+# (vm_buyer). Off, the Market stays as described above.
+MARKET_SWING = 0.12
+MARKET_BARGAIN = (0.86, 1.02)
+MARKET_ASK_MAX = 1.1
+
+
+def market_swing(spid, day):
+    """A player's dynamic Market price on crowd day `day`, as a share of his cards' value: a slow
+    seeded wave of about +-MARKET_SWING (every grade of him moves together)."""
+    r = random.Random(f"swing/{spid}")
+    p1, p2, a, b = r.uniform(12, 30), r.uniform(4, 9), r.uniform(0, 2 * math.pi), r.uniform(0, 2 * math.pi)
+    noise = random.Random(f"swing/{spid}/{day}").uniform(-0.01, 0.01)
+    return 1 + MARKET_SWING * (0.7 * math.sin(2 * math.pi * day / p1 + a) + 0.3 * math.sin(2 * math.pi * day / p2 + b)) + noise
+
+
+def market_value(spid, grade, t=None):
+    """A card's Market price now (or at t): its value (card_price), moved by market_swing when
+    the dynamic Market is on."""
+    p = card_price(spid, grade)
+    if not ECONOMY["dynamic"] or not p:
+        return p
+    return nice_price(p * market_swing(spid, vm_day(time.time() if t is None else t)))
+
+
+def sell_band(spid, grade):
+    """(lower, upper, Market price) of what a listing of this card may ask now (Jual's band)."""
+    v = market_value(spid, grade)
+    return v * 8 // 10, nice_price(v * MARKET_ASK_MAX) if ECONOMY["dynamic"] else v, v
+
+
 def market_rows(spid, t=None):
     """The Market's rows of one card now: [{spid, expandme, grade, price, count}], the +1..+3
     stock first; [] if it is not tradeable."""
@@ -2690,16 +2971,19 @@ def market_rows(spid, t=None):
     now = time.time() if t is None else t
     day, key = vm_day(now), f"{vm_day(now)}/{time.gmtime(now).tm_hour}"
     r = random.Random(f"market/{spid}/{key}")
-    rows = {(g, card_price(spid, g)): r.randint(*MARKET_STOCK) for g in (1, 2, 3)}
+    rows = {(g, market_value(spid, g, now)): r.randint(*MARKET_STOCK) for g in (1, 2, 3)}
     for _ in range(r.choice(VM_LIST_ROWS)):
         g = r.choice(VM_LIST_GRADES)
         p = card_price(spid, g)
-        price = min(p, max(nice_price(0.96 * p), nice_price(p * market_factor(spid, g, day) * r.uniform(0.99, 1.01))))
+        if ECONOMY["dynamic"]:  # from bargains to a little over the day's price
+            price = nice_price(market_value(spid, g, now) * r.uniform(*MARKET_BARGAIN))
+        else:
+            price = min(p, max(nice_price(0.96 * p), nice_price(p * market_factor(spid, g, day) * r.uniform(0.99, 1.01))))
         rows[g, price] = rows.get((g, price), 0) + r.choice((1, 1, 1, 2, 3))
     out = []
     for (g, price), n in rows.items():
         n -= MARKET_BOUGHT.get((spid, g, price, key), 0)
-        stock = g <= 3 and price == card_price(spid, g)
+        stock = g <= 3 and price == market_value(spid, g, now)
         if n > 0 or stock:
             out.append({"spid": spid, "expandme": "player", "grade": g, "price": price, "count": max(1, n)})
     return out
@@ -2711,7 +2995,7 @@ def market_buy(spid, grade, price, t=None):
     now = time.time() if t is None else t
     key = f"{vm_day(now)}/{time.gmtime(now).tm_hour}"
     row = next((r for r in market_rows(spid, now) if r["grade"] == grade and r["price"] == price), None)
-    if row is None and on_market(spid) and grade in (1, 2, 3) and price == card_price(spid, grade):
+    if row is None and on_market(spid) and grade in (1, 2, 3) and price == market_value(spid, grade, now):
         row = {"grade": grade, "price": price}  # the stock, seen in an older list (the client caches 30 s)
     if row is None:
         return None
@@ -2802,6 +3086,7 @@ def ep_transfer_purchase(spid, grade, price, query, body):
 # refused, so buying back is never cheaper than selling.
 SALE_FEE = 0.10
 VM_SALE = (20, 300)
+VM_SALE_SLOW = 48  # dynamic Market: 10% over the price waits 48 x 300 s = 4 h for a buyer
 # listings a manager can hold (waiting + sold, not collected); more is the client's own
 # TRANSFERMARKET_MAX_REGISTERED ("Silahkan hapus daftar penjualan"). Keeps the pushed list (about
 # 270 bytes an offer) far under the 64 KB a messenger push can carry.
@@ -2839,17 +3124,20 @@ def ep_transfer_price(spid, grade, query, body):
     """GET /transfer/price/<spid>/<grade>: the Jual tab's price band and default; lowest = the
     cheapest row of that grade on the Market now ("Harga terendah di bursa transfer adalah ..."),
     0 if none ("Tidak ada pemain yang dijual")."""
-    p, g = card_price(spid, int(grade)), int(grade)
+    g = int(grade)
+    lower, upper, p = sell_band(int(spid), g)
     lowest = min((r["price"] for r in market_rows(int(spid)) if r["grade"] == g), default=0)
-    return _json({"lower": p * 8 // 10, "upper": p, "default": p, "lowest": lowest, "registrationFee": 0})
+    return _json({"lower": lower, "upper": upper, "default": p, "lowest": lowest, "registrationFee": 0})
 
 
 def vm_buyer(o, now):
-    """Pick the manager who buys offer o and when (buyat, s): VM_SALE by its price."""
+    """Pick the manager who buys offer o and when (buyat, s): VM_SALE by its price against the
+    Market's; one asking more (the dynamic Market) waits VM_SALE_SLOW times longer per 10% over."""
     r = random.Random(f"{o['_id']}/{o['price']}")
-    share = o["price"] / max(1, card_price(o["spid"], o["grade"]))
+    share = o["price"] / max(1, market_value(o["spid"], o["grade"], now))
     lo, hi = VM_SALE
-    o["buyat"] = now + (lo + (hi - lo) * min(1, max(0, (share - 0.8) / 0.2)) ** 2) * r.uniform(0.6, 1.4)
+    wait = lo + (hi - lo) * min(1, max(0, (share - 0.8) / 0.2)) ** 2 if share <= 1 else hi * VM_SALE_SLOW ** ((share - 1) / 0.1)
+    o["buyat"] = now + wait * r.uniform(0.6, 1.4)
     o["buyer"] = r.choice(virtual_managers())["_id"]
 
 
@@ -2934,7 +3222,7 @@ def ep_transfer_offer(query, body):
     price = int(req.get("price") or 0)
     if p is None or is_starter(team, p):
         return _json({"result": False, "reason": "TRANSFERMARKET_SELECT_SELLABLE_PLAYER"})
-    if not 0 < price <= card_price(p["spid"], grade_of(p)):
+    if not 0 < price <= sell_band(p["spid"], grade_of(p))[1]:
         return _json({"result": False, "reason": "TRANSFERMARKET_LOWERLIMIT"})
     if len(slot_offers(st)) >= OFFERS_MAX:
         return _json({"result": False, "reason": "TRANSFERMARKET_MAX_REGISTERED"})
@@ -2978,7 +3266,7 @@ def ep_offer_reoffer(offerid, query, body):
     if o is None:
         return _json({"result": False, "reason": "OFFER_NOT_EXIST_ERROR"})
     price = int(req.get("price") or 0)
-    if not 0 < price <= card_price(o["spid"], o["grade"]):
+    if not 0 < price <= sell_band(o["spid"], o["grade"])[1]:
         return _json({"result": False, "reason": "TRANSFERMARKET_LOWERLIMIT"})
     now = time.time()
     o.update(status="waiting", issuedat=w3c(now), price=price, completefee={"base": int(price * SALE_FEE)})
@@ -2990,12 +3278,16 @@ def ep_offer_reoffer(offerid, query, body):
 def ep_transfer_detail(spid, grade, query, body):
     """GET /transfer/<spid>/<grade>/detail: the card window's Market price graph
     (PlayerDetailPopup, features.transfermarket.playerpricegraph): {history {basePrice, startat,
-    endat, data [[time ms, price > 0]]}}, one point a day for PRICE_DAYS days (market_factor)."""
+    endat, data [[time ms, price > 0]]}}, one point a day for PRICE_DAYS days: the dynamic Market's
+    price of each day (market_value), else the managers' listings under the fixed price
+    (market_factor)."""
     spid, grade = int(spid), max(1, int(grade))
-    p, today = card_price(spid, grade), vm_day()
+    p, today = market_value(spid, grade), vm_day()
     days = range(today - PRICE_DAYS + 1, today + 1)
     at = lambda d: VM_EPOCH + d * 86400
-    data = [[at(d) * 1000, max(1, nice_price(p * market_factor(spid, grade, d)))] for d in days]
+    day_price = (lambda d: market_value(spid, grade, at(d) + 43200)) if ECONOMY["dynamic"] else \
+        (lambda d: nice_price(p * market_factor(spid, grade, d)))
+    data = [[at(d) * 1000, max(1, day_price(d))] for d in days]
     return _json({"history": {"basePrice": p, "startat": w3c(at(days[0])), "endat": w3c(at(today)), "data": data}})
 
 
@@ -3862,12 +4154,13 @@ def pack_price(itemid):
     if draft:  # worth the default picks (the n best cards) at the pack's grade
         g = pack_grades(itemid)[0][0]
         top = draft_top(itemid, draft)
-        return sig3(sum(card_price(s, g) for s in top) / len(top)) if top else 0
+        return sig3(sum(card_price(s, g) for s in top) / len(top) * ECONOMY["packs"]) if top else 0
     pool, grades = pack_pool(itemid), pack_grades(itemid)
     if not pool:
         return 0
     gw = sum(w for _, w in grades)
-    return sig3(sum(card_price(s, g) * w * gwt for s, w in pool for g, gwt in grades) / sum(w for _, w in pool) / gw)
+    ev = sum(card_price(s, g) * w * gwt for s, w in pool for g, gwt in grades) / sum(w for _, w in pool) / gw
+    return sig3(ev * ECONOMY["packs"])  # the admin page's pack price setting on top of the cards' worth
 
 
 def warm_packs():
@@ -5275,6 +5568,7 @@ def ladder_match(st, room):
     user = {"id": me["id"], "name": me["name"], "levelinfo": me["levelinfo"]}
     match = new_match("League_2_league_MGR" if i == 3 else "League_2_league",
                       match_side(st["teams"][str(_default_slot(st))], teamid, user, _tactics(st)[1]), vm_side(vm))
+    apply_prematch(st, match)  # the game setting screen's stadium / time / weather / length steppers
     match["gamesettings"]["difficulty"] = 10 + min(14, (vm["elo"][i] - LADDER_START) // 55)  # Liga levels 10..24
     match["leagueparam"] = {"matchtype": "ladder", "round": 0, "home": teamid, "away": vm["teamid"], "leagueid": 0}
     match["elo"] = {"left": {"rating": my_ladder(st)["elo"][i]}, "right": {"rating": vm["elo"][i]}}
@@ -5585,6 +5879,7 @@ ENDPOINTS = {
     "/shop/cash/history/url": ep_shop_url,
 }
 ENDPOINTS["/contact/list"] = ep_contact_list
+ENDPOINTS["/stadium/list"] = ep_stadium_list  # before the /stadium/<id> route
 ENDPOINTS.update({"/ladder/leaderboard": ep_ladder_leaderboard, "/ladder/friends/info": ep_ladder_friends,
                   "/ladder/my/info": ep_ladder_my_info, "/ladder/season/info": ep_ladder_season_info,
                   "/room": ep_room, "/matchmaking": ep_matchmaking})
