@@ -208,6 +208,9 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   thiết bị đang dùng, và đưa thiết bị còn lại về preset đầu tiên khi bạn chuyển thiết bị. Giờ đây máy chủ
   nhớ preset dùng gần nhất của từng thiết bị và khôi phục nó sau khi bấm Konfirmasi (màn hình hiện preset
   đó ở lần mở tiếp theo; trận đấu dùng nó ngay từ lúc giao bóng).
+  Để màn hình hiện ngay preset của thiết bị khi chuyển, hãy đóng game rồi chạy một lần
+  `python tools/control_presets.py`: công cụ này vá màn hình Kontrol của client (có lưu bản sao lưu;
+  `--remove` khôi phục bản gốc).
 - **Mở được hộp ngẫu nhiên** (Kotak Platinum và các hộp khác, issue #12): màn hình hộp liệt kê phần thưởng
   từ `staticdata.availables`, trước đây bị thiếu, nên mọi hộp đều lỗi khi bấm "Gunakan" (dùng).
 - **Thẻ mới vào Tim Cadangan**: thẻ từ gói, giao dịch, Market, Bag hoặc trang quản trị hiện "-" ở cột Tim

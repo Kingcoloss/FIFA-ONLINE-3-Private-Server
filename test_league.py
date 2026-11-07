@@ -62,7 +62,7 @@ def main():
         # Opsi > Kontrol: /account always has a full controlOption (none = key changes never
         # apply or save, {} crashes the client); a saved one comes back, an incomplete one is ignored
         acc_ctl = lambda: body(hc.ENDPOINTS["/account"]("", b""))["option"]["controlOption"]
-        assert acc_ctl() == hc.CONTROL_DEFAULTS and len(acc_ctl()) == 35
+        assert acc_ctl() == dict(hc.CONTROL_DEFAULTS, selectedIndex=0, index=0) and len(acc_ctl()) == 37
         # Controller 1 = the Gamepad tab (Joy* lists); the next login's OptionManager.initialize
         # then starts with the pad (keyboardControl = Controller == 0)
         mine = dict(hc.CONTROL_DEFAULTS, Controller=1, Type=2, JoyAttType3=[3, 4, 2, 1, 5, 7, 6, 8])
@@ -72,7 +72,7 @@ def main():
         # the reply carries the saved options: AccountCommand.saveGameOption reads resources[0].body
         # (OptionManager's backup for every zone change; none = login options back in a match, issue #21)
         opt = r["resources"][0]["body"]
-        assert opt == body(hc.ENDPOINTS["/account"]("", b""))["option"] and opt["controlOption"] == mine
+        assert opt == body(hc.ENDPOINTS["/account"]("", b""))["option"] and opt["controlOption"] == dict(mine, selectedIndex=0, index=2)
         assert opt["cameraOption"] == {**hc.CAMERA_DEFAULTS, **cam}
         # Opsi > Kamera: every gauge has a value (none = empty, could not be stepped, issue #24); a
         # null saved while one was NaN gets the default
@@ -80,7 +80,7 @@ def main():
         assert body(hc.ENDPOINTS["/account"]("", b""))["option"]["cameraOption"] == dict(
             hc.CAMERA_DEFAULTS, Camera=1, CamDetail=1, CamHeight=10, CamZoom=14)
         save_opt({"soundOption": {"BGM": 4}, "controlOption": {}})  # e.g. leaving a match
-        assert acc_ctl() == mine and body(hc.ENDPOINTS["/account"]("", b""))["option"]["soundOption"]["BGM"] == 4
+        assert acc_ctl() == dict(mine, selectedIndex=0, index=2) and body(hc.ENDPOINTS["/account"]("", b""))["option"]["soundOption"]["BGM"] == 4
         save_opt({"soundOption": {"BGM": 10}, "controlOption": hc.CONTROL_DEFAULTS})
         # issue #32: each device keeps its own preset. The Kontrol screen resets a device it switches to
         # to preset 0 (Type 0); the server gives it back its last one
@@ -97,6 +97,38 @@ def main():
         mapped = [3, 4, 2, 1, 5, 7, 6, 8]  # the pad's own keys, kept in every PUT (the client sends all lists)
         assert ctl_type(pad(1, JoyAttType1=mapped)) == 1 and ctl_type(kb(5, JoyAttType1=mapped)) == 5
         assert ctl_type(pad(0)) == 1  # switched to the pad, then Initialize (default keys; Type stays the switch's 0)
+        # the patched Kontrol screen (tools/control_presets.py) swaps the presets itself on a switch:
+        # both are in controlOption (selectedIndex keyboard, index pad), a switch sets selected and
+        # its Type stands (preset 0 too); the other device's preset comes back as the screen left it
+        save_opt({"controlOption": kb(1)}); save_opt({"controlOption": pad(1)})  # keyboard FO2 Baru, pad Tipe W
+        c = acc_ctl()
+        assert (c["Controller"], c["Type"], c["selectedIndex"], c["index"]) == (1, 1, 1, 1) and "selected" not in c
+        sw = lambda o: body(save_opt({"controlOption": o}))["resources"][0]["body"]["controlOption"]
+        r = sw(kb(0, selectedIndex=1, index=2, selected=True))  # to the keyboard, its Default picked; the pad left at DPAD
+        assert (r["Type"], r["selectedIndex"], r["index"]) == (0, 0, 2) and hc._state()["controlType"] == {"0": 0, "1": 2}
+        assert not {"selectedIndex", "index", "selected"} & set(hc._state()["option"]["controlOption"])
+        assert sw(kb(3, index=7))["index"] == 2  # out of the pad's range: not taken
+        # the patch itself, on the client's own screen when the client is here: 55 bytes in place
+        # of the reset, branches to the pad part (71) and past both (89)
+        sys.path[:0] = [os.path.join(HERE, "tools"), os.path.join(HERE, "tools", "re")]
+        import zlib, importlib.util, control_presets, bigdir
+        big = os.path.join(hc.GAME, control_presets.BIG)
+        if os.path.isfile(big):
+            gfx = bigdir.read(big, control_presets.ENTRY)
+            new = control_presets.patched_gfx(gfx) or gfx  # None: patched already
+            assert control_presets.patched_gfx(new) is None
+            spec = importlib.util.spec_from_file_location("abcp", os.path.join(HERE, "tools", "re", "abc.py"))
+            abcp = importlib.util.module_from_spec(spec); spec.loader.exec_module(abcp)
+            swf = b"FWS" + new[3:8] + zlib.decompress(new[8:])
+            abc = abcp.parse(swf, 0x4c80)
+            code = abcp.dis(abc, abc["body"][6])
+            assert any("iftrue -> 71" in x for x in code) and any("jump -> 89" in x for x in code) and len(code) > 50
+            props = [x.split(": ", 1)[1] for x in code if "property" in x]
+            i = props.index("setproperty selected")
+            assert props[i:i + 11] == [
+                "setproperty selected", "getproperty Controller", "getproperty Type", "setproperty index",
+                "getproperty selectedIndex", "setproperty Type", "getproperty Type", "setproperty selectedIndex",
+                "getproperty index", "setproperty Type", "getproperty _option"], code
         st = hc._state(); st["option"]["controlOption"] = pad(5); st.pop("controlType"); hc._save(st)  # saved before the fix
         assert acc_ctl()["Type"] == 0  # shown as the pad's Default
         assert ctl_type(kb(0)) == 5 and hc._state()["controlType"] == {"0": 5}  # the 5 was the keyboard's (a guide flip)

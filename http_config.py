@@ -340,13 +340,21 @@ CONTROL_DEFAULTS = {"Controller": 0, "Type": 0,
 # its range (the beginner's guide flips Controller and keeps the other device's Type). The reply
 # carries it into OptionManager (the screen shows it next time; native gets it at the next match
 # start, ZoneManager.startBE -> applyControlSetting). controlOption itself keeps the client's shape:
-# native onOptionControlSettingChanged gets the whole object.
+# native onOptionControlSettingChanged gets the whole object (it ignores other fields).
+# The reporter still saw the default after a switch (it only came back after Konfirmasi), so
+# tools/control_presets.py patches the screen: a switch takes the new device's preset from
+# controlOption.selectedIndex (keyboard) or .index (gamepad), leaves the old one's there and sets
+# .selected; the server fills both from st["controlType"] and keeps what comes back. Those names
+# are the screen's own (its constant pool has them), so the patch keeps the handler's length.
 CONTROL_TYPE_MAX = {0: 7, 1: 2}
+CONTROL_PRESET_FIELDS = {0: "selectedIndex", 1: "index"}
+CONTROL_SWAPPED = "selected"  # set by the patched screen on a switch: its Type is the player's choice
 
 
-def remember_control_type(st, ctl, prev):
+def remember_control_type(st, ctl, prev, swapped=False):
     """ctl (a complete controlOption from the client) with this device's remembered preset when
-    the screen reset it (see CONTROL_TYPE_MAX); prev = the controlOption saved before."""
+    the screen reset it (see CONTROL_TYPE_MAX); prev = the controlOption saved before. A patched
+    screen (swapped) never resets it, so its Type stays, preset 0 included."""
     types = st.setdefault("controlType", {})
     pc, pt = prev["Controller"], prev["Type"]
     for d in (pc, 1 - pc):  # a Type out of prev's range is the other device's (a guide flip)
@@ -357,7 +365,7 @@ def remember_control_type(st, ctl, prev):
     top = CONTROL_TYPE_MAX.get(c, 0)
     keys = lambda o: [o.get(f"{'Key' if c == 0 else 'Joy'}{k}Type1") for k in ("Att", "Def", "Mov")]
     # not a remap of preset 0: its keys as before, or as Initialize sets them (it leaves Type alone)
-    reset = c != prev["Controller"] and t == 0 and keys(ctl) in (keys(prev), keys(CONTROL_DEFAULTS))
+    reset = not swapped and c != prev["Controller"] and t == 0 and keys(ctl) in (keys(prev), keys(CONTROL_DEFAULTS))
     if reset or not 0 <= t <= top:
         t = types.get(str(c), 0)
     t = t if 0 <= t <= top else 0
@@ -387,8 +395,13 @@ def account_option():
     if not control_option_ok(opt.get("controlOption")):
         opt["controlOption"] = CONTROL_DEFAULTS
     c = opt["controlOption"]
+    types = _state().get("controlType") or {}
     if not 0 <= c["Type"] <= CONTROL_TYPE_MAX.get(c["Controller"], 0):  # saved before issue #32's fix
-        opt["controlOption"] = {**c, "Type": (_state().get("controlType") or {}).get(str(c["Controller"]), 0)}
+        c = {**c, "Type": types.get(str(c["Controller"]), 0)}
+    # each device's preset for the patched Kontrol screen (tools/control_presets.py)
+    pick = lambda d: c["Type"] if d == c["Controller"] else types.get(str(d), 0)
+    opt["controlOption"] = {**c, **{f: pick(d) if 0 <= pick(d) <= CONTROL_TYPE_MAX[d] else 0
+                                    for d, f in CONTROL_PRESET_FIELDS.items()}}
     return opt
 
 
@@ -415,7 +428,15 @@ def ep_account_option(query, body):
     st["option"] = {k: v for k, v in req.items() if k.endswith("Option") and k != "controlOption"}
     ctl = req.get("controlOption") if control_option_ok(req.get("controlOption")) else old
     if ctl is not old:  # a new one from the client: each device keeps its own preset (issue #32)
-        ctl = remember_control_type(st, ctl, old if control_option_ok(old) else CONTROL_DEFAULTS)
+        extra = (*CONTROL_PRESET_FIELDS.values(), CONTROL_SWAPPED)
+        sent = {k: ctl.get(k) for k in extra}
+        ctl = {k: v for k, v in ctl.items() if k not in extra}  # account_option adds them again
+        ctl = remember_control_type(st, ctl, old if control_option_ok(old) else CONTROL_DEFAULTS,
+                                    sent[CONTROL_SWAPPED] is True)
+        d = 1 - ctl["Controller"]  # the other device's preset as the screen left it
+        v = sent[CONTROL_PRESET_FIELDS[d]]
+        if isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= CONTROL_TYPE_MAX[d]:
+            st["controlType"][str(d)] = v
     if ctl:
         st["option"]["controlOption"] = ctl
     _save(st)

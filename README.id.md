@@ -224,6 +224,9 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   preset pertamanya saat kamu berganti perangkat. Sekarang server mengingat preset terakhir tiap
   perangkat dan memulihkannya setelah Konfirmasi (layar itu menampilkannya saat dibuka lagi; match
   memakainya sejak kick-off).
+  Agar layar langsung menampilkannya saat berganti perangkat, jalankan sekali
+  `python tools/control_presets.py` saat game tertutup: tool ini mem-patch layar Kontrol di client
+  (cadangannya disimpan; `--remove` mengembalikan aslinya).
 - **Kotak acak bisa dibuka** (Kotak Platinum dan lainnya, issue #12): layar kotak menampilkan
   hadiahnya dari `staticdata.availables`, yang belum ada, jadi tiap kotak gagal saat "Gunakan".
 - **Kartu baru masuk Tim Cadangan**: kartu dari pak, trade, Market, Bag, atau halaman admin tampil

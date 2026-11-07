@@ -209,6 +209,9 @@ Added, passing the tests but not yet checked in the client:
   preset, for the device in use, and puts the other device back to its first preset when you switch.
   The server now remembers each device's last preset and restores it after Konfirmasi (the screen
   shows it the next time it opens; matches use it from kick-off).
+  To see it on the screen right away when you switch, run `python tools/control_presets.py` once
+  with the game closed: it patches the client's Kontrol screen (a backup is kept; `--remove` puts
+  the original back).
 - **Random boxes open** (Kotak Platinum and the rest, issue #12): the box screen lists its prizes
   from `staticdata.availables`, which was missing, so every box failed at "Gunakan".
 - **New cards join Tim Cadangan**: a card from a pack, a trade, the Market, the Bag or the admin

@@ -172,6 +172,8 @@
 - **键盘和手柄各自保留按键预设**（issue #32）：Opsi > Kontrol 只保存一套预设，即当前所用设备的预设；
   切换设备时，另一种设备会回到它的第一套预设。现在服务器会记住每种设备最后使用的预设，并在按下
   Konfirmasi 后恢复（下次打开该界面时会显示出来；比赛从开球起就会使用它）。
+  想在切换设备时立刻看到对应的预设，请在关闭游戏后运行一次 `python tools/control_presets.py`：它会修补客户端的
+  Kontrol 界面（会保留备份；`--remove` 可恢复原版）。
 - **随机箱可以打开**（Kotak Platinum 等，issue #12）：箱子界面从 `staticdata.availables` 列出奖品，
   之前缺少这个字段，所以每个箱子在 "Gunakan"（使用）时都会失败。
 - **新球员卡进入 Tim Cadangan**：从卡包、交易、Market、Bag 或管理后台得到的卡，在 Skuad 的 Tim 一栏显示
