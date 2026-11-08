@@ -1,8 +1,12 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/FO3.Application/FO3.Application.csproj" />
     <Project Path="src/FO3.Domain/FO3.Domain.csproj" />
+    <Project Path="src/FO3.Host/FO3.Host.csproj" />
+    <Project Path="src/FO3.Infrastructure/FO3.Infrastructure.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/FO3.Domain.Tests/FO3.Domain.Tests.csproj" />
+    <Project Path="tests/FO3.Host.Tests/FO3.Host.Tests.csproj" />
   </Folder>
 </Solution>

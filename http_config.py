@@ -8795,6 +8795,7 @@ class H(http.server.BaseHTTPRequestHandler):
         # iterated, so a stray "result": true becomes a bogus row. List endpoints get a
         # responses/ file with []. Unknown POSTs get {"result": true}.
         fallback = ep_telemetry if self.command == "POST" else ep_empty
+        unhandled = False  # answered by the fallback: X-FO3-Fallback (the .NET host counts these)
         if path.startswith("/" + CDN_PREFIX):
             hit = cdn_file(path[len(CDN_PREFIX) + 1:])
             if hit is None:
@@ -8811,7 +8812,12 @@ class H(http.server.BaseHTTPRequestHandler):
                             REQUEST["method"] = str(json.loads(body).get("_method") or self.command).upper()
                         except (ValueError, AttributeError):
                             pass
-                    ctype, data = from_file(path) or (ENDPOINTS.get(path) or route(path) or fallback)(query, body)
+                    hit = from_file(path)
+                    if hit is None:
+                        handler = ENDPOINTS.get(path) or route(path)
+                        unhandled = handler is None
+                        hit = (handler or fallback)(query, body)
+                    ctype, data = hit
             except Exception:
                 # an empty reply is a curl error and the client quits (CLIENT_CLOSE); answer
                 # something parseable and keep the traceback in the log instead
@@ -8821,6 +8827,8 @@ class H(http.server.BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
+        if unhandled:
+            self.send_header("X-FO3-Fallback", "1")
         self.end_headers()
         self.wfile.write(data)
 
