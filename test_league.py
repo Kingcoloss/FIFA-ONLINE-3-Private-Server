@@ -2258,6 +2258,8 @@ def main():
         assert not post("/shop/purchase", {"shopid": 8336, "productid": 8336, "bunch": 0})["result"]
         A("shop_hide", itemid=8336, hidden=False)
         save("items", {**hc.item_to(hc.ITEMS[501]), "name": "Lucky EP baru"}, itemid=501)  # a built-in, changed
+        # it keeps its own icon even where the client has none (3Sea); another missing one is refused
+        assert refused("shop_save", kind="items", itemid=501, **{"def": {**hc.item_to(hc.ITEMS[501]), "icon": "nope"}})
         assert hc.item_def(501)["name"] == "Lucky EP baru"
         A("shop_delete", kind="items", itemid=501); assert hc.item_def(501)["name"] == "Lucky EP"  # back to the original
         assert refused("shop_delete", kind="packs", itemid=newpack)  # still a prize of the box

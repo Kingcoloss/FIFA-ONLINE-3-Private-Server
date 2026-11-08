@@ -606,9 +606,11 @@ def text(v, what, n=40):
     return v
 
 
-def icon_of(v, required=True):
+def icon_of(v, required=True, keep=""):
+    """A shop icon the client has, or keep: the product's own icon, kept as it is (the 3Sea client
+    ships no shop icons, so a built-in product could not even be renamed)."""
     v = str(v or "").strip()
-    if v and v not in shop_icons():
+    if v and v != keep and v not in shop_icons():
         raise AdminError("e_no_icon", v)
     if required and not v:
         raise AdminError("e_pick_icon")
@@ -638,8 +640,8 @@ def prize_row(w, prize, not_id=None):
     raise AdminError("e_unknown_prize", prize)
 
 
-def check_def(kind, d, itemid):
-    """A clean shop.json entry from the page's form, or AdminError."""
+def check_def(kind, d, itemid, keep=""):
+    """A clean shop.json entry from the page's form, or AdminError. keep: the product's own icon."""
     name = text(d.get("name"), ("f_name",))
     desc = str(d.get("description") or "").strip()[:200]
     if kind == "packs":
@@ -651,7 +653,7 @@ def check_def(kind, d, itemid):
         draft = opt("draft", 1, 10, ("f_draft",))
         if draft and len(seasons) != 1:  # the draft screen searches one season
             raise AdminError("e_draft_season")
-        return {"name": name, "icon": icon_of(d.get("icon"), False), "seasons": seasons, "all": bool(d.get("all")),
+        return {"name": name, "icon": icon_of(d.get("icon"), False, keep), "seasons": seasons, "all": bool(d.get("all")),
                 "top": opt("top", 1, 100000, ("f_top",)), "ovr": opt("ovr", 40, 130, ("f_ovr",)),
                 "grade": opt("grade", 1, 10, ("f_grade",)), "pos": pos or None,
                 "league": opt("league", 1, 10 ** 6, ("f_league",)), "draft": draft}
@@ -659,7 +661,7 @@ def check_def(kind, d, itemid):
         t = str(d.get("type") or "")
         if t not in hc.SHOP_ITEM_TYPES:
             raise AdminError("e_unknown_type")
-        out = {"name": name, "icon": icon_of(d.get("icon")), "type": t, "description": desc}
+        out = {"name": name, "icon": icon_of(d.get("icon"), keep=keep), "type": t, "description": desc}
         if t == "EP_LOTTERY":
             lo, hi = (as_int(x, 0, 10 ** 12, "EP") for x in (d.get("ep") or [0, 0]))
             if not 0 < lo <= hi:
@@ -680,10 +682,10 @@ def check_def(kind, d, itemid):
                 out["season"] = as_int(d["season"], 1, 99, ("th_season",))
         return out
     if kind == "packages":
-        return {"name": name, "icon": icon_of(d.get("icon")), "description": desc,
+        return {"name": name, "icon": icon_of(d.get("icon"), keep=keep), "description": desc,
                 "contents": rows_of(d.get("contents"), ("f_contents",), ("packs", "items", "ep"))}
     if kind == "monthly":
-        return {"name": name, "icon": icon_of(d.get("icon")), "description": desc,
+        return {"name": name, "icon": icon_of(d.get("icon"), keep=keep), "description": desc,
                 "days": as_int(d.get("days"), 1, 365, ("f_days",)),
                 "now": rows_of(d.get("now"), ("f_now",), ("packs", "items", "ep"), 0),
                 "daily": rows_of(d.get("daily"), ("f_daily",), ("packs", "items", "ep"))}
@@ -701,15 +703,17 @@ def kind_of(p):
 def shop_save(p):
     """Create (no itemid) or change a product; a built-in one is replaced by the saved copy."""
     kind = kind_of(p); cfg = hc.shop_config()
-    table = hc.SHOP_KINDS[kind][0]
+    table, _, to = hc.SHOP_KINDS[kind]
+    keep = ""
     if p.get("itemid"):
         itemid = as_int(p["itemid"], 1, 10 ** 10, "itemid")
         if itemid not in table:
             raise AdminError("e_product_missing")
+        keep = str(to(table[itemid]).get("icon") or "")
     else:
         taken = set().union(*(t for t, _, _ in hc.SHOP_KINDS.values()))
         itemid = next(i for i in range(hc.SHOP_ID_BASE[kind] + 1, 10 ** 10) if i not in taken)
-    cfg.setdefault(kind, {})[str(itemid)] = check_def(kind, p.get("def") or {}, itemid)
+    cfg.setdefault(kind, {})[str(itemid)] = check_def(kind, p.get("def") or {}, itemid, keep)
     save_shop(cfg)
     return {"itemid": itemid}
 
