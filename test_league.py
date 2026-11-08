@@ -1150,10 +1150,11 @@ def main():
         pr = post("/players/trade/proposal", {"players": ids})
         sv = hc.static_values()
         # pack opening glow (TeamManagementPlayerCardScreen.getEffectType): highest threshold
-        # first, and Market cards land in every tier (none, 1, 2, 3)
+        # first, and Market cards land in every tier (none, 1, 2, 3). The whole pool: every
+        # 997th row missed the 70 top-tier cards of the 3Sea data (445,730 rows).
         star = sv["starplayer_price"]
         assert star == sorted(star, reverse=True)
-        tiers = {sum(r[0] >= t for t in star) for r in hc.trade3_pool()[::997]}
+        tiers = {sum(r[0] >= t for t in star) for r in hc.trade3_pool()}
         assert tiers == {0, 1, 2, 3}, tiers
         lo = min(int(sum(hc.card_ovr(p["spid"]) for p in reserves) / 4 + sv["playertrade_cardovrbonus"]["4"]),
                  sv["playertrade_limit"]["CardMaxValue"])
