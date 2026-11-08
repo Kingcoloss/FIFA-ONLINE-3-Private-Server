@@ -36,7 +36,11 @@ def main():
         hc.MISSIONS_FILE = os.path.join(tmp, "missions.json")  # default missions; admin test writes here
         # a fresh account through the client's club creation (the live state may hold no manager)
         hc._save({"coaches": [], "defaultcoachid": "", "teams": {}})
-        spids = [p["spid"] for p in hc.roster(241)["team"]["players"]]  # 2017 file, or built for 26 LIVE
+        # the 3Sea client asks for the King of the Hill region counts at start-up, before the
+        # manager select screen: no manager yet must not be a 500 (it closed the game)
+        assert body(hc.route(f"/esports2/region/register/{hc.koth_sid()}")("", b""))["result"]
+        assert hc.route("/esports2/region/leaderboard/101")("", b"")[0] == "application/json"
+        spids =[p["spid"] for p in hc.roster(241)["team"]["players"]]  # 2017 file, or built for 26 LIVE
         assert body(hc.ENDPOINTS["/coach/0/new/step/3"]("", json.dumps({"id": 241, "spids": spids}).encode()))["result"]
         assert body(hc.ENDPOINTS["/coach/0"]("", json.dumps({"id": 241, "coachName": "Tester"}).encode()))["result"]
         assert body(hc.ENDPOINTS["/coach/0/default"]("", b""))["result"]

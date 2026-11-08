@@ -8435,9 +8435,10 @@ def koth_board(st, region):
     within = lambda leaf: leaf == region or (KOTH_LEAVES.get(leaf) or (0, 0))[1] == region
     rows = [(m["elo"][KOTH_LADDER], m["wins"][KOTH_LADDER], m["losses"][KOTH_LADDER], m["_id"], m["name"])
             for m in virtual_managers() if within(vm_region(m["_id"]))]
-    r, coach = my_koth(st), my_coach(st)
-    if within(r.get("regionid")):
-        rows.append((r["elo"], r["wins"], r["losses"], coach["_id"], coach["name"]))
+    if st["coaches"]:  # no manager yet on a new save (see ep_koth_register_counts)
+        r, coach = my_koth(st), my_coach(st)
+        if within(r.get("regionid")):
+            rows.append((r["elo"], r["wins"], r["losses"], coach["_id"], coach["name"]))
     return sorted(rows, key=lambda x: (-x[0], -x[1], x[3]))
 
 
@@ -8458,9 +8459,12 @@ def koth_statistics(st, coach):
 
 
 def ep_koth_register_counts(sid, query, body):
-    """GET /esports2/region/register/<season>: players per region (the region picker shows them)."""
+    """GET /esports2/region/register/<season>: players per region (the region picker shows them).
+    The 3Sea client asks during start-up, before the manager select screen: on a new save there
+    is no manager yet (my_coach raised StopIteration, the 500 closed the game)."""
     count = collections.Counter(vm_region(m["_id"]) for m in virtual_managers())
-    r = my_koth(_state())
+    st = _state()
+    r = my_koth(st) if st["coaches"] else {}
     if r.get("regionid"):
         count[r["regionid"]] += 1
     return _json({"result": True, "registeredplayer": {k: count[k] for k in KOTH_LEAVES}})
