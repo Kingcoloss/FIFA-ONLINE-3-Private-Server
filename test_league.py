@@ -191,6 +191,19 @@ def main():
         assert all(c["teamcolorid"] < 70000 and c["teamcolorid"] not in (20055, 20056, 20057, 20058) for c in tc["teamColors"])
         assert hc.match_side(st["teams"]["0"], 241, user={"id": "me"})["team"]["teamcolors"] == active
         assert hc.match_side(st["teams"]["0"], 241)["team"]["teamcolors"] == []
+        # a match side lists the 18 first: the HUD's season badge takes the first card of a player
+        # there, and a reserve card of a starter (26 LIVE Mbappe vs WC18 Mbappe) must not win
+        t2 = json.loads(json.dumps(st["teams"]["0"]))
+        with hc.closing(hc._db()) as c:
+            twin = next((s, r[0]) for s in t2["squad"]["positions"] if s["pos"] < hc.POS_SUB
+                        for r in c.execute("SELECT spid FROM players WHERE playerid = ? AND spid != ? AND spid >= 1000000",
+                                           (s["spid"] % 1000000, s["spid"])))
+        t2["players"].insert(0, {"_id": "ab" * 12, "spid": twin[1], "team2": True})
+        cards = hc.match_side(t2, 241, user={"id": "me"})["team"]["players"]
+        assert next(p for p in cards if p["spid"] % 1000000 == twin[1] % 1000000)["_id"] == str(twin[0].get("id") or twin[0]["spid"])
+        in18 = {str(s.get("id") or s["spid"]) for s in t2["squad"]["positions"]}
+        order = [p["_id"] for p in cards]
+        assert len(cards) == len(t2["players"]) and max(order.index(i) for i in in18) < order.index("ab" * 12)
         # upgrade colors (type "grade"): 7 starters at +5 or higher meet +2 (index 1) and +5 (index 1)
         grades = [c for c in tc["teamColors"] if c["type"] == "grade"]
         assert [(c["grade"], c["name"]) for c in grades] == [(g, n) for _, g, n, _ in hc.TC_GRADE]
@@ -525,6 +538,18 @@ def main():
                 assert len({s.lower() for s in lines}) == len(lines) == 900
                 assert all(3 <= len(s) <= 60 and not set(s) & set("<>&") and max(map(ord, s)) < 0x1F00 for s in lines)
                 assert not [s for s in lines if any(w in s.lower() for w in masked)], lang
+            # the club chat's library (issue #36), the same rules: 10 per trigger and personality
+            club_chat = json.load(open(os.path.join(hc.RESPONSES, "vm_club_chat.json"), encoding="utf-8"))
+            assert set(club_chat) == set(hc.VM_CHAT_LANGS)
+            for lang, triggers in club_chat.items():
+                lines = [s for cells in triggers.values() for v in cells.values() for s in v]
+                assert set(triggers) == {"hello", "reply", "thanks", "welcome", "joined", "idle", "win", "loss", "draw",
+                                         "description", "news", "board"}
+                assert all(set(cells) == set(hc.VM_PERSONALITIES) and all(len(v) == 10 for v in cells.values())
+                           for cells in triggers.values())
+                assert len({s.lower() for s in lines}) == len(lines) == 600
+                assert all(3 <= len(s) <= 60 and not set(s) & set("<>&") and max(map(ord, s)) < 0x1F00 for s in lines)
+                assert not [s for s in lines if any(w in s.lower() for w in masked)], lang
 
             def after(act):  # what goes out for act, its timers fired
                 n0 = len(pushed); act()
@@ -770,6 +795,8 @@ def main():
         cup = body(hc.ep_cup_new("", b'{"metaid": 1, "difficulty": 2}'))["resources"][0]["body"]
         cid = cup["_id"]
         assert len(cup["teams"]) == 16 and cup["phases"][0]["system"] == "round-robin"
+        # issue #36: the cup screens draw trophies/t<trophy>.png and skins/s<skin>.png (were "undefined")
+        assert (cup["trophy"], cup["skin"]) == ("66", "1") and body(hc.route(f"/cup/{cid}")("", b""))["trophy"] == "66"
         played = 0
         for _ in range(10):
             g, leg = hc.cup_my_pair(hc._state()["cups"][cid])
@@ -1530,6 +1557,32 @@ def main():
         # cup/liga"); "default" is the client's own DEFAULT_SEASON_ID 88 ('17 cards), listed once
         assert 0 not in roster and [e["value"] for e in seasons if e["season"] == "default"] == [[88]]
         assert sorted(c for e in seasons for c in e["value"]) == sorted(roster)  # no season twice
+        # WC18 (tools/fo4_season.py wc18 + build): the 2018 World Cup's best 300 squad players; at +1 a
+        # card shows its World Cup rating - 5 (user: "grade 1 = nilai akhir turnamen dikurangi 5")
+        with hc.closing(hc._db()) as c:
+            wc18 = dict(c.execute("SELECT spid, overallrating FROM players WHERE spid / 1000000 = 78"))
+        fetched_json = os.path.join(HERE, "gamedata", "wc18_cards.json")  # absent where the DB came from a patched client
+        if wc18 and os.path.exists(fetched_json):
+            fetched = json.load(open(fetched_json, encoding="utf-8"))
+            assert len(wc18) == len(fetched) == 300
+            kept = [(78000000 + int(e), w["rating"]) for e, w in fetched.items() if 78000000 + int(e) in wc18]
+            assert len(kept) >= 290  # players FO3 has keep their (EA's) id; the others get new ones
+            assert all(wc18[s] == r - 5 and hc.card_ovr(s) == r - 10 for s, r in kept), \
+                [(s, r, wc18[s], hc.card_ovr(s)) for s, r in kept if (wc18[s], hc.card_ovr(s)) != (r - 5, r - 10)][:5]
+            assert 78 in roster and hc.tc_season_of(78) == hc.TC_SEASON + 78
+            assert len(hc.pack_pool(92000078)) == 200 and {s // 1000000 for s, _ in hc.pack_pool(92000078)} == {78}
+            # its team colors (user: "Tambah tem color wc18"): the season's, named as FO3's 2014 one, and
+            # one per nation as the "14 WC <nation>" ones, counting that nation's WC18 cards
+            colors18 = {c["teamcolorid"]: c for c in hc.tc_colors()}
+            assert colors18[hc.TC_SEASON + 78]["name"] == "2018 WC All-Star"
+            assert colors18[hc.TC_SEASON + 78]["boostgroups"][2]["boosts"] == [{"type": "ovr", "amount": 3}, {"type": "reactions", "amount": 1}]
+            fra = hc.TC_WC18 + 18
+            assert colors18[fra]["name"] == "18 WC Perancis" and colors18[fra]["description"] == "Pemain WC18 dari negara ini"
+            assert hc.tc_special_sets()[fra][1] == sum(w["nation"] == 18 for w in fetched.values()) >= 5
+            # Karakteristik: FO3's own bits stay, FIFA 18's are added (user: "traits tiap pemain jangan lupa")
+            with hc.closing(hc._db()) as c:
+                t1 = dict(c.execute("SELECT spid, trait1 FROM players WHERE spid IN (88158023, 78158023)"))
+            assert t1[78158023] & t1[88158023] == t1[88158023] and t1[78158023]  # Messi: finesse shot, playmaker ...
         # every card the client itself can trade (its Market search: permid.transferable = 1 and a
         # name) is on the Market, in the trades and in a pack (user: "jangan sampai ada pemain yang
         # tidak ada di pack, trade, dan market"); fifaaddict alone left out 6,599, 4,313 of them '17
@@ -1592,6 +1645,236 @@ def main():
         assert not use(6004, {"targetid": got["player"]["_id"]})["result"]  # above LV.10
         assert use(6003, {"targetid": opened[0]["_id"]})["result"] and lv(opened[0]["_id"])["level"] == hc.PLAYER_MAX_LEVEL
         assert not use(6001, {"targetid": opened[0]["_id"]})["result"]  # already at the max level
+        # issue #36: clubs (Komunitas > Klub). Founding: the reply feeds /club/me with a string _id
+        # and member.grade (Konfirmasi waits for that) and /coach/me with club.clubid; AI clubs to
+        # browse and join; managers asking to join mine; members' chat, the board, the records.
+        timers, real_timer, real_status, real_reply = [], hc.threading.Timer, hc.vm_status, hc.CLUB_REPLY
+        hc.threading.Timer, hc.vm_status, hc.CLUB_REPLY = Timer, lambda vm, hour=None: "online", (1, 0)
+        q = lambda path, method="GET", **req: (hc.REQUEST.update(method=method),
+                                               body((hc.ENDPOINTS.get(path) or hc.route(path))("", json.dumps(req).encode())))[1]
+        mine = lambda r: next(x["body"] for x in r["resources"] if x["uri"] == "/club/me")
+        snapshot = copy.deepcopy(hc._state())  # put back after the club, friendly and King of the Hill blocks
+        st = hc._state(); ep_kept, bag_kept = hc.my_coach(st).get("ep", hc.START_EP), list(hc.my_coach(st).get("bag", []))
+        try:
+            st = hc._state(); st.pop("club", None); hc.my_coach(st)["ep"] = hc.CLUB_FEE + 500; hc._save(st)
+            assert q("/club/me") == {} and hc.coach_me(st, hc._default_slot(st))["club"] == {"clubid": None}
+            assert q("/club/fee/creation")["fee"] == hc.CLUB_FEE
+            assert q("/club/create", "POST", name="ab", description="") == {"result": False, "reason": "invalid name"}
+            ai_names = [c["name"] for c in hc.ai_clubs_now().values()]
+            assert len(set(ai_names)) == len(ai_names) > 40
+            assert q("/club/create", "POST", name=ai_names[0], description="")["reason"] == "name is already used"
+            r = q("/club/create", "POST", name="Klub Uji", description="Ayo main")
+            club = mine(r)
+            coach_res = next(x["body"] for x in r["resources"] if x["uri"] == "/coach/me")
+            assert r["result"] and isinstance(club["_id"], str) and club["member"]["grade"] == 10 and club["rewards"]
+            assert coach_res["club"]["clubid"] == club["_id"] == r["clubid"] and coach_res["money"]["ep"] == 500
+            assert len(club["member"]["rewards"]) == 7 and club["levelinfo"]["level"] == 1 and club["membercount"] == 1
+            assert q("/club/create", "POST", name="Klub Lain", description="")["reason"] == "already have a club"
+            assert hc._state()["coaches"][0]["bag"][-1]["title"] == "Hadiah klub harian"  # founding passes the day's goal
+            # AI clubs: the list (mine in it, with my grade), a club's page
+            found = body(hc.ENDPOINTS["/club/find"]("keyword=&sort=level&order=-1&allowjoin=false&skipjudgement=false&membernumfrom=0&membernumto=0", b""))
+            assert found["count"] == len(found["clubs"]) == len(ai_names) + 1
+            assert all(isinstance(c["_id"], str) and c["membercount"] >= 1 and c["mastername"] for c in found["clubs"])
+            assert next(c for c in found["clubs"] if c["_id"] == club["_id"])["member"]["grade"] == 10
+            ai = next(c for c in found["clubs"] if c["_id"] != club["_id"] and c["allowjoin"])
+            assert q(f"/club/{ai['_id']}")["name"] == ai["name"] and q("/club/nope") == {"result": False, "reason": "deleted club"}
+            # managers ask to join (Manajemen > permohonan): one taken in, one turned down
+            st = hc._state(); st["club"]["next"] = time.time() - 4 * hc.CLUB_ASK; hc._save(st)
+            asks = q("/club/me/join/requests")
+            assert len(asks) >= 2 and all(a["name"] and set(a["ovr"]) == {"FW", "MF", "DF"} and a["division"].startswith("DIVISION_") for a in asks)
+            n0 = len(pushed)
+            assert mine(q(f"/club/me/join/{asks[0]['id']}", "PUT", memberid=asks[0]["id"]))["membercount"] == 2
+            assert q(f"/club/me/join/{asks[1]['id']}", "DELETE")["result"]
+            assert [a["id"] for a in q("/club/me/join/requests")] == [a["id"] for a in asks[2:]]
+            members = q("/club/me/members")
+            assert [m["grade"] for m in members] == [10, 1] and members[1]["coachid"] == asks[0]["id"] and members[1]["online"]
+            while timers:
+                fn, args = timers.pop(0); fn(*args)
+            lines = json.load(open(os.path.join(hc.RESPONSES, "vm_club_chat.json"), encoding="utf-8"))["id"]
+            said = [b for u, b in pushed[n0:] if u == "/club/me/message"]
+            assert said and said[0]["coachname"] == members[1]["name"] and said[0]["message"] in [s for v in lines["joined"].values() for s in v]
+            # chat: my line comes back to me, a member answers a greeting
+            n0 = len(pushed)
+            assert q("/club/me/message", "POST", message="Halo semua", hint=None)["result"]
+            assert pushed[n0] == ("/club/me/message", {"type": "chat", "coachid": hc.my_coach(hc._state())["_id"],
+                                                       "coachname": hc.my_coach(hc._state())["name"], "message": "Halo semua", "hint": None})
+            while timers:
+                fn, args = timers.pop(0); fn(*args)
+            assert pushed[n0 + 1][1]["message"] in [s for v in lines["hello"].values() for s in v]
+            # the board, the news, the records, the friends ranking's club tab, the chat's member list
+            assert q("/club/me/post/", "POST", msg="Latihan malam ini")["result"]
+            posts = q("/club/me/posts")
+            assert posts[0]["message"] == "Latihan malam ini"
+            q(f"/club/me/post/{posts[0]['_id']}", "DELETE")
+            assert all(p["message"] != "Latihan malam ini" for p in q("/club/me/posts"))
+            assert mine(q("/club/me/settings/news", "POST", message="Kumpul jam 8"))["news"]["message"] == "Kumpul jam 8"
+            assert mine(q("/club/me/settings/allowjoin/false", "POST"))["allowjoin"] is False
+            assert len(q("/club/record/members")["members"]) == 2 and q("/club/record/leaderboard")["leaderboardlist"]
+            assert [m["_id"] for m in q("/contact/club")["members"]] == [asks[0]["id"]] and len(q("/rank/teamvalue/club")) == 2
+            # this week's club points give my matches their boosts
+            st = hc._state(); assert hc.club_boosts(st) == {}
+            st["club"]["me"]["days"][str(hc.club_day())]["LEAGUE"] = 300; st["club"]["me"]["total"] += 300
+            assert hc.club_boosts(st) == {"MATCH_PLUS_COACHEXP": 0.05}
+            # closing (DELETE /club/me): inactive until its time, cancel undoes it; then gone
+            assert mine(q("/club/me", "DELETE"))["state"] == "inactive"
+            assert mine(q("/club/me/delete/cancel", "POST"))["state"] == "active"
+            q("/club/me", "DELETE"); st = hc._state(); st["club"]["deleteat"] = time.time() - 1; hc._save(st)
+            assert q("/club/me") == {} and hc._state()["club"] is None
+            # an AI club takes me at once; then I leave it
+            r = q(f"/club/{ai['_id']}/join", "POST")
+            assert r["result"] and mine(r)["_id"] == ai["_id"] and mine(r)["member"]["grade"] == 1 and mine(r)["membercount"] == ai["membercount"] + 1
+            assert q("/club/me/members")[-1]["grade"] == 1 and q(f"/club/{ai['_id']}/join", "POST")["reason"] == "already have a club"
+            assert q("/club/me/member/leave", "PUT")["result"] and hc._state()["club"] is None
+            # joining and leaving again pays the day's club reward no second time
+            paid = lambda: sum(b["title"] == "Hadiah klub harian" for b in hc.my_coach(hc._state())["bag"])
+            n = paid(); q(f"/club/{ai['_id']}/join", "POST"); q("/club/me/member/leave", "PUT")
+            assert paid() == n == 1
+        finally:
+            hc.threading.Timer, hc.vm_status, hc.CLUB_REPLY = real_timer, real_status, real_reply
+            hc.REQUEST["method"] = "GET"
+            timers.clear()
+            st = hc._state(); st.pop("club", None); hc.my_coach(st).update(ep=ep_kept, bag=bag_kept); hc._save(st)
+        # issue #36: Multiple > Persahabatan against AI. The feature shows its buttons; Quick match
+        # finds a virtual manager (Friendly_PvP_1v1 on the Rank path), vs COM plays the AI picker's
+        # club, an invited friend joins and plays; results are friendlies, not Rank games
+        assert set(body(hc.ep_account("", b""))["features"]["friendlymatch"]) == {"quickmatch", "randommatch", "custommatch"}
+        timers, real_timer = [], hc.threading.Timer
+        hc.threading.Timer = Timer
+
+        def fire():
+            while timers:
+                fn, args = timers.pop(0); fn(*args)
+
+        def end(gf, ga):
+            m = hc._state()["match"]
+            req = {"home": {"id": m["side"]["left"]["team"]["teamid"], "score": gf},
+                   "away": {"id": m["side"]["right"]["team"]["teamid"], "score": ga}, "myTeam": "home", "opponentTeam": "away"}
+            assert body(hc.route(f"/match/{m['id']}/end")("", json.dumps(req).encode()))["result"]
+        new_room = lambda t: body(hc.ENDPOINTS["/room"]("", json.dumps({"type": t, "slotsize": 1}).encode()))["resources"][0]["body"]
+        rq = lambda rid, path, **req: body(hc.route(f"/room/{rid}/{path}")("", json.dumps(req).encode()))
+        try:
+            st = hc._state(); elo0, games0 = hc.my_ladder(st)["elo"][0], sum(hc.my_ladder(st)["games"])
+            room = new_room("pvp_random")
+            assert "ladder" not in room and room["AI"]["index"]["difficulty"] == 2
+            rq(room["roomid"], "matchmaking"); fire()
+            st = hc._state()
+            assert st["match"]["type"] == "Friendly_PvP_1v1" and st["ladder_pending"]["record"] == "quick"
+            assert st["room"]["side"]["right"]["players"][0]["summary"]["ovr"]  # the room slot reads it
+            end(2, 1)
+            st = hc._state()
+            assert (hc.my_ladder(st)["elo"][0], sum(hc.my_ladder(st)["games"])) == (elo0, games0) and "ladder_pending" not in st
+            fs = hc.coach_me(st, hc._default_slot(st))["statistics"]["friendly"]
+            assert fs["quick"]["wins"][0] == 1 and fs["quick"]["winningstreak"]["max"] == [1] and fs["vscom"]["wins"] == [0] * 5
+            assert hc.my_coach(st)["multiplay"][-1]["type"] == "Friendly_PvP_1v1"
+            # a custom room vs COM: the AI picker's club and difficulty, Mulai starts it (a Ready taken
+            # back within its second does not)
+            room = new_room("pvp_referee"); rid = room["roomid"]
+            assert rq(rid, "type", type="pve_referee")["resources"][0]["body"]["type"] == "pve_referee"
+            assert rq(rid, "AI", index={"nation": 1, "league": 0, "team": 2, "difficulty": 4})["result"]
+            rq(rid, "side/left/ready", ready=True); rq(rid, "side/left/ready", ready=False); fire()
+            assert hc._state()["room"]["stage"] == "room" and "ladder_pending" not in hc._state()
+            rq(rid, "side/left/ready", ready=True); fire()
+            st = hc._state(); m = st["match"]
+            assert m["type"] == "Friendly_PvE_1v1" and m["gamesettings"]["difficulty"] == 4 and st["ladder_pending"]["record"] == "vscom"
+            assert m["side"]["right"]["team"]["teamid"] == st["ladder_pending"]["teamid"] == hc.room_ai_team(st["room"]) > 0
+            end(0, 0)
+            assert hc.coach_record(hc.my_coach(hc._state()), "friendly")["vscom"]["draws"][0] == 1
+            # a friend invited from the list joins ready; my Ready plays him
+            friend = hc.vm_friends()[0]
+            rq(rid, "type", type="pvp_referee")
+            assert rq(rid, f"invite/{friend['_id']}")["result"]
+            fire()
+            assert hc._state()["room"]["side"]["right"]["players"][0]["id"] == friend["_id"]
+            rq(rid, "side/left/ready", ready=True); fire()
+            st = hc._state()
+            assert st["match"]["type"] == "Friendly_PvP_1v1" and st["ladder_pending"]["opponent"] == friend["_id"]
+            end(1, 3)
+            assert hc.coach_record(hc.my_coach(hc._state()), "friendly")["custom"]["losses"][0] == 1
+            assert rq(rid, "slotsize", slotsize=2)["result"]  # the room's other controls: as it is
+            left = rq(rid, "leave", targetid="", byWhom="")
+            assert left["resources"][0]["body"]["side"]["left"]["players"] == [] and "room" not in hc._state()
+            # King of the Hill (the Esports Regional League): the feature, the division table preloaded,
+            # this month's season with its region tree, a region picked, its board, a match there
+            assert "regionalleague" in body(hc.ep_account("", b""))["features"]["esports"]
+            init = body(hc.ENDPOINTS["/static/initialize"]("", b""))["resources"][0]
+            assert init["uri"] == "/static/db/ESPORTS2_BALANCING_DEFAULT" and init["body"]["divisions"] == hc.ladder_divisions()
+            pres = body(hc.ENDPOINTS["/esports2/region/seasons/presently"]("", b""))
+            cur = pres["seasons"][0]
+            assert cur["schedule"]["startdt"] <= time.strftime("%Y%m%d") < cur["schedule"]["enddt"] == pres["seasons"][1]["schedule"]["startdt"]
+            assert cur["_id"] == str(hc.koth_sid()) and cur["schedule"]["midreward"] == [] and len(cur["schedule"]["week"]) == 7
+            assert len(cur["reward"]["week"]["grade"]) == len(cur["reward"]["season"]["grade"]["1"]) == len(hc.ladder_divisions())
+            tree = pres["regiongrouptrees"][cur["regiongroup"]["id"]]
+            assert set(tree) == {m for _, m, _ in hc.KOTH_REGIONS}  # keyed by name: the pickers list the keys
+            leaf = next(iter(next(iter(tree.values()))["children"].values()))
+            assert leaf["parent"] in tree and leaf["name"] in tree[leaf["parent"]]["children"]
+            koth = lambda: hc.coach_me(hc._state(), hc._default_slot(hc._state()))["statistics"]["esports2"]
+            assert "regionid" not in koth() and koth()["seasonid"] == "" and koth()["rewarded"] is True
+            assert koth()["midrewarded"] == [] and koth()["introid"] == ""
+            assert body(hc.route(f"/esports2/region/register/{cur['_id']}")("", b""))["registeredplayer"][leaf["id"]] > 0
+            assert not body(hc.ENDPOINTS["/esports2/region/register"]("", json.dumps({"regiongroupid": "nope"}).encode()))["result"]
+            assert body(hc.ENDPOINTS["/esports2/region/register"]("", json.dumps({"regiongroupid": leaf["id"]}).encode()))["result"]
+            body(hc.ENDPOINTS["/esports2/region/intro"]("", json.dumps({"_method": "PUT", "seasonid": cur["_id"]}).encode()))
+            assert koth()["regionid"] == leaf["id"] and koth()["regionname"]["parent"] and koth()["introid"] == cur["_id"] and koth()["rank"] >= 1
+            assert koth()["seasonid"] == cur["_id"]  # registered for this season
+            board = body(hc.route(f"/esports2/region/leaderboard/{leaf['id']}")("", b""))
+            assert any(x["cid"] == hc.my_coach(hc._state())["_id"] for x in board) and len(board) > 10
+            assert all(hc.vm_region(x["cid"]) == leaf["id"] for x in board if x["cid"].startswith("vm"))
+            major = tree[leaf["parent"]]["id"]  # a major region's board holds all of its own
+            assert len(body(hc.route(f"/esports2/region/leaderboard/{major}")("", b""))) >= len(board)
+            room = new_room("esports2"); rq(room["roomid"], "matchmaking"); fire()
+            st = hc._state(); m = st["match"]
+            assert m["type"] == "Regional_League" and hc.vm_region(st["ladder_pending"]["opponent"]) == leaf["id"]
+            assert m["side"]["left"]["players"][0]["matchstats"] == [{"type": "Regional_League", "elorating": koth()["elo"]}]
+            assert all(c["es2stamina"] == 1 for s_ in m["side"].values() for c in s_["team"]["players"])
+            elo0, lad0 = koth()["elo"], copy.deepcopy(hc.my_ladder(st))
+            end(3, 0)
+            st = hc._state(); rw = st["match"]["reward"]
+            assert koth()["elo"] > elo0 == rw["preveloinfo"]["elo"] and rw["eloinfo"]["elo"] == koth()["elo"] and koth()["wins"] == 1
+            assert hc.my_ladder(st) == lad0 and hc.my_coach(st)["multiplay"][-1]["type"] == "Regional_League"
+            # Exhibition (Live Center): plays a day; a room on licensed clubs (my side's club changed by
+            # the room's team picker); an invited manager joins with a club of his own; my Ready plays
+            # Exhibition_PvP, each side its club's own squad; a squad change goes to that club; my
+            # cards earn no EXP from it; a play is used
+            assert body(hc.ENDPOINTS["/exhibition/info/points"]("", b"")) == {"point": 0, "maxpoint": hc.EXHIBITION_PLAYS}
+            ex = body(hc.ENDPOINTS["/static/db/EXHIBITIONMATCH"]("", b""))
+            assert ex["entrycondition"]["NORMAL_use"] and ex["recommendteams"] == list(hc.EXHIBITION_TEAMS)
+            r = body(hc.ENDPOINTS["/exhibition/room"]("", json.dumps({"type": "pvp_exhibition", "slotsize": 5}).encode()))
+            room = r["resources"][0]["body"]; rid = room["roomid"]
+            assert r["result"] and room["type"] == "pvp_exhibition" and room["side"]["left"]["authTeamId"] == hc.EXHIBITION_TEAMS[0]
+            club = hc.EXHIBITION_TEAMS[2]
+            t = body(hc.route(f"/exhibition/room/{rid}/team")("", json.dumps({"teamid": club, "side": "left"}).encode()))
+            assert t["result"] and t["resources"][0]["body"]["side"]["left"]["authTeamId"] == club
+            assert not body(hc.route(f"/exhibition/room/{rid}/team")("", json.dumps({"teamid": 0, "side": "left"}).encode()))["result"]
+            info = body(hc.route(f"/exhibition/info/authentic/team/{club}")("", b""))
+            assert info["teamid"] == club and set(info["summary"]["ovr"]) >= {"FW", "MF", "DF"}
+            friend = hc.vm_friends()[1]
+            assert rq(rid, f"invite/{friend['_id']}")["result"]
+            fire()
+            right = hc._state()["room"]["side"]["right"]
+            assert right["players"][0]["id"] == friend["_id"] and right["ready"] and right["authTeamId"] in hc.EXHIBITION_TEAMS
+            assert right["authTeamId"] != club
+            rq(rid, "side/left/ready", ready=True); fire()
+            m = hc._state()["match"]
+            assert m["type"] == "Exhibition_PvP" and m["side"]["left"]["team"]["teamid"] == club
+            assert m["side"]["right"]["team"]["teamid"] == right["authTeamId"] and m["side"]["left"]["team"]["teamcolors"] == []
+            sq = m["side"]["left"]["team"]["squad"]
+            xi = [p for p in sq["positions"] if p["pos"] < hc.POS_SUB]
+            a_, b_ = xi[1], xi[2]
+            swapped = [dict(p, pos=b_["pos"]) if p["id"] == a_["id"] else dict(p, pos=a_["pos"]) if p["id"] == b_["id"] else p
+                       for p in sq["positions"]]
+            r = body(hc.route(f"/match/{m['id']}/side/left/squad")("", json.dumps({"squad": {"positions": swapped}}).encode()))
+            got = {p["id"]: p["pos"] for p in hc._state()["match"]["side"]["left"]["team"]["squad"]["positions"]}
+            assert r["result"] and (got[a_["id"]], got[b_["id"]]) == (b_["pos"], a_["pos"])
+            end(2, 0)
+            st = hc._state()
+            assert st["match"]["reward"]["players"] == [] and hc.my_coach(st)["multiplay"][-1]["type"] == "Exhibition_PvP"
+            assert body(hc.ENDPOINTS["/exhibition/info/points"]("", b""))["point"] == 1
+            st = hc._state(); hc.my_coach(st)["exhibition"]["played"] = hc.EXHIBITION_PLAYS; hc._save(st)
+            assert body(hc.ENDPOINTS["/exhibition/room"]("", b"{}")) == {"result": False, "reason": "the point is not enough"}
+        finally:
+            hc.threading.Timer = real_timer
+            timers.clear()
+            hc._save(snapshot)  # their matches levelled the manager up (level rewards in the Bag) and so on
         # --- admin page API (admin.py)
         import admin, urllib.error, urllib.request
         admin.hc = hc
@@ -1631,6 +1914,7 @@ def main():
         assert all(len(g) <= 5 for g in sa["mixed"].values()) and all(len(d.get("rewards", [])) <= 5 for d in sa["list"])
         names = body(hc.ENDPOINTS["/static/db/ITEMNAMES"]("", b""))  # a reward without a name throws
         assert all(str(r["itemid"]) in names for d in sa["list"] for g in d.get("rewards", []) for r in g["reward"])
+        assert all(hc.LANGUAGE in n and "vie" in n for n in names.values())  # read by the client's LOCALE (issue #36)
         assert {b["asset"] for b in body(hc.ENDPOINTS["/static/db/BADGES"]("", b""))} <= set(sa["mixed"]) and "misc" in sa["mixed"]
         ach = lambda: body(hc.ENDPOINTS["/achievement/me"]("", b""))
         rows = lambda: {r["id"]: r for r in ach()["achievement"]}
@@ -1976,6 +2260,46 @@ def main():
         assert [s["lock"] for s in A("summary")["scouts"]] == [False] * len(hc.SCOUTS)  # no cooldowns
         A("scouts_reset"); assert not any(s["lock"] for s in A("summary")["scouts"])
         assert len(A("log", n=5)["lines"]) <= 5
+        # issue #36: the login notice's picture (admin Pengumuman tab -> gamedata/notice.png, served as
+        # externalAssets/notice/notice.png); the user's own one is put back afterwards
+        import base64, struct, zlib
+        def png(w, h):
+            chunk = lambda t, d: struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+            return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 0, 0, 0, 0))
+                    + chunk(b"IDAT", zlib.compress(b"".join(b"\x00" + b"\x40" * w for _ in range(h)))) + chunk(b"IEND", b""))
+        kept = open(hc.NOTICE_IMAGE, "rb").read() if os.path.isfile(hc.NOTICE_IMAGE) else None
+        try:
+            assert refused("notice_set", png=base64.b64encode(png(640, 480)).decode())  # not the popup's 800x720 box
+            assert refused("notice_set", png="not base64!")
+            assert A("notice_set", png=base64.b64encode(png(800, 720)).decode())["has"]
+            assert hc.cdn_file("externalAssets/notice/notice.png")[1] == png(800, 720)  # the Korean client's way
+            if hc.ADMIN_PORT:  # this client's way: its web renderer opens the admin page's /notice
+                assert hc.notice_url().startswith(f"http://127.0.0.1:{hc.ADMIN_PORT}/notice?t=")
+            assert not A("notice_delete")["has"] and hc.cdn_file("externalAssets/notice/notice.png") is None
+            assert hc.notice_url() == "about:blank"
+        finally:
+            if kept is not None:
+                open(hc.NOTICE_IMAGE, "wb").write(kept)
+        # issue #36: the Aset tab runs tools/fa_faces.py in the background, one kind at a time (a
+        # stand-in here, which waits for the Stop button's file as the tool does)
+        stand_in = ("import os, sys, time\nprint('stand-in', *sys.argv[1:], flush=True)\n"
+                    f"while not os.path.isfile({admin.ASSET_STOP!r}): time.sleep(0.05)\nprint('stopped')")
+        cmd, log = admin.ASSET_CMD, admin.ASSET_LOG
+        admin.ASSET_CMD, admin.ASSET_LOG = [sys.executable, "-c", stand_in], os.path.join(tmp, "assets_fetch.log")
+        try:
+            assert refused("assets_fetch", kind="music")
+            assert A("assets_fetch", kind="crests")["running"] == "crests"
+            assert refused("assets_fetch", kind="faces")  # one at a time
+            a = A("assets_stop")
+            assert (a["running"], a["last"], a["lines"]) == (None, "crests", ["stand-in --crests", "stopped"])
+            assert set(a["counts"]) == set(admin.ASSET_KINDS) and not os.path.exists(admin.ASSET_STOP)
+        finally:
+            admin.ASSET_CMD, admin.ASSET_LOG = cmd, log
+        # the game setting screen's "Default ball" (ball 0, "NOT FOUND") shows ball 6's picture, and a
+        # small flag (none cached) is the nation's big one
+        assert hc.asset_path("externalAssets/balls/ball_0.png") == hc.asset_path("externalAssets/balls/ball_6.png") is not None
+        flag = sorted(f for f in os.listdir(os.path.join(hc.ASSETS, "externalAssets", "countries")) if f[:-4].isdigit())[0]
+        assert hc.asset_path(f"externalAssets/countries/smallFlags/{flag}") == hc.asset_path(f"externalAssets/countries/{flag}")
         # HTTP: reads are GETs; a change needs POST + X-FO3-Admin (a cross-site form can't add it)
         srv = admin.start(hc, 0)
         url, web = f"http://127.0.0.1:{srv.server_address[1]}", urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -1983,6 +2307,7 @@ def main():
             page = web.open(url + "/").read()
             assert b"FO3ID admin" in page and b"/*I18N*/" not in page and b'"lang_name": "\\u7b80\\u4f53\\u4e2d\\u6587"' in page
             assert web.open(url + "/icon/8194.png").read()[:4] == b"\x89PNG"  # the client's shop icon
+            assert b'<img src="/notice.png?t=' in web.open(url + "/notice").read()  # the login notice page
             err = urllib.request.Request(url + "/api/player_grade", b'{"id": "nope", "grade": 2}',
                                          {"X-FO3-Admin": "1", "X-FO3-Lang": "en"}, method="POST")
             assert json.load(web.open(err)) == {"error": "player not found"}

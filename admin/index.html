@@ -60,6 +60,12 @@
   button.b.primary { background: var(--gold); border-color: var(--gold); color: var(--gold-ink); font-weight: 600; }
   button.b.danger { color: #ffb4ad; border-color: #6b3330; }
   button.b.small { padding: 3px 8px; font-size: 13px; }
+  /* the login notice's 800x720 box, shown at half size */
+  .notice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 400px)); gap: 16px; margin-top: 12px; }
+  .notice-grid figure { margin: 0; }
+  .notice-grid figcaption { color: var(--mute); margin-bottom: 6px; }
+  #noticeCanvas, #noticeNow { display: block; width: 100%; height: auto; aspect-ratio: 800 / 720;
+                              border: 1px solid var(--line); background: #11181f; }
 
   .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); }
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -147,6 +153,8 @@
     <button role="tab" data-tab="prematch" data-i18n="nav_prematch"></button>
     <button role="tab" data-tab="economy" data-i18n="nav_economy"></button>
     <button role="tab" data-tab="chat" data-i18n="nav_chat"></button>
+    <button role="tab" data-tab="notice" data-i18n="nav_notice"></button>
+    <button role="tab" data-tab="assets" data-i18n="nav_assets"></button>
     <button role="tab" data-tab="missions" data-i18n="nav_missions"></button>
     <button role="tab" data-tab="scout" data-i18n="nav_scout"></button>
     <button role="tab" data-tab="log" data-i18n="nav_log"></button>
@@ -324,6 +332,35 @@
         <label class="f"><span data-i18n="chat_lang"></span><select id="chatLang"></select></label>
         <button class="b primary" id="chatSave" data-i18n="save"></button>
       </div>
+    </section>
+
+    <section id="notice" hidden>
+      <h2 data-i18n="notice_title"></h2>
+      <p class="lead" data-i18n="notice_lead"></p>
+      <div class="row">
+        <label class="f"><span data-i18n="notice_file"></span><input type="file" id="noticeFile" accept="image/png,image/jpeg"></label>
+        <label class="f"><span data-i18n="notice_mode"></span><select id="noticeMode">
+          <option value="fit" data-i18n="notice_fit"></option><option value="fill" data-i18n="notice_fill"></option></select></label>
+        <label class="f"><span data-i18n="notice_bg"></span><input type="color" id="noticeBg" value="#1b232c"></label>
+        <button class="b primary" id="noticeSave" data-i18n="notice_save"></button>
+        <button class="b danger" id="noticeDelete" data-i18n="notice_delete"></button>
+      </div>
+      <div class="notice-grid">
+        <figure><figcaption data-i18n="notice_new"></figcaption><canvas id="noticeCanvas" width="800" height="720"></canvas></figure>
+        <figure><figcaption data-i18n="notice_current"></figcaption><div id="noticeNowBox"></div>
+          <p class="muted" id="noticeNone" data-i18n="notice_none"></p></figure>
+      </div>
+    </section>
+
+    <section id="assets" hidden>
+      <h2 data-i18n="as_title"></h2>
+      <p class="lead" data-i18n="as_lead"></p>
+      <div class="table-wrap"><table>
+        <thead><tr><th data-i18n="as_kind"></th><th data-i18n="as_added"></th><th data-i18n="as_failed"></th><th></th></tr></thead>
+        <tbody id="assetRows"></tbody>
+      </table></div>
+      <div class="row"><span class="muted" id="assetState"></span><button class="b danger" id="assetStop" data-i18n="as_stop" hidden></button></div>
+      <pre class="log" id="assetLog"></pre>
     </section>
 
     <section id="missions" hidden>
@@ -518,6 +555,21 @@ const loaders = {
       return `<tr><td>${esc(SCOUT_NAMES[sc.key] || sc.key)}</td><td>${esc(t(sc.lock ? "locked" : "ready"))}</td>
         <td>${sc.cooltime ? new Date(sc.cooltime).toLocaleString(t("locale")) : esc(t("now"))}</td><td class="muted">${esc(q)}</td></tr>`;
     }).join("");
+  },
+  async notice() {
+    const n = await api("notice");
+    // the picture only when there is one (no empty image box)
+    $("#noticeNowBox").innerHTML = n.has ? `<img id="noticeNow" src="/notice.png?t=${n.updated}" alt="" width="800" height="720">` : "";
+    $("#noticeNone").hidden = n.has;
+  },
+  async assets() {
+    const a = await api("assets");
+    assetsBusy = !!a.running;
+    $("#assetRows").innerHTML = Object.entries(a.counts).map(([k, c]) => `<tr><td>${esc(t("as_" + k))}</td><td>${fmt(c.added)}</td>
+      <td>${fmt(c.failed)}</td><td><button class="b" data-asset="${k}"${a.running ? " disabled" : ""}>${esc(t("as_fetch"))}</button></td></tr>`).join("");
+    $("#assetState").textContent = a.running ? t("as_running", t("as_" + a.running)) : t("as_idle");
+    $("#assetStop").hidden = !a.running;
+    $("#assetLog").textContent = a.lines.join("\n");
   },
   async log() {
     const {lines} = await api("log?n=150");
@@ -905,6 +957,46 @@ $("#misSave").addEventListener("click", () => act(async () => {
                              targets: Number($("#misTargets").value), rewards: Number($("#misRewards").value)});
   await loaders.missions();
 }, t("mis_saved")));
+// the login notice: the chosen picture fitted (or filled) into the popup's 800x720 box, sent as PNG
+let noticeImg = null;
+function drawNotice() {
+  const c = $("#noticeCanvas"), g = c.getContext("2d");
+  g.fillStyle = $("#noticeBg").value; g.fillRect(0, 0, c.width, c.height);
+  if (!noticeImg) return;
+  const k = ($("#noticeMode").value === "fill" ? Math.max : Math.min)(c.width / noticeImg.width, c.height / noticeImg.height);
+  const w = noticeImg.width * k, h = noticeImg.height * k;
+  g.imageSmoothingQuality = "high";
+  g.drawImage(noticeImg, (c.width - w) / 2, (c.height - h) / 2, w, h);
+}
+$("#noticeFile").addEventListener("change", e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const img = new Image();
+  img.onload = () => { noticeImg = img; drawNotice(); };
+  img.onerror = () => say(t("failed") + t("e_notice_png"), "err");
+  img.src = URL.createObjectURL(f);
+});
+$("#noticeMode").addEventListener("change", drawNotice);
+$("#noticeBg").addEventListener("input", drawNotice);
+$("#noticeSave").addEventListener("click", () => {
+  if (!noticeImg) return say(t("notice_pick_first"), "err");
+  act(async () => {
+    await api("notice_set", {png: $("#noticeCanvas").toDataURL("image/png").split(",")[1]});
+    await loaders.notice();
+  }, t("notice_saved"));
+});
+$("#noticeDelete").addEventListener("click", () => {
+  if (confirm(t("notice_confirm_delete"))) act(async () => { await api("notice_delete", {}); await loaders.notice(); }, t("notice_deleted"));
+});
+drawNotice();
+// missing pictures: one tools/fa_faces.py run at a time, watched while it runs
+let assetsBusy = false;
+$("#assetRows").addEventListener("click", e => {
+  const kind = e.target.dataset.asset;
+  if (kind) act(async () => { await api("assets_fetch", {kind}); await loaders.assets(); }, t("as_started"));
+});
+$("#assetStop").addEventListener("click", () => act(async () => { await api("assets_stop", {}); await loaders.assets(); }, t("as_stopped")));
+setInterval(() => { if (assetsBusy && !$("#assets").hidden) loaders.assets().catch(() => {}); }, 2000);
 $("#scoutReset").addEventListener("click", () => act(async () => { await api("scouts_reset", {}); await loaders.scout(); }, t("scouts_ready")));
 $("#logRefresh").addEventListener("click", () => loaders.log());
 setInterval(() => { if ($("#logAuto").checked && !$("#log").hidden) loaders.log(); }, 3000);

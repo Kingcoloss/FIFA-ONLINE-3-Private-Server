@@ -1,11 +1,12 @@
-"""Add FIFA Online 4's 26 LIVE and 25 LIVE cards to the game as two new seasons.
+"""Add FIFA Online 4's 26 LIVE and 25 LIVE cards to the game as two new seasons, and WC18.
 User: "buatkan session baru untuk musim 2026 bedasarkan database fifa online 4
 https://id.fifaaddict.com/fo4db?class=25,live ikuti stat nya dianggap +0 icon ikuti berdasarkan
-fifa online 4".
+fifa online 4"; then the 2018 World Cup's best 300 squad players as WC18 (see WC18 below).
 
     python tools/fo4_season.py fetch [--min-ovr 72]   fifaaddict search -> gamedata/fo4_cards.json
     python tools/fo4_season.py collect                 console script that reads the card pages
     python tools/fo4_season.py import FILE             its output -> gamedata/fo4_cards.json
+    python tools/fo4_season.py wc18 [--game DIR]       futwiz + Wikipedia -> gamedata/wc18_cards.json
     python tools/fo4_season.py build                   cards -> gamedata/fifadb.sqlite
     python tools/fo4_season.py install [--game DIR]    fifadb + season icons -> the client
     python tools/fo4_season.py hud [--game DIR]        only the match HUD's season icons (Module.big)
@@ -135,7 +136,8 @@ def nuxt(html):
 
 # --- fetch ------------------------------------------------------------------------------------
 
-def fetcher(cache):
+def fetcher(cache, site=SITE, agent="Mozilla/5.0 (FO3 private server season sync)"):
+    """fetch(path or full URL) -> page text, one request every DELAY s, cached in `cache`."""
     os.makedirs(cache, exist_ok=True)
     last = [0.0]
 
@@ -146,7 +148,8 @@ def fetcher(cache):
         time.sleep(max(0.0, DELAY - (time.time() - last[0])))
         for attempt in range(4):
             try:
-                req = urllib.request.Request(SITE + path, headers={"User-Agent": "Mozilla/5.0 (FO3 private server season sync)"})
+                url = path if path.startswith("http") else site + path
+                req = urllib.request.Request(url, headers={"User-Agent": agent})
                 body = urllib.request.urlopen(req, timeout=60).read().decode("utf-8", "replace")
                 break
             except OSError as e:
@@ -383,7 +386,7 @@ def cmd_build(a):
     pids = json.load(open(PIDS)) if os.path.exists(PIDS) else {}
     c = sqlite3.connect(FIFADB); c.row_factory = sqlite3.Row
     cols = [r[1] for r in c.execute("PRAGMA table_info(players)")]
-    seasons = tuple(CLASSES.values())
+    seasons = (*CLASSES.values(), WC18)
     c.execute(f"DELETE FROM players WHERE spid / 1000000 IN ({','.join('?' * len(seasons))})", seasons)
     for t in PERM_TABLES:
         c.execute(f"DELETE FROM {t} WHERE spid / 1000000 IN ({','.join('?' * len(seasons))})", seasons)
@@ -404,6 +407,7 @@ def cmd_build(a):
     generic = collections.defaultdict(list)  # skin tone -> 2017 cards with a generic head
     for r in c.execute("SELECT * FROM players WHERE spid / 1000000 = 88 AND headclasscode = 1 ORDER BY spid"):
         generic[r["skintonecode"]].append(r)
+    cards.update(wc18_build_cards(best))
     found = new = 0
     heads = {}
     for uid, card in sorted(cards.items(), key=lambda kv: kv[1]["season"]):
@@ -411,7 +415,7 @@ def cmd_build(a):
         when = _date(db["birthdate"])
         cands = [(max(_same_name(db["name"], names.get(p, ("", ""))[0]), _same_name(db["name_short"], names.get(p, ("", ""))[1])), p)
                  for p in born.get(when, []) if p < NEW_PID]
-        score, pid = max(cands, default=(0, None))
+        score, pid = (2.0, card["pid"]) if card.get("pid") in best else max(cands, default=(0, None))
         person = f"{'-'.join(map(str, when))}|{_key(db['name'])}"
         if score >= 0.85:  # same last name, or a near-identical spelling (Haland / Haaland)
             base = dict(best[pid][1])
@@ -444,6 +448,7 @@ def cmd_build(a):
                     trait1=sum(1 << FO3_TRAITS.index(t) for t in card.get("fo3traits", [])),  # Karakteristik
                     contractvaliduntil=2027, playerjointeamdate="Tue, 01 Jul 2025 00:00:00 GMT", historyopen=0,
                     **{f"preferredposition{i + 1}": (poss[i] if i < len(poss) else -1) for i in range(4)})
+        base.update(card.get("keep", {}))  # WC18: what stays as on the player's own FO3 card
         base["badges"] = badges(base)  # Style
         c.execute(f"INSERT INTO players ({','.join(cols)}) VALUES ({','.join('?' * len(cols))})", [base[k] for k in cols])
         for t in PERM_TABLES:
@@ -466,6 +471,347 @@ def cmd_build(a):
     per = collections.Counter(card["season"] for card in cards.values())
     print(f"{len(cards)} cards ({', '.join(f'{SEASON_NAMES[s]} {n}' for s, n in sorted(per.items()))}): "
           f"{found} players FO3 has, {new} new -> {FIFADB}")
+
+
+# --- WC18: the 2018 World Cup's best 300 squad players ----------------------------------------
+# User: "research untuk kartu wc18", then "Pemain top 300 saja wc18, grade 1 = nilai akhir
+# turnamen dikurangi 5, pemain yang ada di skuad saja tidak usah legend". FO3 and FO4 never had
+# such cards. futwiz keeps FIFA 18's World Cup mode: EA's World Cup ratings as they stood when
+# the tournament ended (Hazard 96, Messi and Modric 95, Mbappe 94). Its list rows carry EA's
+# player and nation ids, which are FO3's (a card is season * 1e6 + EA id), its card pages the
+# stats. The squads are Wikipedia's 32 x 23, the clubs theirs at the time. The WC18_TOP best of
+# the players in a squad (icons left out; ties at the cut go to the higher face stats) become
+# season 78, next to FO3's own WC14 (77), with an "18" badge in the green of FO3's WC06 / WC10 /
+# WC14 ones. A card's stats are the World Cup page's, all moved by one step so that at +1 it
+# shows its World Cup rating + WC18_PLUS1 (the step is about -10: +1 adds PLUS1 to each stat).
+# The World Cup pages leave out the physical stats (taken from the player's FIFA 18 card, moved
+# by the World Cup PHY face stat) and a keeper's everything but his six face stats (DIV HAN KIC
+# REF SPD POS: the GK skills; the rest from his FIFA 18 card, its speed moved by SPD). Face, weak
+# foot, skills and reputation stay as on the player's own FO3 card; his Karakteristik (traits) are
+# that card's and his FIFA 18 card's together (user: "specialist sama traits tiap pemain jangan
+# lupa"), his Style (badges, the specialities) follows his stats, as on every card build adds.
+WC18 = 78
+SEASON_NAMES[WC18] = "WC18"
+WC18_CARDS = os.path.join(ROOT, "gamedata", "wc18_cards.json")
+WC18_SITE = "https://www.futwiz.com"
+WC18_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) FO3 private server season sync"
+WC18_SQUADS = ("https://en.wikipedia.org/w/api.php?action=parse&page=2018_FIFA_World_Cup_squads"
+               "&prop=wikitext&format=json&formatversion=2")
+WC18_TOP = 300
+WC18_PLUS1 = -5  # a card at +1 shows its World Cup rating - 5
+# Wikipedia's squad headings -> EA nation ids (futwiz's flags, fifadb's nationality)
+WC18_NATIONS = {"Egypt": 111, "Russia": 40, "Saudi Arabia": 183, "Uruguay": 60, "Iran": 161, "Morocco": 129,
+                "Portugal": 38, "Spain": 45, "Australia": 195, "Denmark": 13, "France": 18, "Peru": 59,
+                "Argentina": 52, "Croatia": 10, "Iceland": 24, "Nigeria": 133, "Brazil": 54, "Costa Rica": 72,
+                "Serbia": 51, "Switzerland": 47, "Germany": 21, "Mexico": 83, "South Korea": 167, "Sweden": 46,
+                "Belgium": 7, "England": 14, "Panama": 87, "Tunisia": 145, "Colombia": 56, "Japan": 163,
+                "Poland": 37, "Senegal": 136}
+_WC18_CARD = re.compile(r'<a href="/fifa18/worldcup/player/([^/"]+)/(\d+)"><div class="card-19-pack '
+                        r'card-19-pack-([a-z-]+)\s*">(.*?)</a>', re.S)
+_WC18_VERSION = re.compile(r'<li><a href="(/fifa18/player/[^"]+)"><img src="[^"]*/badges/(\d+)\.png"[^>]*>\s*'
+                           r'(\d+)\s+(\w+)</a>\s*(?:<span class="pull-right">([^<]*)</span>)?')
+# a card page's labels -> fifadb columns (Composure has none); "Pac".."Phy" head a FIFA 18 page's
+# groups (a keeper's: DIV HAN KIC REF SPD POS)
+WC18_LABELS = {"Acceleration": "acceleration", "Sprint Speed": "sprintspeed", "Positioning": "positioning",
+               "Finishing": "finishing", "Long Shots": "longshots", "Penalties": "penalties", "Shot Power": "shotpower",
+               "Volleys": "volleys", "Crossing": "crossing", "Curve": "curve", "FK. Acc.": "freekickaccuracy",
+               "FK. Accuracy": "freekickaccuracy", "Long Pass": "longpassing", "Long Passing": "longpassing",
+               "Short Pass": "shortpassing", "Short Passing": "shortpassing", "Vision": "vision", "Agility": "agility",
+               "Balance": "balance", "Ball Control": "ballcontrol", "Dribbling": "dribbling", "Reactions": "reactions",
+               "Heading Acc.": "headingaccuracy", "Interceptions": "interceptions", "Marking": "marking",
+               "Stand Tackle": "standingtackle", "Slide Tackle": "slidingtackle", "Sliding Tackle": "slidingtackle",
+               "Aggression": "aggression", "Jumping": "jumping", "Stamina": "stamina", "Strength": "strength"}
+WC18_FACE = ("Pac", "Sho", "Pas", "Dri", "Def", "Phy")
+WC18_GK = {"DIV": "gkdiving", "HAN": "gkhandling", "KIC": "gkkicking", "REF": "gkreflexes", "POS": "gkpositioning"}
+WC18_PHYSICAL = ("aggression", "jumping", "stamina", "strength")
+# words a club's name may carry or not (Deportivo La Coruna / RC Deportivo); not CP: Sporting CP is
+# not FO3's R. Sporting (Gijon)
+WC18_TEAM_WORDS = {"fc", "cf", "afc", "sc", "ac", "fk", "sk", "club", "de", "the", "rc", "rcd", "cd", "ud", "sd", "ca",
+                   "sl", "ss", "ssc", "us", "as", "sv", "vfl", "vfb", "tsg", "pfc", "nk", "bk"}
+# a FIFA 18 card's traits (futwiz's names, "Shooting - " / "(CPU AI Only)" cut) -> FO3's trait1 ones
+# (Karakteristik). "Long Thrower" is a keeper's (Neuer, De Gea), "Long Throw" an outfield player's
+# (Walker, Trippier). FUT's newer ones (Technical Dribbler, Chip Shot, Corner Specialist, Sweeper
+# Keeper, Ultimate Professional, Target Forward, Backs Into Player, One Club Player, Takes Finesse
+# Style Free Kicks) have no trait1 bit.
+WC18_TRAITS = {"Inflexible": "inflexibility", "Long Throw": "long-throw-in", "Long Throw-in": "long-throw-in",
+               "Takes Powerful Driven Free Kicks": "takes-powerful-driven-free-kicks", "Power Free-Kick": "takes-powerful-driven-free-kicks",
+               "Diver": "diver", "Injury Prone": "injury-prone", "Solid Player": "solid-player", "Injury Free": "solid-player",
+               "Avoids Using Weaker Foot": "avoids-using-weaker-foot", "Dives Into Tackles": "dives-into-tackles",
+               "Tries To Beat Defensive Line": "tries-to-beat-offside-trap", "Beat Offside Trap": "tries-to-beat-offside-trap",
+               "Selfish": "selfish", "Leadership": "leadership", "Argues With Officials": "argues-with-officials",
+               "Early Crosser": "early-crosser", "Finesse Shot": "finesse-shot", "Flair": "flair", "Long Passer": "long-passer",
+               "Long Shot Taker": "long-shot-taker", "Speed Dribbler": "speed-dribbler", "Playmaker": "play-maker",
+               "Pushes Up For Corners": "pushes-up-for-corners", "GK Up For Corners": "pushes-up-for-corners", "Puncher": "puncher",
+               "Long Thrower": "gk-long-thrower", "GK Long Throw": "gk-long-thrower", "Power Header": "power-header",
+               "GK One On One": "gk-one-on-ones", "Giant Throw-in": "giant-throw-in", "Outside Foot Shot": "outside-foot-shot",
+               "Crowd Favourite": "crowd-favourite", "Swerve Pass": "swerve", "Second Wind": "second-wind",
+               "Acrobatic Clearance": "acrobatic-clearance"}
+WORKRATE_WORD = {"High": "high", "Med": "medium", "Low": "low"}
+
+
+def wc18_list(fetch):
+    """{fid: card} of futwiz's FIFA 18 World Cup players, 25 a page: EA id (the face picture's),
+    EA nation id (the flag's), short name, rating, position, kind (gold / silver / bronze / icon)
+    and the six face stats."""
+    out, page = {}, 0
+    while True:
+        rows = _WC18_CARD.findall(fetch(f"/fifa18/worldcup/players?page={page}"))
+        for slug, fid, kind, body in rows:
+            get = lambda rx: (re.search(rx, body, re.S) or [None, None])[1]
+            out[int(fid)] = {"fid": int(fid), "slug": slug, "kind": kind, "eaid": int(get(r"/faces/(\d+)\.png")),
+                             "nation": int(get(r"/flags/(\d+)\.png")), "name": get(r'pack-name">\s*(.*?)\s*<'),
+                             "rating": int(get(r'pack-rating">\s*(\d+)')), "pos": get(r'pack-position">\s*(\w+)'),
+                             "face": dict(zip(re.findall(r'attlabel\d">\s*(\w+)', body),
+                                              map(int, re.findall(r'attnum\d">\s*(\d+)', body))))}
+        if not rows:
+            return out
+        page += 1
+
+
+def wc18_page(html):
+    """A futwiz card page: {column: value} of its attributes (a label's last value: a World Cup
+    page heads its dribbling group with the DRI face stat), the FIFA 18 page's face stats, height,
+    weight, foot, workrates ("Med/Med") and the player's FIFA 18 versions [(link, club badge id,
+    rating, position, label)], a version with no label being a plain card."""
+    i = html.find("WORKRATES")
+    ends = [k for k in (html.find(m, i) for m in ("Traits", "World Cup Fixtures", "Player Chemistry", "pchart")) if k > 0]
+    toks = [t.strip() for t in re.sub(r"<[^>]+>", "|", html[i:min(ends or [len(html)])]).split("|") if t.strip()]
+    stats, face = {}, {}
+    for a, b in zip(toks, toks[1:]):
+        if b.isdigit() and a in WC18_LABELS:
+            stats[WC18_LABELS[a]] = int(b)
+        elif b.isdigit() and a in WC18_FACE:
+            face[a] = int(b)
+    head = [t.strip() for t in re.sub(r"<[^>]+>", "|", html[max(0, i - 3000):i + 9]).split("|") if t.strip()]
+    body = re.search(r"(\d{3})cm.*?(\d{2,3})kg", html[:i], re.S)
+    listed = re.search(r"Traits:\s*([^<]*)", html)  # a FIFA 18 page: "Traits: Shooting - Finesse Shot, Playmaker"
+    traits = [re.sub(r"\s*\(CPU AI Only\)", "", t.split(" - ")[-1]).strip() for t in (listed[1] if listed else "").split(",")]
+    return {"stats": stats, "face": face, "height": int(body[1]) if body else None, "weight": int(body[2]) if body else None,
+            "foot": toks[1] if toks[1:2] in (["Left"], ["Right"]) else None,
+            "workrate": head[-2] if len(head) > 1 and "/" in head[-2] else "Med/Med", "traits": [t for t in traits if t],
+            "versions": [(link, int(b), int(r), p, (lab or "").strip()) for link, b, r, p, lab in _WC18_VERSION.findall(html)]}
+
+
+def wc18_squads(fetch):
+    """[{nation, name, dob [y, m, d], clubs (the club's article name and the name shown)}] of
+    Wikipedia's 2018 World Cup squads."""
+    text = json.loads(fetch(WC18_SQUADS))["parse"]["wikitext"]
+    links = lambda s: [x for pair in re.findall(r"\[\[([^|\]]+)(?:\|([^\]]+))?\]\]", s) for x in pair if x] or [s.strip()]
+    out, nation = [], None
+    for line in text.splitlines():
+        m = re.match(r"===\s*(.+?)\s*===\s*$", line)
+        if m:
+            nation = m.group(1)
+        elif line.startswith("{{nat fs g player") and nation in WC18_NATIONS:
+            field = lambda k: (re.search(r"\|" + k + r"=(.*?)(?=\|[a-z]+=|\}\}\s*$)", line) or [None, ""])[1]
+            dob = re.search(r"[Bb]irth date and age2\|(?:df=y\|)?2018\|6\|14\|(\d+)\|(\d+)\|(\d+)", line)
+            out.append({"nation": nation, "name": links(field("name"))[-1], "clubs": links(field("club")),
+                        "dob": [int(x) for x in dob.groups()]})
+    return out
+
+
+def wc18_pick(cards, squads, fo3):
+    """(the WC18_TOP best futwiz cards of players in a squad, each with "squad": its entry; how
+    many squad players have a card). Pairs by name, and by birth date where FO3 knows the EA id
+    (fo3 = {pid: ((y, m, d), full name)}), best pair first, one card a squad place."""
+    by_nation = collections.defaultdict(list)
+    for i, s in enumerate(squads):
+        by_nation[WC18_NATIONS[s["nation"]]].append(i)
+    pairs = []
+    for card in cards.values():
+        if card["kind"] == "icon":
+            continue
+        born, full = fo3.get(card["eaid"], (None, ""))
+        for i in by_nation.get(card["nation"], ()):
+            s = squads[i]
+            name = max(_same_name(s["name"], full), _same_name(s["name"], card["slug"].replace("-", " ")))
+            same_day = born == tuple(s["dob"])
+            if (same_day and name >= 0.6) or name >= 1.6:
+                pairs.append((name + 2 * same_day, card["fid"], i))
+    taken, used, out = set(), set(), []
+    for _, fid, i in sorted(pairs, reverse=True):
+        if fid not in taken and i not in used:
+            taken.add(fid)
+            used.add(i)
+            out.append(dict(cards[fid], squad=squads[i]))
+    out.sort(key=lambda card: (-card["rating"], -sum(card["face"].values()), card["fid"]))
+    return out[:WC18_TOP], len(out)
+
+
+def _team_like(a, b):
+    """0..1: likeness of two club names, word by word: 1 the same words, 0.95 one name's words
+    inside the other's (Inter Milan / Inter), else the shorter name's words' best likeness, halved
+    when one of them has no counterpart (Bayern Munich / FC Bayern Munchen 0.88, Manchester City /
+    Manchester United 0.35)."""
+    wa, wb = ([w for w in _key(s).split() if w not in WC18_TEAM_WORDS] for s in (a, b))
+    if not wa or not wb:
+        return 0.0
+    if wa == wb:
+        return 1.0
+    if set(wa) <= set(wb) or set(wb) <= set(wa):
+        return 0.95
+    short, other = sorted((wa, wb), key=len)
+    near = [max(difflib.SequenceMatcher(None, x, y).ratio() for y in other) for x in short]
+    return sum(near) / len(near) * (0.5 if min(near) < 0.5 else 1)
+
+
+def wc18_team(clubs, candidates, teams):
+    """FO3 team id of a player's 2018 club (Wikipedia's names for it): the best match among the
+    clubs his FIFA 18 cards and his FO3 card show (Bayern Munich / FC Bayern Munchen), else a club
+    of the same name (its words in the other's: Inter Milan / Inter) among all FO3 clubs (Porto is
+    not Port Vale, Al Ain not Al Batin); None = not in FO3 (build puts him in Rest of the World).
+    teams = {teamid: (name, leagueid)}, national teams (league 78) left out."""
+    teams = {t: v for t, v in teams.items() if v[1] != 78}
+    score = lambda t: max(_team_like(n, teams[t][0]) for n in clubs)
+    near = max((t for t in candidates if t in teams), key=score, default=None)
+    if near is not None and score(near) >= 0.6:
+        return near
+    best = max(teams, key=score, default=None)
+    return best if best is not None and score(best) >= 0.95 else None
+
+
+def _fo3_teams(game):
+    """{teamid: (name, leagueid)} of FO3's clubs (a club with cards), from the client's eng.db."""
+    import bigdir
+    data0 = os.path.join(BACKUP, "data_0.big")
+    if not os.path.isfile(data0):
+        data0 = os.path.join(game, "data", "data_0.big")
+    tmp = os.path.join(tempfile.gettempdir(), "fo4_season_teams.sqlite")
+    open(tmp, "wb").write(_plain(bigdir.read(data0, "data/db2/eng.db.db2")))
+    with closing(sqlite3.connect(tmp)) as c:
+        teams = {t: (n, lg) for t, n, lg in c.execute("SELECT teamid, teamname, leagueid FROM team")}
+    os.remove(tmp)
+    with closing(sqlite3.connect(FIFADB)) as c:
+        have = {r[0] for r in c.execute("SELECT DISTINCT teamid FROM players")}
+    return {t: v for t, v in teams.items() if t in have}
+
+
+def cmd_wc18(a):
+    fetch = fetcher(a.cache, WC18_SITE, WC18_AGENT)
+    squads = wc18_squads(fetch)
+    cards = wc18_list(fetch)
+    with closing(sqlite3.connect(FIFADB)) as c:
+        names = dict(c.execute("SELECT playerid, full_eng FROM nameseng"))
+        fo3, own_team = {}, {}
+        for pid, born, team, spid in c.execute("SELECT playerid, birthdate, teamid, spid FROM players ORDER BY spid"):
+            m = re.match(r"(\d+)/(\d+)/(\d+)", born or "")
+            if m and pid not in fo3:
+                fo3[pid] = ((int(m[3]), int(m[1]), int(m[2])), names.get(pid, ""))
+            if spid // 1000000 == 88:
+                own_team[pid] = team
+    top, have = wc18_pick(cards, squads, fo3)
+    print(f"{len(cards)} World Cup cards, {len(squads)} squad players ({have} with a card); "
+          f"the best {len(top)}: {top[0]['rating']}..{top[-1]['rating']}", flush=True)
+    teams = _fo3_teams(a.game)
+    out = {}
+    for n, card in enumerate(top, 1):
+        wc = wc18_page(fetch(f"/fifa18/worldcup/player/{card['slug']}/{card['fid']}"))
+        # his FIFA 18 card: the plain version rated lowest, the first made of those (a later one at
+        # the same rating is a move after the World Cup, a page without stats: Iniesta's Vissel Kobe)
+        first = min((v for v in wc["versions"] if not v[4]), key=lambda v: (v[2], int(v[0].rsplit("/", 1)[1])), default=None)
+        fifa18 = wc18_page(fetch(first[0])) if first else None
+        pos = card["pos"] or (first[3] if first else None)
+        squad = card["squad"]
+        team = wc18_team(squad["clubs"], {v[1] for v in wc["versions"]} | {own_team.get(card["eaid"])}, teams)
+        out[str(card["eaid"])] = {
+            "fid": card["fid"], "name": card["name"], "full": squad["name"], "dob": squad["dob"], "nation": card["nation"],
+            "rating": card["rating"], "pos": pos, "face": card["face"], "stats": wc["stats"], "height": wc["height"],
+            "weight": wc["weight"], "foot": wc["foot"], "workrate": wc["workrate"], "clubs": squad["clubs"],
+            "team": team, "league": teams[team][1] if team else None,
+            "fifa18": {"stats": fifa18["stats"], "face": fifa18["face"], "traits": fifa18["traits"]} if fifa18 else None}
+        if n % 25 == 0:
+            print(f"{n}/{len(top)} cards read", flush=True)
+    tmp = WC18_CARDS + ".tmp"
+    json.dump(out, open(tmp, "w", encoding="utf-8"), ensure_ascii=False)
+    os.replace(tmp, WC18_CARDS)
+    lost = [plain(v["full"]) for v in out.values() if v["team"] is None]  # ASCII: a cp1252 console
+    print(f"{len(out)} WC18 cards -> {WC18_CARDS}; clubs FO3 lacks (Rest of the World): {len(lost)} {lost}")
+
+
+def wc18_stats(w, own):
+    """EA-scale stats of a WC18 card (w = its wc18_cards.json entry; own = his FO3 card or None):
+    the World Cup page's, the FIFA 18 card's for the rest (physical stats moved by the World Cup
+    PHY, a keeper's speed by SPD), a keeper's GK skills from the face stats; what neither has from
+    his FO3 card one EA step up (FO3 = EA - 6 on average), else a keeper's reactions from his GK
+    skills, an outfield player's physical stats from PHY, the rest plain (50; GK skills 10)."""
+    keeper = w["pos"] == "GK"
+    f18 = w.get("fifa18") or {"stats": {}, "face": {}}
+    if own:
+        out = {k: own[k] + 6 for k in STATS}
+    elif keeper:
+        out = {k: 25 for k in STATS}
+        out["reactions"] = sum(w["face"].get(k, 50) for k in WC18_GK) // len(WC18_GK) - 5
+    else:
+        out = {k: 10 if k.startswith("gk") else 50 for k in STATS}
+        out.update({k: w["face"].get("PHY", 50) for k in WC18_PHYSICAL})
+    out.update(f18["stats"])
+    if keeper:
+        out.update({col: w["face"][k] for k, col in WC18_GK.items() if k in w["face"]})
+        if "SPD" in w["face"] and "Def" in f18["face"]:
+            for k in ("acceleration", "sprintspeed"):
+                out[k] += w["face"]["SPD"] - f18["face"]["Def"]
+    else:
+        out.update(w["stats"])
+        if "PHY" in w["face"] and "Phy" in f18["face"]:
+            for k in WC18_PHYSICAL:
+                out[k] += w["face"]["PHY"] - f18["face"]["Phy"]
+    return out
+
+
+def wc18_shift(stats, pos, target):
+    """stats all moved by the one step that makes the client's rating at position code pos
+    (Enums.calcPosOvr, http_config.ROLE_WEIGHTS) come out at target, kept within 1..99."""
+    sys.path.insert(0, ROOT)
+    from http_config import ROLE_WEIGHTS, POS_ROLE
+    weights = ROLE_WEIGHTS[POS_ROLE[pos]]
+    moved = lambda s: {k: max(1, min(99, v + s)) for k, v in stats.items()}
+    rate = lambda st: sum(n * st[k] for k, n in weights.items()) // 100
+    return moved(min(range(-30, 11), key=lambda s: (abs(rate(moved(s)) - target), abs(s + 10))))
+
+
+def wc18_build_cards(best):
+    """WC18's cards in fetch's shape for cmd_build (forced pid = EA id when FO3 has a card of him;
+    keep = what stays as on that card), from gamedata/wc18_cards.json."""
+    if not os.path.exists(WC18_CARDS):
+        return {}
+    tones = collections.defaultdict(list)  # nation -> its 2017 players' skin tones (a new player's head)
+    for rank, r in best.values():
+        if r["spid"] // 1000000 == 88:
+            tones[r["nationality"]].append(r["skintonecode"])
+    out = {}
+    for eaid, w in json.load(open(WC18_CARDS, encoding="utf-8")).items():
+        own = dict(best[int(eaid)][1]) if int(eaid) in best else None
+        code = POS.get(w["pos"], (own or {}).get("preferredposition1", POS["CM"]))  # a list row without one: his own
+        stats = wc18_shift(wc18_stats(w, own), code, w["rating"] + WC18_PLUS1 - PLUS1)
+        others = [p for p in ((own or {}).get(f"preferredposition{i}", -1) for i in range(1, 5)) if p >= 0 and p != code]
+        poss = ([code] + others + [-1] * 3)[:4]
+        keep = {f"preferredposition{i + 1}": p for i, p in enumerate(poss)}
+        if own:
+            keep.update({k: own[k] for k in ("trait2", "internationalrep", "nationalteamid", "weakfootabilitytypecode",
+                                              "skillmoves", "contractvaliduntil", "playerjointeamdate", "historyopen")})
+        else:
+            keep.update(contractvaliduntil=2019, playerjointeamdate="Fri, 01 Jun 2018 00:00:00 GMT")
+        # Karakteristik: his FO3 card's and his FIFA 18 card's (user: "traits tiap pemain jangan lupa");
+        # Style (badges) build works out from the stats, as for every added card
+        keep["trait1"] = (own or {}).get("trait1", 0) | sum(
+            {1 << FO3_TRAITS.index(WC18_TRAITS[t]) for t in (w.get("fifa18") or {}).get("traits", []) if t in WC18_TRAITS})
+        y, m, d = w["dob"]
+        if own:  # FO3's own birth date (it can differ from Wikipedia's by a day)
+            mm, dd, yy = re.match(r"(\d+)/(\d+)/(\d+)", own["birthdate"]).groups()
+            y, m, d = int(yy), int(mm), int(dd)
+        words = plain(w["full"]).split()
+        att, dfn = (w["workrate"] or "Med/Med").split("/")
+        tone = sorted(tones[w["nation"]])[len(tones[w["nation"]]) // 2] if tones[w["nation"]] else 2
+        out[f"wc18-{eaid}"] = {
+            "season": WC18, "pid": int(eaid) if own else None, "attr": stats, "keep": keep,
+            "db": {"name": w["full"], "name_short": f"{words[0][0]}. {' '.join(words[1:])}" if len(words) > 1 else w["full"],
+                   "birthdate": f"{d}.{m}.{y}", "height": w["height"] or (own or {}).get("height", 180),
+                   "weight": w["weight"] or (own or {}).get("weight", 75), "pos1": w["pos"],
+                   "foot_pref": (w["foot"] or "Right").lower(), "foot_weak": 3, "skill_level": 2,
+                   "workrate_att": WORKRATE_WORD.get(att, "medium"), "workrate_def": WORKRATE_WORD.get(dfn, "medium"),
+                   "current_ovr": w["rating"] + WC18_PLUS1 - PLUS1, "nation_id": w["nation"],
+                   "team_id": w["team"] or 0, "league_id": w["league"] or 0, "skintonecode": tone}}
+    return out
 
 
 # --- season icons: data/ui/components/Label.big ------------------------------------------------
@@ -591,6 +937,71 @@ def _draw(dds, img, x, y):
             dds[at:at + 16] = _bc3(px)
 
 
+def _frame_icons(gfx, dds, labels):
+    """{label: RGBA PIL image} of SeasonIcon frames of Label.gfx (sprite 144, the big badges)."""
+    import io, zlib
+    from PIL import Image
+    atlas = Image.open(io.BytesIO(bytes(dds))).convert("RGBA")
+    body = zlib.decompress(gfx[8:])
+    r = _Bits(body, 0); r.u(4 * r.u(5)); start = r.end() + 4
+    tags = _tags(body, start, len(body))
+    defs = {int.from_bytes(d[:2], "little"): (c, d) for c, d in tags if c in DEFINES}
+    sprite = next(d for c, d in tags if c == 39 and int.from_bytes(d[:2], "little") == ICON_SPRITES[0])
+    inner = _tags(sprite, 4, len(sprite))
+    out = {}
+    for i, (c, d) in enumerate(inner):
+        if c == 43 and d[:-1].decode() in labels:
+            place = next(pd for pc, pd in inner[i:] if pc == 26)
+            shape = defs[int.from_bytes(place[3:5], "little")][1]
+            ref = next(defs[b][1] for b in _bitmaps(shape) if b in defs and defs[b][0] == 1008)
+            out[d[:-1].decode()] = atlas.crop(tuple(int.from_bytes(ref[k:k + 2], "little") for k in (4, 6, 8, 10)))
+    return out
+
+
+def wc18_icon(gfx, dds):
+    """A WC18 badge made of FO3's own: its WC10 one ("10" in the World Cup badges' yellow to green,
+    frame 47season) with the 0 swapped for the white 8 of the red '08 badge (67season), recoloured
+    row by row as the 1."""
+    from PIL import Image
+    f = _frame_icons(gfx, dds, ("47season", "67season"))
+    wc, red = f["47season"], f["67season"]
+    px, out = wc.load(), wc.copy()
+    o = out.load()
+    w, h = wc.size
+    digit = lambda p: p[3] > 0 and p[0] + p[1] > p[2] + 90  # yellow / green on the navy box
+
+    def glyphs(cols):  # runs of adjacent columns, 4 wide or more (the box's edge is not one)
+        runs = []
+        for x in cols:
+            if runs and x == runs[-1][-1] + 1:
+                runs[-1].append(x)
+            else:
+                runs.append([x])
+        return [g for g in runs if len(g) >= 4]
+    one, zero = glyphs([x for x in range(4, w - 4) if any(digit(px[x, y]) for y in range(6, h - 7))])[:2]
+    rows = [y for y in range(4, h - 5) if any(digit(px[x, y]) for x in zero)]
+    for y in range(rows[0] - 1, rows[-1] + 2):  # the 0 out: the box's colour of that row
+        for x in range(zero[0] - 1, zero[-1] + 2):
+            o[x, y] = px[one[-1] + 1, y]
+    rp, (rw, rh) = red.load(), red.size
+    white = lambda p: p[3] > 0 and min(p[:3]) > 150
+    eight = glyphs([x for x in range(4, rw - 4) if any(white(rp[x, y]) for y in range(4, rh - 4))])[-1]
+    erows = [y for y in range(4, rh - 4) if any(white(rp[x, y]) for x in eight)]
+    mask = Image.new("L", (len(eight), len(erows)))
+    for x in eight:
+        for y in erows:
+            mask.putpixel((x - eight[0], y - erows[0]), max(0, min(255, (min(rp[x, y][:3]) - 110) * 3)))
+    mask = mask.resize((len(zero), rows[-1] - rows[0] + 1), Image.LANCZOS)
+    for y in rows:
+        ink = next((px[x, y] for x in one if digit(px[x, y])), (200, 220, 40, 255))
+        for x in range(mask.width):
+            a = mask.getpixel((x, y - rows[0])) / 255
+            if a:
+                b = o[zero[0] + x, y]
+                o[zero[0] + x, y] = tuple(int(ink[k] * a + b[k] * (1 - a)) for k in range(3)) + (255,)
+    return out
+
+
 def label_with_icons(gfx, dds, icons):
     """(gfx, dds) of Label.big with one more SeasonIcon frame per {season: PIL RGBA icon}."""
     import zlib
@@ -657,7 +1068,9 @@ def label_with_icons(gfx, dds, icons):
 #             for p in that side's players:   side's team.players as the match resource has them)
 #                 if (p.spid % SEASON_MULTIPLIER == spid) { spid = p.spid; goto done }
 # so a match card gets its own season ('17 cards still show curseason) and anything else is as
-# before. Branches in AVM2 are relative, so the old code behind the prefix needs no fixing.
+# before. Branches in AVM2 are relative, so the old code behind the prefix needs no fixing. A side
+# lists every card of the club (the pre-match screen swaps reserves in), so http_config.match_side
+# puts the 18 first: a reserve 26 LIVE Mbappe no longer badges the WC18 one playing.
 MODULE_BIG, MODULE_GFX = "data/ui/libs/Module.big", "data/ui/libs/Module.gfx"
 
 
@@ -1015,12 +1428,22 @@ def _game_running():
     return "fifazf.exe" in out.lower()
 
 
-def _icons():
-    """{season: RGBA PIL image} of FO4's season badges (downloaded once to gamedata/fo4_icons)."""
+def _seasons_built():
+    """The added seasons gamedata/fifadb.sqlite has cards of."""
+    with closing(sqlite3.connect(FIFADB)) as c:
+        return [s for s in (*CLASSES.values(), WC18)
+                if c.execute("SELECT 1 FROM players WHERE spid BETWEEN ? AND ? LIMIT 1", (s * 1000000, s * 1000000 + 999999)).fetchone()]
+
+
+def _icons(gfx, dds):
+    """{season: RGBA PIL image} of FO4's season badges (downloaded once to gamedata/fo4_icons) and,
+    once built, WC18's (wc18_icon, from the shipped Label.big's gfx and dds)."""
     from PIL import Image
     d = os.path.join(ROOT, "gamedata", "fo4_icons")
     os.makedirs(d, exist_ok=True)
     out, meta = {}, None
+    if WC18 in _seasons_built():
+        out[WC18] = wc18_icon(gfx, dds)
     for season in CLASSES.values():
         f = os.path.join(d, f"{season}.png")
         if not os.path.exists(f):
@@ -1088,7 +1511,9 @@ def cmd_install(a):
     files[NG_ENTRY] = (packed, len(ng))
     bigdir.patch(data0, files, in_place=True, at=at)
     assert bigdir.read(data0, NG_ENTRY) == ng
-    gfx, dds = label_with_icons(bigdir.read(label, LABEL_GFX), bigdir.read(label, LABEL_DDS), _icons())
+    gfx, dds = bigdir.read(label, LABEL_GFX), bigdir.read(label, LABEL_DDS)
+    icons = _icons(gfx, dds)
+    gfx, dds = label_with_icons(gfx, dds, icons)
     bigdir.patch(label, {LABEL_GFX: gfx, LABEL_DDS: (refpack(dds), len(dds))})
     _patch_module(module)
     # check what the client will read
@@ -1096,10 +1521,11 @@ def cmd_install(a):
         assert bytes(decrypt(bigdir.read(data0, entry))[16:]) == plain_db[16:], entry
     assert os.path.getsize(data0) == os.path.getsize(os.path.join(BACKUP, "data_0.big"))
     print(f"installed into {a.game}: {len(names)} new names, season icons "
-          f"{', '.join(SEASON_NAMES[s] for s in CLASSES.values())}")
+          f"{', '.join(SEASON_NAMES[s] for s in sorted(icons))}")
 
 
 def _plain(shipped):
+    sys.path.insert(0, ROOT)
     from extract_fifadb import decrypt
     db = decrypt(bytes(shipped))
     db[:16] = b"SQLite format 3\x00"
@@ -1122,13 +1548,13 @@ def cmd_restore(a):
         raise SystemExit("nothing to restore (no backup/fo4season)")
     _originals(a.game)
     c = sqlite3.connect(FIFADB)
-    seasons = tuple(CLASSES.values())
+    seasons = (*CLASSES.values(), WC18)
     for t in ("players", *PERM_TABLES):
         c.execute(f"DELETE FROM {t} WHERE spid / 1000000 IN ({','.join('?' * len(seasons))})", seasons)
     for t in NAME_TABLES:
         c.execute(f"DELETE FROM {t} WHERE playerid BETWEEN ? AND ?", (NEW_PID, NEW_PID + 99999))
     c.commit()
-    print("client files restored; the FO4 seasons are out of gamedata/fifadb.sqlite")
+    print("client files restored; the FO4 seasons and WC18 are out of gamedata/fifadb.sqlite")
 
 
 def cmd_selftest(a=None):
@@ -1152,6 +1578,47 @@ def cmd_selftest(a=None):
     assert len(b) == 16 and b[0] == 255 and b[1] == 0
     assert _u30(127) == b"\x7f" and _u30(128) == b"\x80\x01" and _u30(300) == b"\xac\x02"
     assert _asm([b"\x09", ("@", "a"), (0x10, "a"), (0x12, "b"), b"\x02", ("@", "b")]) == b"\x09\x10\xfc\xff\xff\x12\x01\x00\x00\x02"
+    # WC18: futwiz's list row and card page (cut down), Wikipedia's club names, the rating step
+    row = ('<a href="/fifa18/worldcup/player/lionel-messi/90"><div class="card-19-pack card-19-pack-gold\n">'
+           '<img src="https://cdn.futwiz.com/assets/img/fifa19/faces/158023.png"><img src="f/flags/52.png">'
+           '<div class="card-19-pack-name">Messi</div> <div class="card-19-pack-rating">95</div>'
+           '<div class="card-19-pack-position">RW</div><div class="card-19-pack-attnum card-19-pack-attnum1">90</div>'
+           '<div class="card-19-pack-attlabel card-19-pack-attlabel1">PAC</div></div></a>')
+    got = wc18_list(lambda p: row if p.endswith("page=0") else "")
+    assert got == {90: {"fid": 90, "slug": "lionel-messi", "kind": "gold", "eaid": 158023, "nation": 52, "name": "Messi",
+                        "rating": 95, "pos": "RW", "face": {"PAC": 90}}}, got
+    page = wc18_page('<div>170cm</div><div>72kg</div><div>Med/High</div><div>WORKRATES</div><div>Left</div><div>FOOTED'
+                     '</div><div>Dribbling</div><div>97</div><div>Agility</div><div>90</div><div>Dribbling</div><div>98</div>'
+                     '<li><a href="/fifa18/player/lionel-messi/37084"><img src="b/badges/241.png" width="20"> 94 RW</a> '
+                     '<span class="pull-right">Hero </span></li><li><a href="/fifa18/player/lionel-messi/20181"><img '
+                     'src="b/badges/241.png" width="20"> 93 RW</a> </li><div>World Cup Fixtures</div>')
+    assert page == {"stats": {"dribbling": 98, "agility": 90}, "face": {}, "height": 170, "weight": 72, "foot": "Left",
+                    "workrate": "Med/High", "traits": [], "versions": [("/fifa18/player/lionel-messi/37084", 241, 94, "RW", "Hero"),
+                                                                       ("/fifa18/player/lionel-messi/20181", 241, 93, "RW", "")]}, page
+    traits = wc18_page('<div>Med/Med</div><div>WORKRATES</div><div class="mb-20">Traits: Shooting - Finesse Shot, '
+                       'Passing - Long Passer (CPU AI Only), Flair, Corner Specialist</div>')["traits"]
+    assert traits == ["Finesse Shot", "Long Passer", "Flair", "Corner Specialist"], traits
+    assert {WC18_TRAITS[t] for t in traits if t in WC18_TRAITS} == {"finesse-shot", "long-passer", "flair"}
+    assert set(WC18_TRAITS.values()) <= set(FO3_TRAITS)
+    assert _team_like("Inter Milan", "Inter") == 0.95 and _team_like("Bayern Munich", "FC Bayern Munchen") > 0.8
+    assert _team_like("Manchester City", "Manchester United") < 0.8
+    teams = {241: ("FC Barcelona", 53), 10: ("Manchester City", 13), 11: ("Manchester United", 13)}
+    assert wc18_team(["FC Barcelona", "Barcelona"], {241, 10}, teams) == 241
+    assert wc18_team(["Manchester United F.C.", "Manchester United"], set(), teams) == 11
+    assert wc18_team(["Al Taawoun FC", "Al Taawoun"], set(), teams) is None
+    teams.update({1354: ("Portugal", 78), 304: ("Port Vale", 60), 112139: ("Al Batin", 350), 242: ("RC Deportivo", 53)})
+    assert wc18_team(["Sporting CP"], {1354}, teams) is None and wc18_team(["FC Porto", "Porto"], set(), teams) is None
+    assert wc18_team(["Al Ain FC", "Al Ain"], set(), teams) is None
+    assert wc18_team(["Deportivo de La Coruña", "Deportivo La Coruña"], set(), teams) == 242
+    moved = wc18_shift({k: 80 for k in STATS}, POS["RW"], 70)  # every weight set sums to 100
+    assert set(moved.values()) == {70}, moved
+    label = os.path.join(BACKUP, "Label.big")
+    if os.path.exists(label):  # the WC18 badge out of the shipped Label.big
+        import bigdir
+        gfx, dds = bigdir.read(label, LABEL_GFX), bigdir.read(label, LABEL_DDS)
+        icon, wc10 = wc18_icon(gfx, dds), _frame_icons(gfx, dds, ("47season",))["47season"]
+        assert icon.size == wc10.size and icon.tobytes() != wc10.tobytes()
+        print("WC18 badge ok")
     module = os.path.join(r"D:\FO3ID\32795", MODULE_BIG)
     if os.path.exists(module):  # the getSeason patch against the client's Module.gfx, in memory
         import bigdir
@@ -1171,12 +1638,14 @@ def main():
     f.add_argument("--cache", default=os.path.join(tempfile.gettempdir(), "fo4_cache"))
     sub.add_parser("collect")
     sub.add_parser("import").add_argument("file")
+    w = sub.add_parser("wc18")
+    w.add_argument("--cache", default=os.path.join(tempfile.gettempdir(), "wc18_cache"))
     sub.add_parser("build")
     sub.add_parser("selftest")
-    for name in ("install", "hud", "restore"):
-        sub.add_parser(name).add_argument("--game", default=r"D:\FO3ID\32795")
+    for p in (w, *(sub.add_parser(name) for name in ("install", "hud", "restore"))):
+        p.add_argument("--game", default=r"D:\FO3ID\32795")
     a = ap.parse_args()
-    {"fetch": cmd_fetch, "collect": cmd_collect, "import": cmd_import, "build": cmd_build,
+    {"fetch": cmd_fetch, "collect": cmd_collect, "import": cmd_import, "wc18": cmd_wc18, "build": cmd_build,
      "install": cmd_install, "hud": cmd_hud, "restore": cmd_restore, "selftest": cmd_selftest}[a.cmd](a)
 
 

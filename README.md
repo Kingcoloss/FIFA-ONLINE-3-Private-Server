@@ -1,10 +1,10 @@
-[![SEASON UPGRADE 25, 26](docs/season-upgrade-25-26.svg)](https://www.mediafire.com/file/7yteho45esxfnu8/FO3ID-Season-25-26-LIVE-client.rar/file)
+[![SEASON UPGRADE 25, 26, WC18](docs/season-upgrade-25-26-wc18.svg)](https://www.mediafire.com/file/505f9vtgtkfu69w/FO3ID-Season-25-26-LIVE-WC18-client.rar/file)
 
 # FO3ID Private Server
 
 **English** | [Bahasa Indonesia](README.id.md) | [简体中文](README.zh-CN.md) | [ไทย](README.th.md) | [Tiếng Việt](README.vi.md) | [한국어](README.ko.md)
 
-**New:** FIFA Online 4's 25 LIVE and 26 LIVE cards as two new seasons (stats as +0, FO4's traits and season badges), with 26 LIVE as the default season. See `tools/fo4_season.py`.
+**New:** FIFA Online 4's 25 LIVE and 26 LIVE cards as two new seasons (stats as +0, FO4's traits and season badges), with 26 LIVE as the default season, and WC18: the 2018 World Cup's best 300 squad players (at +1 each card shows its final tournament rating - 5). See `tools/fo4_season.py`.
 
 A local private server for **FIFA Online 3 Indonesia** (Garena, client build 654420), written in
 Python. Garena shut the official servers down on 2020-06-30; this project re-implements the
@@ -260,6 +260,37 @@ Added, passing the tests but not yet checked in the client:
   lists the coming levels' rewards. FO3 items this server has no use for (staff packs, Red Ball, locker room
   and reward boost coupons, EXP transfer) are left out. EP rewards follow the Ekonomi tab's player
   prices.
+- **Clubs** (issue #36): Klub works. Found a club (10,000 EP; "Konfirmasi" after "Klub telah dibuat"
+  no longer stays grey) or join one of 60 AI clubs run by the virtual managers, each with its master,
+  members, level, description and news. Managers without a club ask to join yours (Manajemen >
+  permohonan, or at once while it takes members without a check). Members are online by their play
+  hours, earn activity points, post on the board and talk in the chat window's Klub tab: they answer
+  your greetings and messages, welcome newcomers and cheer your results, in the admin page's chat
+  language (Indonesian, English, Vietnamese). The week's club points give match boosts (manager EXP,
+  player EXP, EP), and 30 points of your own in a day pay 1,000 EP to the Bag. Not done: club
+  matches, the club facility and the club ranking.
+- **Friendly matches against AI** (issue #36): Multiple > Persahabatan shows its buttons again. Quick
+  match and Random match find a virtual manager; a custom room plays vs COM (the AI picker's club
+  and level, Amateur to Legendary) or a friend you invite from the list. Results count as friendlies
+  in Info Manager, not in the Rank rating, and the opponent chats as in Rank.
+- **King of the Hill** (issue #36): the Esports regional league runs a season every month. Pick one
+  of 19 Indonesian regions; its leaderboard holds that region's virtual managers, and Mulai plays
+  one of them near your King of the Hill rating. The reward screen shows the points won or lost. No
+  weekly or season reward items yet.
+- **Login notice image** (issue #36): the admin page's Pengumuman tab uploads a JPG or PNG (fitted
+  to the 800×720 popup, with a preview) for the Notice popup at login, or deletes it.
+- **Missing pictures from the admin page** (issue #36): the Aset tab downloads the missing player
+  faces, club crests, league logos and staff pictures from fifaaddict.com in the background (one
+  kind at a time; stop and resume at any time). It runs `tools/fa_faces.py`, which also takes
+  `--leagues` now. The game setting screen's "Default ball" shows the EA SPORTS ball, small flags
+  use the big ones, and the cup screens get their trophy and skin.
+- **Reward names with a language pack** (issue #36): with the Vietnamese pack the achievement list
+  showed "undefined" before each reward and a UI error, as the server named reward items in
+  Indonesian and Korean only. Every client language gets a name now.
+- **Exhibition against AI** (issue #36): Multiple > Exhibition opens its room. Pick a licensed club with
+  the arrows or Pilih Team, invite a friend from the list (a virtual manager, who joins with a club of
+  his own and is ready), then Siap plays both clubs' own squads. Five matches a day; your cards earn no
+  EXP from them. The Live Center opens without its two old UI errors.
 - **Staff** (Tim > Manajemen Staff): FO3's staff system works again. *Rekrut*: staff packs for EP
   (Basic FW / MF / DF / GK / ALL, Pro, Premium, Technical Director, Premium Medical) and, each day, a
   free ALL pack for logging in and another for playing 3 matches. *Staff yang dimiliki*: 7 role frames
@@ -305,7 +336,7 @@ It crashed the same way with the song as raw PCM (37.7 MB), as EALayer3 (6.5 MB,
 bank smaller than the shipped one, so the size of the music is not the cause. Keep the game's own
 music: `python -I tools/eatrax_song.py --restore` puts it back.
 
-Not done: online play against other people (ranked PvP, friendly, King of the Hill), Road to World, league simulation.
+Not done: online play against other people (ranked PvP, friendly, King of the Hill, club matches), Road to World, league simulation.
 
 ## Requirements
 
@@ -352,7 +383,7 @@ Not done: online play against other people (ranked PvP, friendly, King of the Hi
 | `gen_teams.py` | Starter squads and club summaries from `gamedata/fifadb.sqlite`. |
 | `tools/eatrax_song.py` | Puts a song first in the game's EA Trax menu music as EALayer3, replacing TrackID 1 (edits `data_0.big` / `data_1.big` by appending; `--restore` puts the originals back). Crashes the game after matches, see the known issue. |
 | `tools/fa_sync.py` | fifaaddict.com price sync. |
-| `tools/fo4_season.py` | Adds FIFA Online 4's 26 LIVE and 25 LIVE cards (fifaaddict data, stats as +0) as two new seasons with FO4's season badges: `fetch`, `collect` + `import`, `build`, `install` (rewrites entries of `data_0.big` in place, as its size must not change, and appends to `Label.big` and `Module.big`; `restore` puts them back). `hud` patches only `Module.big`, for a client installed before it: a match's player name boxes showed the '17 badge on every 2017 and FO4 card, now each card's own. |
+| `tools/fo4_season.py` | Adds FIFA Online 4's 26 LIVE and 25 LIVE cards (fifaaddict data, stats as +0) as two new seasons with FO4's season badges: `fetch`, `collect` + `import`, `build`, `install` (rewrites entries of `data_0.big` in place, as its size must not change, and appends to `Label.big` and `Module.big`; `restore` puts them back). `hud` patches only `Module.big`, for a client installed before it: a match's player name boxes showed the '17 badge on every 2017 and FO4 card, now each card's own. `wc18` reads the 2018 World Cup's best 300 squad players for `build` (futwiz's FIFA 18 World Cup ratings, Wikipedia's squads and clubs): season WC18 (code 78), a card at +1 showing its World Cup rating - 5, with an "18" badge in the green of FO3's own World Cup ones; team colors "2018 WC All-Star" (the season) and "18 WC <nation>" (each nation's cards), Karakteristik from the player's FO3 card and his FIFA 18 card. |
 | `tools/fa_faces.py` | Adds the player mini faces missing from the client's cache (fifaaddict serves the same 128x128 PNGs); `--crests` adds the missing club crests (most clubs have none in the cache, so the game shows a default one); `--staffs` adds the staff pictures (the cache has 7 of the 71 the server hands out). Resumable, `--remove` undoes it. |
 | `tools/draft_icons.py` | Draws the draft packs' Shop icons (the client's cache has no draft pictures) into `assets/externalAssets/shop/`, which the server serves before the client's own images; `<icon> <tag> <picks>` draws one more, for a pack made on the admin page. Needs Pillow. |
 | `tools/re/` | Reverse-engineering helpers: `bigdir.py` (BIg4 archive tables), `refpack.py` (RefPack codec), `eadb.py` (EA "DB" database tables), `abc*.py` (AS3 bytecode parser / grep / schema miner), `gfxx.py` (UI SWFs), `memgrab.py`, `dbwin.py` (the client's debug output), `relay_emu.py` (PvP relay packet codec and test relay), `gamectl.ps1` (drive the client window for tests). |

@@ -78,8 +78,7 @@
   "community": {
    "myclub": {
     "clubinfo": {},
-    "members": {},
-    "facility": {}
+    "members": {}
    },
    "clubmanagement": {
     "clubmanagement": {}
@@ -93,11 +92,6 @@
     "recordrecent": {},
     "recordleaderborad": {}
    }
-  },
-  "clubranking": {
-   "playerlist": {},
-   "ranking": {},
-   "recordseason": {}
   },
   "item": {
    "item": {

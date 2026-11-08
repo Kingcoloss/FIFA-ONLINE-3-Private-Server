@@ -1,4 +1,4 @@
-[![SEASON UPGRADE 25, 26](docs/season-upgrade-25-26.svg)](https://www.mediafire.com/file/7yteho45esxfnu8/FO3ID-Season-25-26-LIVE-client.rar/file)
+[![SEASON UPGRADE 25, 26, WC18](docs/season-upgrade-25-26-wc18.svg)](https://www.mediafire.com/file/505f9vtgtkfu69w/FO3ID-Season-25-26-LIVE-WC18-client.rar/file)
 
 # FO3ID Private Server
 
@@ -6,7 +6,7 @@
 
 > Bản dịch của [README.md](README.md). Nếu có chỗ khác nhau, README.md là bản mới nhất.
 
-**Mới:** thẻ 25 LIVE và 26 LIVE của FIFA Online 4 thành hai mùa mới (chỉ số tính là +0, đặc tính và biểu tượng mùa của FO4), 26 LIVE là mùa mặc định. Xem `tools/fo4_season.py`.
+**Mới:** thẻ 25 LIVE và 26 LIVE của FIFA Online 4 thành hai mùa mới (chỉ số tính là +0, đặc tính và biểu tượng mùa của FO4), 26 LIVE là mùa mặc định, và WC18: 300 cầu thủ hay nhất trong danh sách đội tuyển World Cup 2018 (ở +1 mỗi thẻ bằng chỉ số cuối giải - 5). Xem `tools/fo4_season.py`.
 
 Máy chủ riêng chạy cục bộ cho **FIFA Online 3 Indonesia** (Garena, client build 654420), viết bằng
 Python. Garena đã đóng máy chủ chính thức ngày 2020-06-30; dự án này dựng lại phần backend mà client
@@ -255,6 +255,36 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   trong cửa sổ lên cấp, và biểu tượng thông tin liệt kê phần thưởng các cấp tiếp theo. Vật phẩm FO3 mà máy chủ
   không dùng (gói staff, Red Ball, phiếu phòng thay đồ và tăng thưởng, chuyển EXP) bị bỏ qua. Thưởng EP theo giá cầu
   thủ ở tab Kinh tế.
+- **Câu lạc bộ** (issue #36): Klub đã dùng được. Lập CLB của riêng bạn (10.000 EP; "Konfirmasi" sau
+  "Klub telah dibuat" không còn bị xám mãi) hoặc vào một trong 60 CLB AI do các HLV ảo điều hành, mỗi CLB có chủ
+  CLB, thành viên, cấp, phần giới thiệu và tin tức. Các HLV chưa có CLB sẽ xin vào CLB của bạn
+  (Manajemen > permohonan, hoặc vào ngay khi CLB đang nhận thành viên không cần duyệt). Thành viên online theo
+  giờ chơi của họ, tích điểm hoạt động, đăng bài lên bảng tin và trò chuyện ở tab Klub của cửa sổ chat: họ trả
+  lời lời chào và tin nhắn của bạn, chào đón thành viên mới, chúc mừng hoặc động viên theo kết quả trận của bạn,
+  bằng ngôn ngữ chat chọn trên trang quản trị (tiếng Indonesia, tiếng Anh, tiếng Việt). Điểm CLB trong tuần mang
+  lại phần tăng thưởng cho trận đấu (EXP HLV, EXP cầu thủ, EP), và khi chính bạn đạt 30 điểm trong một ngày thì
+  nhận 1.000 EP vào Bag. Chưa làm: trận đấu CLB, cơ sở vật chất CLB và bảng xếp hạng CLB.
+- **Giao hữu với AI** (issue #36): Multiple > Persahabatan hiện lại các nút. Quick match và Random match tìm một
+  HLV ảo làm đối thủ; phòng tự tạo đá vs COM (CLB và cấp độ chọn trong bộ chọn AI, từ Amateur đến Legendary) hoặc
+  với một người bạn mà bạn mời từ danh sách. Kết quả được tính là trận giao hữu trong Info Manager, không tính
+  vào rating xếp hạng, và đối thủ chat như ở Rank.
+- **King of the Hill** (issue #36): giải khu vực Esports có một mùa giải mỗi tháng. Chọn một trong 19 vùng của
+  Indonesia; bảng xếp hạng của vùng đó gồm các HLV ảo trong vùng, và Mulai cho bạn đá với một người trong số họ
+  có rating gần với rating King of the Hill của bạn. Màn hình phần thưởng hiện số điểm được hoặc mất. Chưa có vật
+  phẩm thưởng tuần hay thưởng mùa.
+- **Ảnh thông báo lúc đăng nhập** (issue #36): tab Pengumuman (Thông báo) trên trang quản trị tải lên ảnh JPG
+  hoặc PNG (chỉnh theo popup 800×720, có xem trước) cho popup Thông báo lúc đăng nhập, hoặc xóa ảnh đó.
+- **Tải ảnh còn thiếu từ trang quản trị** (issue #36): tab Aset (Hình ảnh) tải ảnh mặt cầu thủ, logo CLB, logo
+  giải đấu và ảnh staff còn thiếu từ fifaaddict.com ở chế độ nền (mỗi lần một loại; dừng và tải tiếp lúc nào cũng
+  được). Tab này chạy `tools/fa_faces.py`, công cụ này giờ nhận thêm `--leagues`. "Default ball" trên màn hình
+  cài đặt trận hiện quả bóng EA SPORTS, cờ nhỏ dùng ảnh cờ lớn, và các màn hình Cup có cúp và skin riêng.
+- **Tên phần thưởng khi dùng gói ngôn ngữ** (issue #36): với gói tiếng Việt, danh sách thành tích hiện
+  "undefined" trước mỗi phần thưởng và báo lỗi UI, vì máy chủ chỉ đặt tên vật phẩm thưởng bằng tiếng Indonesia và
+  tiếng Hàn. Giờ mọi ngôn ngữ của client đều có tên.
+- **Exhibition với AI** (issue #36): Multiple > Exhibition mở được phòng. Chọn CLB có bản quyền bằng mũi tên
+  hoặc Pilih Team, mời bạn từ danh sách (HLV ảo, vào phòng với CLB tự chọn và sẵn sàng ngay), rồi Siap để
+  đá với đội hình thật của hai CLB. Mỗi ngày 5 trận; thẻ của bạn không nhận EXP từ các trận này. Live Center
+  mở được mà không còn hai lỗi UI.
 - **Staff** (Tim > Manajemen Staff): hệ thống staff của FO3 hoạt động trở lại. *Rekrut* (tuyển): gói staff
   bằng EP (Basic FW / MF / DF / GK / ALL, Pro, Premium, Giám đốc kỹ thuật, Premium Medical) và mỗi ngày một
   gói ALL miễn phí khi đăng nhập, thêm một gói khi chơi đủ 3 trận. *Staff yang dimiliki* (staff đang có): 7 ô
@@ -299,7 +329,7 @@ thô (37,7 MB), dạng EALayer3 (6,5 MB, `tools/re/ealayer3.py`) thêm làm bài
 TrackID 1 với kho nhạc nhỏ hơn bản gốc, nên kích thước nhạc không phải nguyên nhân. Hãy dùng nhạc gốc của
 game: `python -I tools/eatrax_song.py --restore` khôi phục lại.
 
-Chưa làm: chơi online với người khác (xếp hạng PvP, giao hữu, King of the Hill), Road to World, mô phỏng giải đấu.
+Chưa làm: chơi online với người khác (xếp hạng PvP, giao hữu, King of the Hill, trận đấu CLB), Road to World, mô phỏng giải đấu.
 
 ## Yêu cầu
 
@@ -345,7 +375,7 @@ Chưa làm: chơi online với người khác (xếp hạng PvP, giao hữu, Kin
 | `gen_teams.py` | Đội hình khởi đầu và tóm tắt CLB từ `gamedata/fifadb.sqlite`. |
 | `tools/eatrax_song.py` | Đặt một bài hát lên đầu nhạc menu EA Trax dưới dạng EALayer3, thay TrackID 1 (sửa `data_0.big` / `data_1.big` bằng cách ghi nối thêm; `--restore` khôi phục bản gốc). Làm game crash sau trận, xem lỗi đã biết. |
 | `tools/fa_sync.py` | Đồng bộ giá từ fifaaddict.com. |
-| `tools/fo4_season.py` | Thêm thẻ 26 LIVE và 25 LIVE của FIFA Online 4 (dữ liệu fifaaddict, chỉ số tính là +0) thành hai mùa mới với biểu tượng mùa của FO4: `fetch`, `collect` + `import`, `build`, `install` (ghi đè các mục trong `data_0.big` tại chỗ vì kích thước tệp không được đổi, và ghi nối thêm vào `Label.big` và `Module.big`; `restore` khôi phục tất cả). `hud` chỉ vá `Module.big`, cho client đã cài mùa giải từ trước: ô tên cầu thủ trong trận trước đây hiện huy hiệu '17 cho mọi thẻ 2017 và FO4, giờ hiện mùa của chính thẻ đó. |
+| `tools/fo4_season.py` | Thêm thẻ 26 LIVE và 25 LIVE của FIFA Online 4 (dữ liệu fifaaddict, chỉ số tính là +0) thành hai mùa mới với biểu tượng mùa của FO4: `fetch`, `collect` + `import`, `build`, `install` (ghi đè các mục trong `data_0.big` tại chỗ vì kích thước tệp không được đổi, và ghi nối thêm vào `Label.big` và `Module.big`; `restore` khôi phục tất cả). `hud` chỉ vá `Module.big`, cho client đã cài mùa giải từ trước: ô tên cầu thủ trong trận trước đây hiện huy hiệu '17 cho mọi thẻ 2017 và FO4, giờ hiện mùa của chính thẻ đó. `wc18` lấy 300 cầu thủ hay nhất trong danh sách đội tuyển World Cup 2018 cho `build` (chỉ số FIFA 18 World Cup của futwiz, danh sách và câu lạc bộ từ Wikipedia): mùa WC18 (mã 78), thẻ ở +1 bằng chỉ số World Cup - 5, với biểu tượng "18" màu xanh lá như biểu tượng World Cup của chính FO3; team color "2018 WC All-Star" (mùa) và "18 WC <quốc gia>" (thẻ của từng quốc gia), đặc tính lấy từ thẻ FO3 và thẻ FIFA 18 của cầu thủ. |
 | `tools/fa_faces.py` | Thêm ảnh mặt nhỏ của cầu thủ còn thiếu trong bộ nhớ đệm của client (fifaaddict có cùng loại PNG 128x128); `--crests` thêm logo CLB còn thiếu (đa số CLB không có trong bộ nhớ đệm nên game hiện logo mặc định); `--staffs` thêm ảnh staff (bộ nhớ đệm chỉ có 7 trong 71 staff máy chủ phát). Chạy tiếp được nếu bị ngắt, `--remove` hoàn tác. |
 | `tools/draft_icons.py` | Vẽ biểu tượng Shop cho các gói draft (bộ nhớ đệm của client không có ảnh draft) vào `assets/externalAssets/shop/`, máy chủ gửi các ảnh này trước ảnh của client; `<icon> <tag> <picks>` vẽ thêm một biểu tượng cho gói tạo trên trang admin. Cần Pillow. |
 | `tools/re/` | Công cụ hỗ trợ dịch ngược: `bigdir.py` (bảng lưu trữ BIg4), `refpack.py` (codec RefPack), `eadb.py` (bảng cơ sở dữ liệu "DB" của EA), `abc*.py` (phân tích / tìm kiếm / khai thác cấu trúc bytecode AS3), `gfxx.py` (SWF giao diện), `memgrab.py`, `dbwin.py` (đầu ra debug của client), `relay_emu.py` (bộ mã hóa gói relay PvP và relay thử nghiệm), `gamectl.ps1` (điều khiển cửa sổ client khi kiểm thử). |

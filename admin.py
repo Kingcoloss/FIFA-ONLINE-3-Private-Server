@@ -12,10 +12,15 @@ Guards: only 127.0.0.1 / localhost may connect, and every change must be a POST 
 X-FO3-Admin header (a page on another origin cannot send it without a CORS preflight this server
 never grants). ponytail: no login; anyone on this PC can use it, add a password if that matters.
 """
+import base64
+import binascii
 import http.server
 import json
 import os
 import re
+import struct
+import subprocess
+import sys
 import threading
 import time
 import urllib.parse
@@ -25,7 +30,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PAGE = os.path.join(HERE, "admin", "index.html")
 POS_NAMES = "GK SW RWB RB RCB CB LCB LB LWB RDM CDM LDM RM RCM CM LCM LM RAM CAM LAM RF CF LF RW RS ST LS LW".split()
 API = {}
-READ_ONLY = {"summary", "players", "search", "packs", "daily", "match_rewards", "vm_chat", "missions", "prematch", "economy", "log", "shop"}  # the rest must be POST + header
+READ_ONLY = {"summary", "players", "search", "packs", "daily", "match_rewards", "vm_chat", "missions", "prematch", "economy", "log", "shop",
+             "notice", "assets"}  # the rest must be POST + header
 hc = None  # the http_config module, set by start() (or by tests)
 
 
@@ -426,6 +432,110 @@ def log(p):
     return {"lines": [ln.rstrip("\n")[:300] for ln in lines]}
 
 
+# --- The login notice's picture (issue #36) -------------------------------------------------------
+# The page fits the chosen JPG / PNG into the popup's 800x720 box in the browser (canvas) and sends
+# that PNG as base64; the server takes nothing else, so no image library is needed here.
+NOTICE_W, NOTICE_H, NOTICE_MAX = 800, 720, 8 << 20
+
+
+@api("notice")
+def notice(p):
+    f = hc.NOTICE_IMAGE
+    if not os.path.isfile(f):
+        return {"has": False, "w": NOTICE_W, "h": NOTICE_H}
+    s = os.stat(f)
+    return {"has": True, "w": NOTICE_W, "h": NOTICE_H, "size": s.st_size, "updated": int(s.st_mtime)}
+
+
+@api("notice_set")
+def notice_set(p):
+    try:
+        raw = base64.b64decode(str(p.get("png") or ""), validate=True)
+    except (binascii.Error, ValueError):
+        raise AdminError("e_notice_png")
+    if len(raw) > NOTICE_MAX:
+        raise AdminError("e_notice_size")
+    if raw[:8] != b"\x89PNG\r\n\x1a\n" or raw[12:16] != b"IHDR" or struct.unpack(">II", raw[16:24]) != (NOTICE_W, NOTICE_H):
+        raise AdminError("e_notice_png")
+    os.makedirs(os.path.dirname(hc.NOTICE_IMAGE), exist_ok=True)
+    tmp = hc.NOTICE_IMAGE + ".tmp"
+    with open(tmp, "wb") as fh:
+        fh.write(raw)
+    os.replace(tmp, hc.NOTICE_IMAGE)
+    return notice(p)
+
+
+@api("notice_delete")
+def notice_delete(p):
+    if os.path.isfile(hc.NOTICE_IMAGE):
+        os.remove(hc.NOTICE_IMAGE)
+    return notice(p)
+
+
+# --- Missing pictures (issue #36: crests, league logos, portraits) -------------------------------
+# The Aset tab runs tools/fa_faces.py in the background, one kind at a time: it fills the client's
+# cache with the pictures it lacks from fifaaddict.com (only when the owner presses the button), and
+# its manifests (gamedata/fa_<kind>.json) say what was added or failed. A rerun resumes.
+ASSET_KINDS = {"faces": [], "crests": ["--crests"], "leagues": ["--leagues"], "staffs": ["--staffs"]}
+ASSET_LOG = os.path.join(HERE, "gamedata", "assets_fetch.log")
+ASSET_CMD = [sys.executable, "-I", os.path.join(HERE, "tools", "fa_faces.py")]  # tests swap it
+ASSET_STOP = os.path.join(HERE, "gamedata", "assets_fetch.stop")  # fa_faces.STOP: it saves its record and quits
+ASSET_JOB = {"proc": None, "kind": None}
+
+
+@api("assets")
+def assets(p):
+    proc = ASSET_JOB["proc"]
+    running = proc is not None and proc.poll() is None
+    counts = {}
+    for kind in ASSET_KINDS:
+        f = os.path.join(HERE, "gamedata", f"fa_{kind}.json")
+        try:
+            with open(f) as fh:
+                m = json.load(fh)
+            counts[kind] = {"added": len(m.get("added", [])), "failed": len(m.get("failed", {}))}
+        except (OSError, ValueError):
+            counts[kind] = {"added": 0, "failed": 0}
+    try:
+        with open(ASSET_LOG, encoding="utf-8", errors="replace") as fh:
+            lines = [ln.rstrip("\n")[:200] for ln in fh.readlines()[-12:]]
+    except OSError:
+        lines = []
+    return {"running": ASSET_JOB["kind"] if running else None, "last": ASSET_JOB["kind"], "counts": counts, "lines": lines}
+
+
+@api("assets_fetch")
+def assets_fetch(p):
+    kind = p.get("kind")
+    if kind not in ASSET_KINDS:
+        raise AdminError("e_asset_kind")
+    proc = ASSET_JOB["proc"]
+    if proc is not None and proc.poll() is None:
+        raise AdminError("e_asset_busy")
+    os.makedirs(os.path.dirname(ASSET_LOG), exist_ok=True)
+    if os.path.isfile(ASSET_STOP):
+        os.remove(ASSET_STOP)
+    with open(ASSET_LOG, "w", encoding="utf-8") as log:  # the child keeps its own handle
+        ASSET_JOB["proc"] = subprocess.Popen(ASSET_CMD + ASSET_KINDS[kind], cwd=HERE, stdout=log, stderr=subprocess.STDOUT,
+                                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    ASSET_JOB["kind"] = kind
+    return assets(p)
+
+
+@api("assets_stop")
+def assets_stop(p):
+    proc = ASSET_JOB["proc"]
+    if proc is not None and proc.poll() is None:
+        open(ASSET_STOP, "w").close()
+        try:
+            proc.wait(15)
+        except subprocess.TimeoutExpired:  # a slow download: its last few records are lost, not its files
+            proc.terminate()
+            proc.wait(10)
+        os.remove(ASSET_STOP)
+    return assets(p)
+
+
 # --- Shop (gamedata/shop.json, format in http_config's "Shop catalog" block) ----------------------
 
 def shop_icons():
@@ -715,6 +825,16 @@ class Admin(http.server.BaseHTTPRequestHandler):
             with open(PAGE, "rb") as f:  # the string tables go in as JSON (ASCII, no "</" to end the script)
                 page = f.read().replace(b"/*I18N*/{}", json.dumps(I18N).replace("</", "<\\/").encode())
             return self._send(200, page, "text/html; charset=utf-8")
+        if url.path == "/notice":  # the game's login notice popup (its web renderer opens http_config.notice_url())
+            page = (b'<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%;'
+                    b'background:#1b232c;overflow:hidden}img{display:block;width:100%;height:100%;object-fit:contain}'
+                    b'</style></head><body><img src="/notice.png?t=' + str(int(time.time())).encode() + b'" alt=""></body></html>')
+            return self._send(200, page, "text/html; charset=utf-8")
+        if url.path == "/notice.png":  # the login notice's picture, for the popup and the Pengumuman tab's preview
+            if not os.path.isfile(hc.NOTICE_IMAGE):
+                return self._send(404, b"", "image/png")
+            with open(hc.NOTICE_IMAGE, "rb") as fh:
+                return self._send(200, fh.read(), "image/png")
         m = re.fullmatch(r"/icon/([A-Za-z0-9_]+)\.png", url.path)  # the shop icons
         if m:
             f = hc.asset_path(f"externalAssets/shop/{m.group(1)}.png")
@@ -840,6 +960,8 @@ I18N = {
         e_unknown_kind="jenis produk tidak dikenal", e_product_missing="produk tidak ditemukan", e_not_changed="produk ini tidak diubah",
         e_in_use="masih dipakai oleh {0}", e_list_item="{0}: item {1} tidak cocok di sini", e_chain_packages="paket berantai hanya berisi paket",
         nav_chat="Chat AI", chat_title="Chat manajer virtual", chat_lead="Lawan Rank (manajer virtual) mengirim pesan di chat match: saat kick-off, saat ada gol di kedua sisi, tembakan meleset, penyelamatan kiper, dan saat kamu mengetik chat. Komentarnya tentang hasil akhir muncul sebagai banner saat kembali ke layar Rank. Tiap manajer punya kepribadian sendiri (ramah, kompetitif, lucu, percaya diri, usil). Tersimpan di {0}; berlaku mulai pesan berikutnya.", chat_on="Aktifkan chat AI", chat_lang="Bahasa pesan", chat_saved="Pengaturan chat AI disimpan.", e_chat_lang="bahasa chat tidak dikenal", nav_missions="Misi", mis_title="Misi dan achievement", mis_lead="Misi harian (baris Misi harian di Manager > Daftar pencapaian, direset tiap hari pukul 00:00 WIB), achievement tetap dengan lencana (level manajer, pertandingan, kemenangan, upgrade, grade, nilai tim, gol, Rank) dan quest mingguan di tombol Quest (hadiah GP untuk kotak hadiahnya; direset Senin pukul 00:00 WIB). Server menghitung pertandingan yang kamu mainkan dan upgrade yang berhasil. Hadiah EP ikut pengali harga pemain di tab Ekonomi. Tersimpan di {0}; bahasa dan tombol Quest berlaku setelah game dibuka ulang.", mis_on="Aktifkan misi", mis_lang="Bahasa misi", mis_targets="Target (x)", mis_rewards="Hadiah (x)", mis_saved="Pengaturan misi disimpan.", e_mission_value="pengaturan misi tidak valid (target 0.1-10, hadiah 0-10, bahasa id/en/vi)",
+        nav_notice='Pengumuman', notice_title='Gambar pengumuman', notice_lead='Gambar ini tampil di popup Pemberitahuan setiap kali login (issue #36). Pilih JPG atau PNG; halaman ini menyesuaikannya ke ukuran popup (800×720) sebelum disimpan. Berlaku saat login berikutnya, tanpa mengubah file client.', notice_file='File gambar (JPG/PNG)', notice_mode='Penyesuaian', notice_fit='Muat utuh (beri latar)', notice_fill='Penuhi kotak (potong tepi)', notice_bg='Warna latar', notice_save='Simpan pengumuman', notice_delete='Hapus pengumuman', notice_current='Pengumuman sekarang', notice_new='Pratinjau baru', notice_none='Belum ada gambar pengumuman: popup tampil kosong.', notice_saved='Gambar pengumuman disimpan; tampil saat login berikutnya.', notice_deleted='Gambar pengumuman dihapus.', notice_confirm_delete='Hapus gambar pengumuman?', notice_pick_first='Pilih file gambar dulu.', e_notice_png='gambar harus PNG 800×720 (pilih ulang file di halaman ini)', e_notice_size='gambar terlalu besar (maks 8 MB)',
+        nav_assets='Aset', as_title='Gambar yang belum ada', as_lead='Game menampilkan foto pemain, logo klub, logo liga dan foto staff dari cache client; yang belum ada tampil sebagai gambar bawaan (siluet, logo kosong). Tombol Unduh mengambil yang belum ada dari fifaaddict.com di latar, satu gambar tiap setengah detik; file yang sudah ada tidak diubah. Foto pemain bisa ribuan dan makan waktu lama; unduhan boleh dihentikan dan dilanjutkan kapan saja. Gambar baru tampil paling lambat setelah game dibuka ulang.', as_kind='Jenis', as_added='Sudah diunduh', as_failed='Tidak tersedia', as_faces='Foto pemain', as_crests='Logo klub', as_leagues='Logo liga', as_staffs='Foto staff', as_fetch='Unduh', as_stop='Hentikan', as_running='Sedang mengunduh: {0}', as_idle='Tidak ada unduhan berjalan.', as_started='Unduhan dimulai.', as_stopped='Unduhan dihentikan.', e_asset_kind='jenis gambar tidak dikenal', e_asset_busy='unduhan lain masih berjalan',
         nav_prematch="Pengaturan match", pm_title="Pengaturan match", pm_lead="Stadion, waktu, cuaca dan durasi untuk match berikutnya (Liga, Cup, Rank). Di Multiple > Rank semuanya juga bisa diganti di layar pengaturan match, dan pilihan itu ikut tersimpan di sini; layar Liga dan Cup hanya menampilkannya. Mendung: berawan di siang hari, senja di malam hari (layar Liga/Cup menuliskannya \"Salju\").", pm_stadium="Stadion", pm_tod="Waktu", pm_weather="Cuaca", pm_length="Durasi", pm_home="Kandang tim tuan rumah", pm_random="Acak", pm_day="Siang", pm_night="Malam", pm_dry="Cerah", pm_rain="Hujan", pm_snow="Salju", pm_overcast="Mendung", pm_minutes="{0} menit", pm_ball="Bola", pm_saved="Pengaturan match disimpan.", e_pm_value="nilai pengaturan match tidak valid",
         nav_economy="Ekonomi", eco_title="Ekonomi", eco_lead="Harga dan EP untuk semua manajer. Santai = seperti biasa (Shop gratis). Realistis: Shop berbayar (harga barang = isinya, barang tanpa EP seperti boost atau kapsul EXP punya harga dasar dikali pengali harga pemain; pack = nilai kartunya, +13% dengan pasar dinamis karena pack bisa dibuka di hari mahal) dan pasar dinamis. Sulit: harga pemain dan pack x2, EP awal kecil. Pasar dinamis: harga tiap pemain naik-turun setiap hari, manajer virtual kadang menjual murah, dan kamu boleh memasang harga sampai 105% (lebih lama terjual): beli murah, jual mahal. Selama Shop berbayar, Upgrade, Tukar dan Scout tidak mencetak EP: biaya upgrade sebesar nilai yang ditambahkannya, restore dibayar EP, tawaran tidak melebihi nilai kartu yang diserahkan. EP dari match diatur di tab Hadiah match; EP awal berlaku untuk manajer baru.", eco_preset="Preset", eco_custom="Kustom", eco_easy="Santai (seperti biasa)", eco_real="Realistis", eco_hard="Sulit", eco_shopfree="Shop gratis (0 EP)", eco_players="Harga pemain (x)", eco_packs="Harga pack (x)", eco_start="EP awal manajer baru", eco_dynamic="Pasar dinamis (harga naik-turun, bisa untung dari jual-beli)", eco_saved="Pengaturan ekonomi disimpan.", e_eco_value="nilai ekonomi tidak valid (pengali 0.1-100, EP awal 0 atau lebih)",
     ),
@@ -921,6 +1043,8 @@ I18N = {
         e_unknown_kind="unknown product kind", e_product_missing="product not found", e_not_changed="this product was not changed",
         e_in_use="still used by {0}", e_list_item="{0}: item {1} does not fit here", e_chain_packages="a chained package holds packages only",
         nav_chat="AI chat", chat_title="Virtual managers' chat", chat_lead="Rank opponents (virtual managers) post in the match chat: at kick-off, on goals both ways, missed shots, keeper saves, and when you type in chat. Their word on the result shows as a banner back on the Rank screen. Each manager has a personality (friendly, competitive, funny, confident, playful). Saved in {0}; used from the next message.", chat_on="AI chat on", chat_lang="Message language", chat_saved="AI chat settings saved.", e_chat_lang="unknown chat language", nav_missions="Missions", mis_title="Missions and achievements", mis_lead="Daily missions (the Daily missions row in Manager > Achievements, reset every day at 00:00 WIB), lasting achievements with badges (manager level, matches, wins, upgrades, grade, team value, goals, Rank) and weekly quests behind the Quest button (GP for its reward boxes; reset on Monday at 00:00 WIB). The server counts the matches you play and the upgrades that succeed. EP rewards follow the player price multiplier on the Economy tab. Saved in {0}; the language and the Quest button apply once the game is restarted.", mis_on="Missions on", mis_lang="Mission language", mis_targets="Targets (x)", mis_rewards="Rewards (x)", mis_saved="Mission settings saved.", e_mission_value="invalid mission setting (targets 0.1-10, rewards 0-10, language id/en/vi)",
+        nav_notice='Announcement', notice_title='Announcement image', notice_lead="This image shows in the Notice popup at every login (issue #36). Pick a JPG or PNG; this page fits it to the popup's size (800×720) before saving. Used from the next login, without changing client files.", notice_file='Image file (JPG/PNG)', notice_mode='Fit', notice_fit='Whole image (with background)', notice_fill='Fill the box (crop the edges)', notice_bg='Background colour', notice_save='Save announcement', notice_delete='Delete announcement', notice_current='Current announcement', notice_new='New preview', notice_none='No announcement image: the popup shows empty.', notice_saved='Announcement image saved; it shows at the next login.', notice_deleted='Announcement image deleted.', notice_confirm_delete='Delete the announcement image?', notice_pick_first='Pick an image file first.', e_notice_png='the image must be an 800×720 PNG (pick the file again on this page)', e_notice_size='the image is too big (8 MB at most)',
+        nav_assets='Assets', as_title='Missing pictures', as_lead="The game shows player faces, club crests, league logos and staff pictures from the client's cache; a missing one shows as a default picture (a silhouette, a blank crest). Download fetches the missing ones from fifaaddict.com in the background, one picture every half second; files already there are not changed. Player faces can be thousands and take long; a download can be stopped and resumed at any time. New pictures show at the latest after the game is restarted.", as_kind='Kind', as_added='Downloaded', as_failed='Not available', as_faces='Player faces', as_crests='Club crests', as_leagues='League logos', as_staffs='Staff pictures', as_fetch='Download', as_stop='Stop', as_running='Downloading: {0}', as_idle='No download running.', as_started='Download started.', as_stopped='Download stopped.', e_asset_kind='unknown picture kind', e_asset_busy='another download is still running',
         nav_prematch="Match settings", pm_title="Match settings", pm_lead="Stadium, time of day, weather and length for the next matches (Liga, Cup, Rank). In Multiple > Rank they can also be changed on the game setting screen, and that choice is saved here too; the Liga and Cup screens only show them. Overcast: cloudy by day, dusk at night (the Liga/Cup screen labels it \"Salju\").", pm_stadium="Stadium", pm_tod="Time of day", pm_weather="Weather", pm_length="Length", pm_home="Home team's stadium", pm_random="Random", pm_day="Day", pm_night="Night", pm_dry="Clear", pm_rain="Rain", pm_snow="Snow", pm_overcast="Overcast", pm_minutes="{0} min", pm_ball="Ball", pm_saved="Match settings saved.", e_pm_value="invalid match setting",
         nav_economy="Economy", eco_title="Economy", eco_lead="Prices and EP for every manager. Easy = as always (free Shop). Realistic: a paid Shop (a product costs what it gives, one with no EP in it such as a boost or an EXP capsule a set price times the player price setting; a pack the worth of its cards, +13% with the dynamic Market, as a pack can be opened on a dear day) and the dynamic Market. Hard: player and pack prices x2, little starting EP. Dynamic Market: each player's price moves every day, virtual managers sometimes sell cheap, and you may ask up to 105% (it sells slower): buy low, sell high. While the Shop is paid, Upgrade, Tukar and Scout make no EP: an upgrade costs what it adds, a restore costs EP, and no offer is worth more than the cards given. Match EP is set on the Match rewards tab; starting EP is for new managers.", eco_preset="Preset", eco_custom="Custom", eco_easy="Easy (as always)", eco_real="Realistic", eco_hard="Hard", eco_shopfree="Free Shop (0 EP)", eco_players="Player prices (x)", eco_packs="Pack prices (x)", eco_start="A new manager's EP", eco_dynamic="Dynamic Market (prices move, trading can pay)", eco_saved="Economy settings saved.", e_eco_value="invalid economy setting (multipliers 0.1-100, starting EP 0 or more)",
     ),
@@ -1003,6 +1127,8 @@ I18N = {
         e_unknown_kind="未知的商品种类", e_product_missing="找不到该商品", e_not_changed="该商品没有被修改过",
         e_in_use="仍被 {0} 使用", e_list_item="{0}：物品 {1} 不能放在这里", e_chain_packages="连锁礼包只能包含礼包",
         nav_chat="AI 聊天", chat_title="虚拟经理聊天", chat_lead="排位对手（虚拟经理）会在比赛聊天中发言：开球时、双方进球时、射门偏出时、门将扑救时，以及你输入聊天时。对比赛结果的评论会在回到排位画面时以横幅显示。每位经理都有自己的性格（友好、好胜、搞笑、自信、调皮）。保存在 {0}；从下一条消息开始生效。", chat_on="启用 AI 聊天", chat_lang="消息语言", chat_saved="AI 聊天设置已保存。", e_chat_lang="未知的聊天语言", nav_missions="任务", mis_title="任务与成就", mis_lead="每日任务（Manager > 成就列表中的“每日任务”一行，每天 00:00 WIB 重置）、带徽章的永久成就（经理等级、比赛、胜场、强化、球员等级、球队价值、进球、排位）以及任务按钮里的每周任务（奖励 GP，用于其奖励箱；每周一 00:00 WIB 重置）。服务器会统计你踢的比赛和成功的强化。EP 奖励随经济页的球员价格倍率变化。保存在 {0}；语言和任务按钮在重新打开游戏后生效。", mis_on="启用任务", mis_lang="任务语言", mis_targets="目标 (x)", mis_rewards="奖励 (x)", mis_saved="任务设置已保存。", e_mission_value="任务设置无效（目标 0.1-10，奖励 0-10，语言 id/en/vi）",
+        nav_notice='公告', notice_title='公告图片', notice_lead='这张图片会在每次登录时的“公告”弹窗中显示（issue #36）。选择 JPG 或 PNG；本页面会在保存前把它调整为弹窗的尺寸（800×720）。下次登录时生效，无需修改客户端文件。', notice_file='图片文件（JPG/PNG）', notice_mode='适配方式', notice_fit='完整显示（加背景）', notice_fill='填满方框（裁去边缘）', notice_bg='背景颜色', notice_save='保存公告', notice_delete='删除公告', notice_current='当前公告', notice_new='新预览', notice_none='还没有公告图片：弹窗显示为空。', notice_saved='公告图片已保存；下次登录时显示。', notice_deleted='公告图片已删除。', notice_confirm_delete='删除公告图片？', notice_pick_first='请先选择图片文件。', e_notice_png='图片必须是 800×720 的 PNG（请在本页面重新选择文件）', e_notice_size='图片太大（最多 8 MB）',
+        nav_assets='图片', as_title='缺失的图片', as_lead='游戏从客户端缓存中显示球员头像、俱乐部队徽、联赛标志和职员照片；缺失的会显示为默认图（剪影、空白队徽）。“下载”会在后台从 fifaaddict.com 获取缺失的图片，每半秒一张；已有的文件不会被改动。球员头像可能有几千张，需要较长时间；下载可以随时停止、随时继续。新图片最迟在重新打开游戏后显示。', as_kind='类型', as_added='已下载', as_failed='无法获取', as_faces='球员头像', as_crests='俱乐部队徽', as_leagues='联赛标志', as_staffs='职员照片', as_fetch='下载', as_stop='停止', as_running='正在下载：{0}', as_idle='没有正在进行的下载。', as_started='已开始下载。', as_stopped='已停止下载。', e_asset_kind='未知的图片类型', e_asset_busy='另一个下载仍在进行',
         nav_prematch="比赛设置", pm_title="比赛设置", pm_lead="下一场比赛（联赛、杯赛、排位）的球场、时间、天气和时长。在 Multiple > Rank 的比赛设置画面也可以修改，修改结果也会保存在这里；联赛和杯赛画面只显示这些设置。阴天：白天为多云，夜晚为黄昏（联赛/杯赛画面会显示为“Salju”）。", pm_stadium="球场", pm_tod="时间", pm_weather="天气", pm_length="时长", pm_home="主队球场", pm_random="随机", pm_day="白天", pm_night="夜晚", pm_dry="晴", pm_rain="雨", pm_snow="雪", pm_overcast="阴天", pm_minutes="{0} 分钟", pm_ball="足球", pm_saved="比赛设置已保存。", e_pm_value="无效的比赛设置",
         nav_economy="经济", eco_title="经济", eco_lead="所有经理的价格与 EP。轻松 = 保持原样（商店免费）。真实：商店收费（商品价格 = 其内容的价值，不含 EP 的商品（如强化加成、经验胶囊）按基础价格乘以球员价格倍率；卡包 = 卡包内球员的价值，开启动态市场时 +13%，因为卡包可以留到价格高的日子再开）并开启动态市场。困难：球员和卡包价格 x2，初始 EP 很少。动态市场：每位球员的价格每天涨跌，虚拟经理有时会低价出售，你可以把售价定到 105%（卖出更慢）：低买高卖。商店收费时，强化、交易和球探都无法刷 EP：强化费用等于它增加的价值，恢复需支付 EP，报价不会超过交出球员的价值。比赛 EP 在“比赛奖励”页设置；初始 EP 只对新经理有效。", eco_preset="预设", eco_custom="自定义", eco_easy="轻松（保持原样）", eco_real="真实", eco_hard="困难", eco_shopfree="商店免费（0 EP）", eco_players="球员价格（倍）", eco_packs="卡包价格（倍）", eco_start="新经理的初始 EP", eco_dynamic="动态市场（价格涨跌，买卖可以获利）", eco_saved="经济设置已保存。", e_eco_value="无效的经济设置（倍率 0.1-100，初始 EP 不小于 0）",
     ),
@@ -1085,6 +1211,8 @@ I18N = {
         e_unknown_kind="ไม่รู้จักประเภทสินค้านี้", e_product_missing="ไม่พบสินค้า", e_not_changed="สินค้านี้ยังไม่เคยถูกแก้ไข",
         e_in_use="ยังถูกใช้โดย {0}", e_list_item="{0}: ใส่ไอเทม {1} ที่นี่ไม่ได้", e_chain_packages="แพ็กเกจต่อเนื่องใส่ได้เฉพาะแพ็กเกจ",
         nav_chat="แชท AI", chat_title="แชทของผู้จัดการเสมือน", chat_lead="คู่แข่งแรงก์ (ผู้จัดการเสมือน) จะพิมพ์ในแชทระหว่างแมตช์: ตอนเริ่มเกม เมื่อมีการทำประตูของทั้งสองฝ่าย ยิงพลาด ผู้รักษาประตูเซฟ และเมื่อคุณพิมพ์แชท ความเห็นต่อผลการแข่งขันจะแสดงเป็นแบนเนอร์เมื่อกลับมาที่หน้าแรงก์ ผู้จัดการแต่ละคนมีนิสัยของตัวเอง (เป็นมิตร ชอบแข่งขัน ตลก มั่นใจ ขี้เล่น) บันทึกไว้ที่ {0} ใช้ตั้งแต่ข้อความถัดไป", chat_on="เปิดแชท AI", chat_lang="ภาษาของข้อความ", chat_saved="บันทึกการตั้งค่าแชท AI แล้ว", e_chat_lang="ไม่รู้จักภาษาแชทนี้", nav_missions="ภารกิจ", mis_title="ภารกิจและความสำเร็จ", mis_lead="ภารกิจรายวัน (แถวภารกิจรายวันใน Manager > รายการความสำเร็จ รีเซ็ตทุกวันเวลา 00:00 WIB) ความสำเร็จถาวรพร้อมเหรียญตรา (เลเวลผู้จัดการ แมตช์ ชัยชนะ การอัปเกรด เกรด มูลค่าทีม ประตู แรงก์) และเควสต์รายสัปดาห์ที่ปุ่ม Quest (ได้ GP สำหรับกล่องรางวัล รีเซ็ตวันจันทร์เวลา 00:00 WIB) เซิร์ฟเวอร์นับแมตช์ที่คุณเล่นและการอัปเกรดที่สำเร็จ รางวัล EP ปรับตามตัวคูณราคานักเตะในแท็บเศรษฐกิจ บันทึกไว้ที่ {0} ภาษาและปุ่ม Quest มีผลหลังเปิดเกมใหม่", mis_on="เปิดภารกิจ", mis_lang="ภาษาของภารกิจ", mis_targets="เป้าหมาย (x)", mis_rewards="รางวัล (x)", mis_saved="บันทึกการตั้งค่าภารกิจแล้ว", e_mission_value="ค่าภารกิจไม่ถูกต้อง (เป้าหมาย 0.1-10 รางวัล 0-10 ภาษา id/en/vi)",
+        nav_notice='ประกาศ', notice_title='รูปประกาศ', notice_lead='รูปนี้จะแสดงในป๊อปอัปประกาศทุกครั้งที่ล็อกอิน (issue #36) เลือกไฟล์ JPG หรือ PNG หน้านี้จะปรับให้พอดีกับขนาดป๊อปอัป (800×720) ก่อนบันทึก มีผลตั้งแต่การล็อกอินครั้งถัดไปโดยไม่ต้องแก้ไฟล์ไคลเอนต์', notice_file='ไฟล์รูป (JPG/PNG)', notice_mode='การปรับขนาด', notice_fit='แสดงทั้งรูป (มีพื้นหลัง)', notice_fill='เต็มกรอบ (ตัดขอบ)', notice_bg='สีพื้นหลัง', notice_save='บันทึกประกาศ', notice_delete='ลบประกาศ', notice_current='ประกาศปัจจุบัน', notice_new='ตัวอย่างใหม่', notice_none='ยังไม่มีรูปประกาศ: ป๊อปอัปจะว่างเปล่า', notice_saved='บันทึกรูปประกาศแล้ว จะแสดงในการล็อกอินครั้งถัดไป', notice_deleted='ลบรูปประกาศแล้ว', notice_confirm_delete='ลบรูปประกาศหรือไม่?', notice_pick_first='เลือกไฟล์รูปก่อน', e_notice_png='รูปต้องเป็น PNG ขนาด 800×720 (เลือกไฟล์ใหม่ในหน้านี้)', e_notice_size='รูปใหญ่เกินไป (สูงสุด 8 MB)',
+        nav_assets='รูปภาพ', as_title='รูปที่ยังไม่มี', as_lead='เกมแสดงรูปนักเตะ โลโก้สโมสร โลโก้ลีก และรูปสตาฟจากแคชของไคลเอนต์ รูปที่ไม่มีจะแสดงเป็นรูปเริ่มต้น (เงาคน โลโก้ว่าง) ปุ่มดาวน์โหลดจะดึงรูปที่ยังไม่มีจาก fifaaddict.com ในเบื้องหลัง ทีละรูปทุกครึ่งวินาที ไฟล์ที่มีอยู่แล้วจะไม่ถูกแก้ไข รูปนักเตะอาจมีหลายพันรูปและใช้เวลานาน หยุดและดาวน์โหลดต่อได้ทุกเมื่อ รูปใหม่จะแสดงอย่างช้าที่สุดหลังเปิดเกมใหม่', as_kind='ประเภท', as_added='ดาวน์โหลดแล้ว', as_failed='ไม่มีให้ดาวน์โหลด', as_faces='รูปนักเตะ', as_crests='โลโก้สโมสร', as_leagues='โลโก้ลีก', as_staffs='รูปสตาฟ', as_fetch='ดาวน์โหลด', as_stop='หยุด', as_running='กำลังดาวน์โหลด: {0}', as_idle='ไม่มีการดาวน์โหลดที่กำลังทำงาน', as_started='เริ่มดาวน์โหลดแล้ว', as_stopped='หยุดดาวน์โหลดแล้ว', e_asset_kind='ไม่รู้จักประเภทรูป', e_asset_busy='ยังมีการดาวน์โหลดอื่นทำงานอยู่',
         nav_prematch="ตั้งค่าแมตช์", pm_title="ตั้งค่าแมตช์", pm_lead="สนาม ช่วงเวลา สภาพอากาศ และความยาวของแมตช์ถัดไป (ลีก คัพ แรงก์) ใน Multiple > Rank เปลี่ยนได้ที่หน้าตั้งค่าแมตช์เช่นกัน และตัวเลือกนั้นจะถูกบันทึกที่นี่ด้วย หน้าลีกและคัพแสดงค่าเท่านั้น ครึ้มฟ้า: กลางวันมีเมฆมาก กลางคืนเป็นยามพลบค่ำ (หน้าลีก/คัพแสดงเป็น \"Salju\")", pm_stadium="สนาม", pm_tod="ช่วงเวลา", pm_weather="สภาพอากาศ", pm_length="ความยาว", pm_home="สนามของทีมเจ้าบ้าน", pm_random="สุ่ม", pm_day="กลางวัน", pm_night="กลางคืน", pm_dry="แจ่มใส", pm_rain="ฝนตก", pm_snow="หิมะ", pm_overcast="ครึ้มฟ้า", pm_minutes="{0} นาที", pm_ball="ลูกบอล", pm_saved="บันทึกการตั้งค่าแมตช์แล้ว", e_pm_value="ค่าการตั้งค่าแมตช์ไม่ถูกต้อง",
         nav_economy="เศรษฐกิจ", eco_title="เศรษฐกิจ", eco_lead="ราคาและ EP ของผู้จัดการทุกคน ง่าย = เหมือนเดิม (ร้านค้าฟรี) สมจริง: ร้านค้าเสียเงิน (ราคาสินค้า = มูลค่าของที่ได้ สินค้าที่ไม่มี EP เช่นบูสต์หรือแคปซูล EXP ใช้ราคาพื้นฐานคูณตัวคูณราคานักเตะ ราคาแพ็ค = มูลค่าการ์ดในแพ็ค +13% เมื่อเปิดตลาดแบบไดนามิก เพราะเก็บแพ็คไว้เปิดวันที่ราคาสูงได้) และตลาดแบบไดนามิก ยาก: ราคานักเตะและแพ็ค x2 และ EP เริ่มต้นน้อย ตลาดแบบไดนามิก: ราคานักเตะแต่ละคนขึ้นลงทุกวัน ผู้จัดการเสมือนบางครั้งขายถูก และคุณตั้งราคาได้ถึง 105% (ขายได้ช้าลง): ซื้อถูก ขายแพง เมื่อร้านค้าเสียเงิน การอัปเกรด การแลกเปลี่ยน และแมวมองจะไม่สร้าง EP เพิ่ม: ค่าอัปเกรดเท่ากับมูลค่าที่เพิ่มขึ้น การกู้คืนจ่ายด้วย EP และข้อเสนอจะไม่สูงกว่ามูลค่าการ์ดที่ให้ไป EP จากแมตช์ตั้งได้ที่แท็บรางวัลหลังแมตช์ EP เริ่มต้นใช้กับผู้จัดการใหม่", eco_preset="พรีเซ็ต", eco_custom="กำหนดเอง", eco_easy="ง่าย (เหมือนเดิม)", eco_real="สมจริง", eco_hard="ยาก", eco_shopfree="ร้านค้าฟรี (0 EP)", eco_players="ราคานักเตะ (เท่า)", eco_packs="ราคาแพ็ค (เท่า)", eco_start="EP เริ่มต้นของผู้จัดการใหม่", eco_dynamic="ตลาดแบบไดนามิก (ราคาขึ้นลง ซื้อขายทำกำไรได้)", eco_saved="บันทึกการตั้งค่าเศรษฐกิจแล้ว", e_eco_value="ค่าการตั้งค่าเศรษฐกิจไม่ถูกต้อง (ตัวคูณ 0.1-100, EP เริ่มต้น 0 ขึ้นไป)",
     ),
@@ -1167,6 +1295,8 @@ I18N = {
         e_unknown_kind="không rõ loại sản phẩm", e_product_missing="không tìm thấy sản phẩm", e_not_changed="sản phẩm này chưa được sửa",
         e_in_use="vẫn đang được {0} dùng", e_list_item="{0}: không đặt được vật phẩm {1} ở đây", e_chain_packages="gói nối tiếp chỉ chứa gói quà",
         nav_chat="Chat AI", chat_title="Chat của HLV ảo", chat_lead="Đối thủ Rank (HLV ảo) nhắn trong khung chat của trận: lúc giao bóng, khi có bàn thắng của hai bên, sút trượt, thủ môn cản phá và khi bạn gõ chat. Lời bình về kết quả hiện thành banner khi quay lại màn hình Rank. Mỗi HLV có tính cách riêng (thân thiện, hiếu thắng, hài hước, tự tin, tinh nghịch). Lưu trong {0}; áp dụng từ tin nhắn tiếp theo.", chat_on="Bật chat AI", chat_lang="Ngôn ngữ tin nhắn", chat_saved="Đã lưu cài đặt chat AI.", e_chat_lang="ngôn ngữ chat không hợp lệ", nav_missions="Nhiệm vụ", mis_title="Nhiệm vụ và thành tích", mis_lead="Nhiệm vụ hằng ngày (dòng Nhiệm vụ hằng ngày trong Manager > Danh sách thành tích, làm mới mỗi ngày lúc 00:00 WIB), thành tích lâu dài kèm huy hiệu (cấp HLV, số trận, số trận thắng, nâng cấp, cấp thẻ, giá trị đội, bàn thắng, Rank) và nhiệm vụ hằng tuần ở nút Quest (GP để đổi hộp quà; làm mới thứ Hai lúc 00:00 WIB). Máy chủ đếm các trận bạn chơi và các lần nâng cấp thành công. Thưởng EP theo hệ số giá cầu thủ ở tab Kinh tế. Lưu trong {0}; ngôn ngữ và nút Quest có hiệu lực sau khi mở lại game.", mis_on="Bật nhiệm vụ", mis_lang="Ngôn ngữ nhiệm vụ", mis_targets="Mục tiêu (x)", mis_rewards="Phần thưởng (x)", mis_saved="Đã lưu cài đặt nhiệm vụ.", e_mission_value="cài đặt nhiệm vụ không hợp lệ (mục tiêu 0.1-10, thưởng 0-10, ngôn ngữ id/en/vi)",
+        nav_notice='Thông báo', notice_title='Ảnh thông báo', notice_lead='Ảnh này hiện trong popup Thông báo mỗi lần đăng nhập (issue #36). Chọn JPG hoặc PNG; trang này chỉnh ảnh theo kích thước popup (800×720) trước khi lưu. Áp dụng từ lần đăng nhập sau, không cần sửa file client.', notice_file='Tệp ảnh (JPG/PNG)', notice_mode='Căn chỉnh', notice_fit='Hiện trọn ảnh (thêm nền)', notice_fill='Lấp đầy khung (cắt mép)', notice_bg='Màu nền', notice_save='Lưu thông báo', notice_delete='Xóa thông báo', notice_current='Thông báo hiện tại', notice_new='Xem trước', notice_none='Chưa có ảnh thông báo: popup hiện trống.', notice_saved='Đã lưu ảnh thông báo; sẽ hiện ở lần đăng nhập sau.', notice_deleted='Đã xóa ảnh thông báo.', notice_confirm_delete='Xóa ảnh thông báo?', notice_pick_first='Hãy chọn tệp ảnh trước.', e_notice_png='ảnh phải là PNG 800×720 (chọn lại tệp trên trang này)', e_notice_size='ảnh quá lớn (tối đa 8 MB)',
+        nav_assets='Hình ảnh', as_title='Hình ảnh còn thiếu', as_lead='Game hiển thị ảnh cầu thủ, logo câu lạc bộ, logo giải đấu và ảnh nhân viên từ bộ nhớ đệm của client; ảnh nào thiếu sẽ hiện ảnh mặc định (bóng người, logo trống). Nút Tải xuống lấy các ảnh còn thiếu từ fifaaddict.com ở chế độ nền, mỗi nửa giây một ảnh; các tệp đã có không bị thay đổi. Ảnh cầu thủ có thể lên tới vài nghìn và mất nhiều thời gian; có thể dừng và tải tiếp bất cứ lúc nào. Ảnh mới hiện ra muộn nhất sau khi mở lại game.', as_kind='Loại', as_added='Đã tải', as_failed='Không có', as_faces='Ảnh cầu thủ', as_crests='Logo câu lạc bộ', as_leagues='Logo giải đấu', as_staffs='Ảnh nhân viên', as_fetch='Tải xuống', as_stop='Dừng', as_running='Đang tải: {0}', as_idle='Không có lượt tải nào đang chạy.', as_started='Đã bắt đầu tải.', as_stopped='Đã dừng tải.', e_asset_kind='loại ảnh không xác định', e_asset_busy='một lượt tải khác vẫn đang chạy',
         nav_prematch="Cài đặt trận", pm_title="Cài đặt trận đấu", pm_lead="Sân, thời gian, thời tiết và thời lượng cho các trận tiếp theo (Liga, Cup, Rank). Trong Multiple > Rank cũng đổi được ở màn hình cài đặt trận, và lựa chọn đó cũng được lưu tại đây; màn hình Liga và Cup chỉ hiển thị. Âm u: trời nhiều mây ban ngày, hoàng hôn ban đêm (màn hình Liga/Cup ghi là \"Salju\").", pm_stadium="Sân vận động", pm_tod="Thời gian", pm_weather="Thời tiết", pm_length="Thời lượng", pm_home="Sân của đội chủ nhà", pm_random="Ngẫu nhiên", pm_day="Ban ngày", pm_night="Ban đêm", pm_dry="Quang đãng", pm_rain="Mưa", pm_snow="Tuyết", pm_overcast="Âm u", pm_minutes="{0} phút", pm_ball="Bóng", pm_saved="Đã lưu cài đặt trận đấu.", e_pm_value="giá trị cài đặt trận đấu không hợp lệ",
         nav_economy="Kinh tế", eco_title="Kinh tế", eco_lead="Giá và EP cho mọi HLV. Dễ = như trước (Shop miễn phí). Thực tế: Shop tính phí (giá vật phẩm = giá trị bên trong, vật phẩm không chứa EP như tăng tỉ lệ hay viên EXP có giá cơ bản nhân hệ số giá cầu thủ; giá gói = giá trị các thẻ, +13% khi thị trường biến động vì gói có thể để dành mở vào ngày giá cao) và thị trường biến động. Khó: giá cầu thủ và giá gói x2, EP ban đầu ít. Thị trường biến động: giá mỗi cầu thủ lên xuống mỗi ngày, HLV ảo đôi khi bán rẻ, và bạn có thể đặt giá đến 105% (bán chậm hơn): mua rẻ, bán đắt. Khi Shop tính phí, Nâng cấp, Trao đổi và Tuyển trạch không tạo thêm EP: phí nâng cấp bằng giá trị nó thêm vào, khôi phục trả bằng EP, và đề nghị không vượt quá giá trị các thẻ đã đưa. EP từ trận đấu chỉnh ở tab Thưởng sau trận; EP ban đầu áp dụng cho HLV mới.", eco_preset="Mẫu", eco_custom="Tùy chỉnh", eco_easy="Dễ (như trước)", eco_real="Thực tế", eco_hard="Khó", eco_shopfree="Shop miễn phí (0 EP)", eco_players="Giá cầu thủ (x)", eco_packs="Giá gói (x)", eco_start="EP ban đầu của HLV mới", eco_dynamic="Thị trường biến động (giá lên xuống, mua bán có lãi)", eco_saved="Đã lưu cài đặt kinh tế.", e_eco_value="giá trị kinh tế không hợp lệ (hệ số 0.1-100, EP ban đầu từ 0 trở lên)",
     ),
@@ -1249,6 +1379,8 @@ I18N = {
         e_unknown_kind="알 수 없는 상품 종류", e_product_missing="상품을 찾을 수 없습니다", e_not_changed="수정된 적 없는 상품입니다",
         e_in_use="아직 {0}에서 사용 중입니다", e_list_item="{0}: 아이템 {1}은(는) 여기에 넣을 수 없습니다", e_chain_packages="연속 패키지에는 패키지만 넣을 수 있습니다",
         nav_chat="AI 채팅", chat_title="가상 감독 채팅", chat_lead="랭크 상대(가상 감독)가 경기 채팅에 메시지를 보냅니다: 킥오프, 양 팀의 골, 빗나간 슈팅, 골키퍼 선방, 그리고 당신이 채팅을 입력할 때. 결과에 대한 한마디는 랭크 화면으로 돌아오면 배너로 표시됩니다. 감독마다 성격이 있습니다(친절함, 승부욕, 유머, 자신감, 장난기). {0}에 저장되며 다음 메시지부터 적용됩니다.", chat_on="AI 채팅 켜기", chat_lang="메시지 언어", chat_saved="AI 채팅 설정을 저장했습니다.", e_chat_lang="알 수 없는 채팅 언어", nav_missions="미션", mis_title="미션과 업적", mis_lead="일일 미션(Manager > 업적 목록의 일일 미션 줄, 매일 00:00 WIB에 초기화), 배지가 있는 영구 업적(감독 레벨, 경기, 승리, 강화, 등급, 팀 가치, 골, 랭크), 퀘스트 버튼의 주간 퀘스트(보상 상자에 쓰는 GP, 매주 월요일 00:00 WIB에 초기화). 서버가 직접 플레이한 경기와 성공한 강화를 셉니다. EP 보상은 경제 탭의 선수 가격 배율을 따릅니다. {0}에 저장되며, 언어와 퀘스트 버튼은 게임을 다시 켠 뒤 적용됩니다.", mis_on="미션 켜기", mis_lang="미션 언어", mis_targets="목표 (x)", mis_rewards="보상 (x)", mis_saved="미션 설정을 저장했습니다.", e_mission_value="미션 설정이 올바르지 않음(목표 0.1-10, 보상 0-10, 언어 id/en/vi)",
+        nav_notice='공지', notice_title='공지 이미지', notice_lead='이 이미지는 로그인할 때마다 공지 팝업에 표시됩니다(issue #36). JPG 또는 PNG를 고르면 이 페이지가 저장 전에 팝업 크기(800×720)에 맞춥니다. 다음 로그인부터 적용되며 클라이언트 파일은 바꾸지 않습니다.', notice_file='이미지 파일(JPG/PNG)', notice_mode='맞춤 방식', notice_fit='전체 표시(배경 추가)', notice_fill='상자 채우기(가장자리 자름)', notice_bg='배경색', notice_save='공지 저장', notice_delete='공지 삭제', notice_current='현재 공지', notice_new='새 미리보기', notice_none='공지 이미지가 없습니다: 팝업이 비어 있습니다.', notice_saved='공지 이미지를 저장했습니다. 다음 로그인 때 표시됩니다.', notice_deleted='공지 이미지를 삭제했습니다.', notice_confirm_delete='공지 이미지를 삭제할까요?', notice_pick_first='먼저 이미지 파일을 고르세요.', e_notice_png='이미지는 800×720 PNG여야 합니다(이 페이지에서 파일을 다시 고르세요)', e_notice_size='이미지가 너무 큽니다(최대 8MB)',
+        nav_assets='이미지', as_title='없는 이미지', as_lead='게임은 선수 얼굴, 클럽 엠블럼, 리그 로고, 스태프 사진을 클라이언트 캐시에서 보여 주며, 없는 것은 기본 이미지(실루엣, 빈 엠블럼)로 표시됩니다. 다운로드는 없는 이미지를 fifaaddict.com에서 백그라운드로 0.5초에 한 장씩 가져오며, 이미 있는 파일은 바꾸지 않습니다. 선수 얼굴은 수천 장일 수 있어 오래 걸립니다. 언제든 멈추고 이어서 받을 수 있습니다. 새 이미지는 늦어도 게임을 다시 실행한 뒤 표시됩니다.', as_kind='종류', as_added='받음', as_failed='없음', as_faces='선수 얼굴', as_crests='클럽 엠블럼', as_leagues='리그 로고', as_staffs='스태프 사진', as_fetch='다운로드', as_stop='중지', as_running='다운로드 중: {0}', as_idle='진행 중인 다운로드가 없습니다.', as_started='다운로드를 시작했습니다.', as_stopped='다운로드를 중지했습니다.', e_asset_kind='알 수 없는 이미지 종류', e_asset_busy='다른 다운로드가 아직 진행 중입니다',
         nav_prematch="경기 설정", pm_title="경기 설정", pm_lead="다음 경기(리그, 컵, 랭크)의 경기장, 시간대, 날씨, 경기 시간입니다. Multiple > Rank에서는 경기 설정 화면에서도 바꿀 수 있고, 그 선택도 여기에 저장됩니다. 리그와 컵 화면은 표시만 합니다. 흐림: 낮에는 구름 낀 하늘, 밤에는 해질녘입니다(리그/컵 화면에는 \"Salju\"로 표시됨).", pm_stadium="경기장", pm_tod="시간대", pm_weather="날씨", pm_length="경기 시간", pm_home="홈 팀 경기장", pm_random="무작위", pm_day="낮", pm_night="밤", pm_dry="맑음", pm_rain="비", pm_snow="눈", pm_overcast="흐림", pm_minutes="{0}분", pm_ball="공", pm_saved="경기 설정을 저장했습니다.", e_pm_value="잘못된 경기 설정 값",
         nav_economy="경제", eco_title="경제", eco_lead="모든 감독의 가격과 EP입니다. 쉬움 = 지금과 같음(상점 무료). 현실적: 유료 상점(상품 가격 = 내용물의 가치, EP가 없는 부스트나 EXP 캡슐 등은 기본 가격 × 선수 가격 배율, 팩 = 들어 있는 카드의 가치이며 변동 시장에서는 +13%: 팩을 비싼 날까지 두었다가 열 수 있기 때문)과 변동 시장. 어려움: 선수와 팩 가격 x2, 적은 시작 EP. 변동 시장: 선수 가격이 매일 오르내리고, 가상 감독이 가끔 싸게 팔며, 판매가를 105%까지 정할 수 있습니다(더 늦게 팔림): 싸게 사서 비싸게 파세요. 상점이 유료일 때는 강화, 트레이드, 스카우트로 EP를 불릴 수 없습니다: 강화 비용은 늘어나는 가치만큼이고, 복구는 EP로 내며, 제안은 내준 카드의 가치를 넘지 않습니다. 경기 EP는 경기 보상 탭에서, 시작 EP는 새 감독에게 적용됩니다.", eco_preset="프리셋", eco_custom="사용자 지정", eco_easy="쉬움(지금과 같음)", eco_real="현실적", eco_hard="어려움", eco_shopfree="상점 무료(0 EP)", eco_players="선수 가격(배)", eco_packs="팩 가격(배)", eco_start="새 감독의 시작 EP", eco_dynamic="변동 시장(가격 변동, 거래로 이익 가능)", eco_saved="경제 설정을 저장했습니다.", e_eco_value="잘못된 경제 설정 값(배율 0.1-100, 시작 EP 0 이상)",
     ),

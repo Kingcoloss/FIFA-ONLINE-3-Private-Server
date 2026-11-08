@@ -1,4 +1,4 @@
-[![SEASON UPGRADE 25, 26](docs/season-upgrade-25-26.svg)](https://www.mediafire.com/file/7yteho45esxfnu8/FO3ID-Season-25-26-LIVE-client.rar/file)
+[![SEASON UPGRADE 25, 26, WC18](docs/season-upgrade-25-26-wc18.svg)](https://www.mediafire.com/file/505f9vtgtkfu69w/FO3ID-Season-25-26-LIVE-WC18-client.rar/file)
 
 # FO3ID Private Server
 
@@ -6,7 +6,7 @@
 
 > [README.md](README.md)의 번역본입니다. 내용이 다르면 README.md가 최신입니다.
 
-**새 기능:** FIFA Online 4의 25 LIVE·26 LIVE 카드를 새 시즌 두 개로 추가(능력치는 +0 기준, FO4의 특성과 시즌 아이콘 사용), 기본 시즌은 26 LIVE. `tools/fo4_season.py` 참고.
+**새 기능:** FIFA Online 4의 25 LIVE·26 LIVE 카드를 새 시즌 두 개로 추가(능력치는 +0 기준, FO4의 특성과 시즌 아이콘 사용), 기본 시즌은 26 LIVE. 또 WC18: 2018 월드컵 엔트리 중 상위 300명(+1에서 각 카드는 대회 최종 능력치 - 5). `tools/fo4_season.py` 참고.
 
 **FIFA Online 3 인도네시아**(Garena, 클라이언트 빌드 654420)용 로컬 사설 서버로, Python으로
 작성했습니다. Garena는 2020-06-30에 공식 서버를 종료했습니다. 이 프로젝트는 클라이언트가 접속하는
@@ -225,6 +225,33 @@ Gudang 등은 게임에 표시되는 화면 이름이라, 게임에서 찾기 �
   가방("Hadiah naik level Lv.N")으로 들어가고, 경기 후 화면의 레벨업 팝업에 표시되며, 정보 아이콘은 다음 레벨들의 보상을
   보여 줌. 이 서버에서 쓰지 않는 FO3 아이템(스태프 팩, Red Ball, 라커룸·보상 부스트 쿠폰, EXP 이전)은 빠짐. EP 보상은 경제
   탭의 선수 가격을 따름.
+- **클럽**(issue #36): Klub 메뉴가 작동함. 클럽을 직접 만들거나(10,000 EP; "Klub telah dibuat" 뒤의 "Konfirmasi"가 더
+  이상 회색으로 남지 않음) 가상 감독들이 운영하는 AI 클럽 60개 중 하나에 가입할 수 있음. 클럽마다 클럽장, 멤버, 레벨,
+  소개, 소식이 있음. 클럽이 없는 감독들이 내 클럽에 가입을 신청함(Manajemen > permohonan, 심사 없이 멤버를 받도록 해
+  두면 바로 가입함). 멤버는 각자 플레이하는 시간대에 따라 온라인이 되고, 활동 포인트를 쌓고, 게시판에 글을 올리고,
+  채팅 창의 Klub 탭에서 대화함: 내 인사와 메시지에 답하고, 새 멤버를 환영하고, 내 경기 결과를 축하하거나 격려함.
+  언어는 관리자 페이지에서 정한 채팅 언어(인도네시아어, 영어, 베트남어)를 따름. 그 주의 클럽 포인트는 경기
+  부스트(감독 EXP, 선수 EXP, EP)를 주고, 하루에 내가 30포인트를 모으면 가방에 1,000 EP가 들어옴. 아직 안 한 것: 클럽
+  경기, 클럽 시설, 클럽 랭킹.
+- **AI와의 친선전**(issue #36): Multiple > Persahabatan에 버튼이 다시 나옴. Quick match와 Random match는 가상 감독을
+  상대로 찾아 줌. 직접 만든 방에서는 vs COM(AI 선택창에서 고른 구단과 레벨, Amateur~Legendary)이나 목록에서 초대한
+  친구와 경기함. 결과는 Info Manager에 친선전으로 집계되고 랭크 레이팅에는 들어가지 않으며, 상대는 랭크에서처럼
+  채팅함.
+- **King of the Hill**(issue #36): Esports 지역 리그에 매달 새 시즌이 열림. 인도네시아의 19개 지역 중 하나를 고르면 그
+  지역의 가상 감독들이 순위표에 나오고, Mulai를 누르면 내 King of the Hill 레이팅에 가까운 감독 중 한 명과 경기함.
+  보상 화면에 얻거나 잃은 포인트가 표시됨. 주간·시즌 보상 아이템은 아직 없음.
+- **로그인 공지 이미지**(issue #36): 관리자 페이지의 Pengumuman(공지) 탭에서 로그인할 때 뜨는 공지 팝업의 JPG 또는 PNG
+  이미지를 올리거나(800×720 팝업에 맞춰지며 미리 보기가 있음) 지울 수 있음.
+- **관리자 페이지에서 없는 이미지 받기**(issue #36): Aset(이미지) 탭이 없는 선수 얼굴, 구단 엠블럼, 리그 로고, 스태프
+  사진을 fifaaddict.com에서 백그라운드로 내려받음(한 번에 한 종류씩, 언제든 멈추고 이어서 받을 수 있음). 이 탭은
+  `tools/fa_faces.py`를 실행하며, 이 도구는 이제 `--leagues`도 받음. 경기 설정 화면의 "Default ball"에 EA SPORTS 공이
+  나오고, 작은 국기는 큰 국기 이미지를 쓰며, Cup 화면에 트로피와 스킨이 나옴.
+- **언어 팩을 쓸 때의 보상 이름**(issue #36): 베트남어 팩에서는 업적 목록의 보상마다 앞에 "undefined"가 붙고 UI 오류가
+  났음. 서버가 보상 아이템 이름을 인도네시아어와 한국어로만 붙였기 때문. 이제 클라이언트의 모든 언어에 이름이 있음.
+- **AI와 Exhibition**(issue #36): Multiple > Exhibition에서 방이 열림. 화살표나 Pilih Team으로 라이선스 클럽을
+  고르고, 목록에서 친구(가상 감독, 자기가 고른 클럽으로 들어와 바로 준비함)를 초대한 뒤 Siap을 누르면 두 클럽의
+  실제 스쿼드로 경기함. 하루 5경기, 내 카드는 이 경기로 EXP를 얻지 않음. Live Center는 전에 나던 UI 오류 두 개
+  없이 열림.
 - **스태프**(Tim > Manajemen Staff): FO3 스태프 시스템이 다시 작동함. *Rekrut*(영입): EP로 사는 스태프 팩(Basic
   FW / MF / DF / GK / ALL, Pro, Premium, 기술 이사, Premium Medical)과 매일 로그인하면 무료 ALL 팩 하나, 3경기를
   하면 하나 더. *Staff yang dimiliki*(보유 스태프): 역할 칸 7개(FW, MF, DF, 수석 코치, GK, 피지컬 코치, 기술 이사);
@@ -263,7 +290,7 @@ EALayer3(6.5 MB, `tools/re/ealayer3.py`)로 넣어도, 원본보다 작은 음�
 넣어도 똑같이 튕겼으므로 음악 크기가 원인은 아님. 게임 원래 음악을 쓰세요:
 `python -I tools/eatrax_song.py --restore`로 되돌릴 수 있습니다.
 
-아직 안 한 것: 다른 사람과의 온라인 대전(랭크 PvP, 친선전, King of the Hill), Road to World, 리그 시뮬레이션.
+아직 안 한 것: 다른 사람과의 온라인 대전(랭크 PvP, 친선전, King of the Hill, 클럽 경기), Road to World, 리그 시뮬레이션.
 
 ## 필요한 것
 
@@ -309,7 +336,7 @@ EALayer3(6.5 MB, `tools/re/ealayer3.py`)로 넣어도, 원본보다 작은 음�
 | `gen_teams.py` | `gamedata/fifadb.sqlite`로 초기 스쿼드와 구단 요약 생성. |
 | `tools/eatrax_song.py` | 노래를 EALayer3로 EA Trax 메뉴 음악의 맨 앞에 넣어 TrackID 1을 교체(`data_0.big` / `data_1.big` 끝에 덧붙여 수정, `--restore`로 원본 복구). 경기 후 게임이 튕김, 알려진 문제 참고. |
 | `tools/fa_sync.py` | fifaaddict.com 가격 동기화. |
-| `tools/fo4_season.py` | FIFA Online 4의 26 LIVE·25 LIVE 카드(fifaaddict 데이터, 능력치는 +0 기준)를 FO4 시즌 아이콘과 함께 새 시즌 두 개로 추가: `fetch`, `collect` + `import`, `build`, `install`(`data_0.big`은 크기가 바뀌면 안 되므로 그 자리에 다시 쓰고 `Label.big`과 `Module.big`은 끝에 덧붙여 수정, `restore`로 모두 원본 복구). `hud`는 시즌을 먼저 설치한 클라이언트용으로 `Module.big`만 패치함: 경기 중 선수 이름 상자가 2017·FO4 카드 모두에 '17 배지를 보였으나 이제 카드 자신의 시즌을 보임. |
+| `tools/fo4_season.py` | FIFA Online 4의 26 LIVE·25 LIVE 카드(fifaaddict 데이터, 능력치는 +0 기준)를 FO4 시즌 아이콘과 함께 새 시즌 두 개로 추가: `fetch`, `collect` + `import`, `build`, `install`(`data_0.big`은 크기가 바뀌면 안 되므로 그 자리에 다시 쓰고 `Label.big`과 `Module.big`은 끝에 덧붙여 수정, `restore`로 모두 원본 복구). `hud`는 시즌을 먼저 설치한 클라이언트용으로 `Module.big`만 패치함: 경기 중 선수 이름 상자가 2017·FO4 카드 모두에 '17 배지를 보였으나 이제 카드 자신의 시즌을 보임. `wc18`은 `build`용으로 2018 월드컵 엔트리 상위 300명을 읽음(futwiz의 FIFA 18 월드컵 능력치, 위키백과의 엔트리와 소속 클럽): 시즌 WC18(코드 78), +1 카드의 OVR은 월드컵 능력치 - 5, FO3 자체 월드컵 아이콘과 같은 초록색 "18" 아이콘. 팀 컬러 "2018 WC All-Star"(시즌)와 "18 WC <국가>"(국가별 카드), 특성은 선수의 FO3 카드와 FIFA 18 카드에서 가져옴. |
 | `tools/fa_faces.py` | 클라이언트 캐시에 없는 선수 미니 얼굴 추가(fifaaddict가 같은 128x128 PNG 제공). `--crests`는 없는 구단 엠블럼 추가(대부분의 구단이 캐시에 없어 게임이 기본 엠블럼을 보여 줌). `--staffs`는 스태프 사진 추가(캐시에는 서버가 주는 71명 중 7명만 있음). 중단 후 이어서 실행 가능, `--remove`로 되돌림. |
 | `tools/draft_icons.py` | 드래프트 팩의 상점 아이콘을 `assets/externalAssets/shop/`에 그림(클라이언트 캐시에 드래프트 이미지가 없음). 서버는 이 이미지를 클라이언트 이미지보다 먼저 제공. `<icon> <tag> <picks>`로 관리자 페이지에서 만든 팩용 아이콘을 하나 더 그림. Pillow 필요. |
 | `tools/re/` | 리버스 엔지니어링 도구: `bigdir.py`(BIg4 아카이브 표), `refpack.py`(RefPack 코덱), `eadb.py`(EA "DB" 데이터베이스 표), `abc*.py`(AS3 바이트코드 파서 / 검색 / 구조 추출), `gfxx.py`(UI SWF), `memgrab.py`, `dbwin.py`(클라이언트 디버그 출력), `relay_emu.py`(PvP 릴레이 패킷 코덱과 테스트 릴레이), `gamectl.ps1`(테스트용 클라이언트 창 조작). |

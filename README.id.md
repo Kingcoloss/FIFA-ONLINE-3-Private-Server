@@ -1,4 +1,4 @@
-[![SEASON UPGRADE 25, 26](docs/season-upgrade-25-26.svg)](https://www.mediafire.com/file/7yteho45esxfnu8/FO3ID-Season-25-26-LIVE-client.rar/file)
+[![SEASON UPGRADE 25, 26, WC18](docs/season-upgrade-25-26-wc18.svg)](https://www.mediafire.com/file/505f9vtgtkfu69w/FO3ID-Season-25-26-LIVE-WC18-client.rar/file)
 
 # FO3ID Private Server
 
@@ -6,7 +6,7 @@
 
 > Terjemahan dari [README.md](README.md). Kalau ada yang berbeda, README.md yang terbaru.
 
-**Baru:** kartu 25 LIVE dan 26 LIVE dari FIFA Online 4 sebagai dua season baru (stat dianggap +0, karakteristik dan badge season FO4), dengan 26 LIVE sebagai season default. Lihat `tools/fo4_season.py`.
+**Baru:** kartu 25 LIVE dan 26 LIVE dari FIFA Online 4 sebagai dua season baru (stat dianggap +0, karakteristik dan badge season FO4), dengan 26 LIVE sebagai season default, dan WC18: 300 pemain skuad terbaik Piala Dunia 2018 (di +1 tiap kartu bernilai rating akhir turnamen - 5). Lihat `tools/fo4_season.py`.
 
 Private server lokal untuk **FIFA Online 3 Indonesia** (Garena, client build 654420), ditulis
 dengan Python. Garena menutup server resminya pada 2020-06-30; proyek ini membuat ulang backend
@@ -277,6 +277,40 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   level Lv.N"); layar setelah match menampilkannya di popup naik level, dan ikon infonya menampilkan
   hadiah level-level berikutnya. Item FO3 yang tidak dipakai server ini (pak staff, Red Ball, kupon locker
   room dan reward boost, EXP transfer) dilewati. Hadiah EP ikut harga pemain di tab Ekonomi.
+- **Klub** (issue #36): Klub sudah jalan. Dirikan klub sendiri (10.000 EP; "Konfirmasi" setelah
+  "Klub telah dibuat" tidak lagi tetap abu-abu) atau gabung ke salah satu dari 60 klub AI yang dikelola
+  manajer virtual, masing-masing dengan ketua, anggota, level, deskripsi, dan berita. Manajer yang belum
+  punya klub minta bergabung ke klubmu (Manajemen > permohonan, atau langsung masuk selama klubmu
+  menerima anggota tanpa pemeriksaan). Anggota online sesuai jam main mereka, mengumpulkan poin
+  aktivitas, menulis di papan klub, dan mengobrol di tab Klub pada jendela chat: mereka membalas sapaan
+  dan pesanmu, menyambut anggota baru, dan memberi selamat atau semangat atas hasil match-mu, dalam
+  bahasa chat yang diatur di halaman admin (Indonesia, Inggris, Vietnam). Poin klub minggu itu memberi
+  boost untuk match (EXP manajer, EXP pemain, EP), dan kalau kamu sendiri mengumpulkan 30 poin dalam
+  sehari, 1.000 EP masuk ke Bag. Belum dikerjakan: match klub, fasilitas klub, dan peringkat klub.
+- **Pertandingan persahabatan melawan AI** (issue #36): Multiple > Persahabatan kembali menampilkan
+  tombol-tombolnya. Quick match dan Random match mempertemukanmu dengan manajer virtual; di room buatan
+  sendiri kamu main vs COM (klub dan level yang dipilih di pemilih AI, Amateur sampai Legendary) atau
+  melawan teman yang kamu undang dari daftar. Hasilnya dihitung sebagai pertandingan persahabatan di
+  Info Manager, bukan di rating Rank, dan lawan ikut chat seperti di Rank.
+- **King of the Hill** (issue #36): liga regional Esports punya musim baru tiap bulan. Pilih satu dari 19
+  wilayah Indonesia; papan peringkatnya berisi manajer virtual dari wilayah itu, dan Mulai
+  mempertemukanmu dengan salah satu dari mereka yang rating-nya dekat dengan rating King of the Hill-mu.
+  Layar hadiah menampilkan poin yang didapat atau hilang. Item hadiah mingguan dan musiman belum ada.
+- **Gambar pengumuman saat login** (issue #36): tab Pengumuman di halaman admin mengunggah JPG atau PNG
+  (disesuaikan ke popup 800×720, dengan pratinjau) untuk popup Pemberitahuan saat login, atau
+  menghapusnya.
+- **Unduh gambar yang belum ada lewat halaman admin** (issue #36): tab Aset mengunduh wajah pemain, logo
+  klub, logo liga, dan foto staff yang belum ada dari fifaaddict.com di latar belakang (satu jenis dalam
+  satu waktu; bisa dihentikan dan dilanjutkan kapan saja). Tab ini menjalankan `tools/fa_faces.py`, yang
+  sekarang juga menerima `--leagues`. "Default ball" di layar pengaturan game menampilkan bola EA SPORTS,
+  bendera kecil memakai gambar bendera besar, dan layar Cup mendapat trofi dan skin-nya.
+- **Nama hadiah saat memakai paket bahasa** (issue #36): dengan paket bahasa Vietnam, daftar achievement
+  menampilkan "undefined" sebelum tiap hadiah dan memunculkan error UI, karena server hanya memberi nama
+  item hadiah dalam bahasa Indonesia dan Korea. Sekarang item hadiah punya nama di tiap bahasa client.
+- **Exhibition melawan AI** (issue #36): Multiple > Exhibition membuka room-nya. Pilih klub berlisensi
+  dengan tombol panah atau Pilih Team, undang teman dari daftar (manajer virtual, yang masuk dengan klub
+  pilihannya sendiri dan langsung siap), lalu Siap memainkan skuad asli kedua klub. Lima match sehari;
+  kartumu tidak mendapat EXP dari match ini. Live Center terbuka tanpa dua error UI yang dulu muncul.
 - **Staff** (Tim > Manajemen Staff): sistem staff FO3 aktif lagi. *Rekrut*: pak staff dengan EP (Basic
   FW / MF / DF / GK / ALL, Pro, Premium, Direktur Teknik, Premium Medical) dan, tiap hari, pak ALL gratis
   untuk login dan satu lagi untuk main 3 match. *Staff yang dimiliki*: 7 frame peran (FW, MF, DF, pelatih
@@ -324,7 +358,7 @@ tidak. Crash yang sama terjadi dengan lagu sebagai PCM mentah (37,7 MB), sebagai
 TrackID 1 dengan bank musik lebih kecil dari aslinya, jadi ukuran musik bukan penyebabnya. Pakai
 musik bawaan game: `python -I tools/eatrax_song.py --restore` mengembalikannya.
 
-Belum dikerjakan: main online melawan orang lain (ranked PvP, friendly, King of the Hill), Road to World, simulasi liga.
+Belum dikerjakan: main online melawan orang lain (ranked PvP, friendly, King of the Hill, match klub), Road to World, simulasi liga.
 
 ## Kebutuhan
 
@@ -372,7 +406,7 @@ Belum dikerjakan: main online melawan orang lain (ranked PvP, friendly, King of 
 | `gen_teams.py` | Skuad awal dan ringkasan klub dari `gamedata/fifadb.sqlite`. |
 | `tools/eatrax_song.py` | Menaruh lagu di urutan pertama musik menu EA Trax sebagai EALayer3, mengganti TrackID 1 (mengubah `data_0.big` / `data_1.big` dengan menambahkan di akhir; `--restore` mengembalikan aslinya). Membuat game crash setelah pertandingan, lihat masalah yang diketahui. |
 | `tools/fa_sync.py` | Sinkronisasi harga fifaaddict.com. |
-| `tools/fo4_season.py` | Menambahkan kartu 26 LIVE dan 25 LIVE FIFA Online 4 (data fifaaddict, stat dianggap +0) sebagai dua season baru dengan badge season FO4: `fetch`, `collect` + `import`, `build`, `install` (menulis ulang isi `data_0.big` di tempat, karena ukurannya tidak boleh berubah, dan menambahkan di akhir `Label.big` dan `Module.big`; `restore` mengembalikan semuanya). `hud` hanya menambal `Module.big`, untuk client yang sudah di-install sebelumnya: kotak nama pemain di match dulu menampilkan badge '17 pada semua kartu 2017 dan FO4, sekarang badge season kartunya sendiri. |
+| `tools/fo4_season.py` | Menambahkan kartu 26 LIVE dan 25 LIVE FIFA Online 4 (data fifaaddict, stat dianggap +0) sebagai dua season baru dengan badge season FO4: `fetch`, `collect` + `import`, `build`, `install` (menulis ulang isi `data_0.big` di tempat, karena ukurannya tidak boleh berubah, dan menambahkan di akhir `Label.big` dan `Module.big`; `restore` mengembalikan semuanya). `hud` hanya menambal `Module.big`, untuk client yang sudah di-install sebelumnya: kotak nama pemain di match dulu menampilkan badge '17 pada semua kartu 2017 dan FO4, sekarang badge season kartunya sendiri. `wc18` mengambil 300 pemain skuad terbaik Piala Dunia 2018 untuk `build` (rating FIFA 18 World Cup dari futwiz, skuad dan klub dari Wikipedia): season WC18 (kode 78), kartu di +1 bernilai rating Piala Dunia - 5, dengan badge "18" hijau seperti badge Piala Dunia FO3 sendiri; team color "2018 WC All-Star" (season) dan "18 WC <negara>" (kartu tiap negara), Karakteristik dari kartu FO3 pemain dan kartu FIFA 18-nya. |
 | `tools/fa_faces.py` | Menambahkan wajah mini pemain yang tidak ada di cache client (fifaaddict menyajikan PNG 128x128 yang sama); `--crests` menambahkan logo klub yang tidak ada (kebanyakan klub tidak punya di cache, jadi game menampilkan logo bawaan); `--staffs` menambahkan foto staff (cache hanya punya 7 dari 71 staff yang diberikan server). Bisa dilanjutkan, `--remove` membatalkannya. |
 | `tools/draft_icons.py` | Menggambar ikon Shop untuk pak draft (cache client tidak punya gambar draft) ke `assets/externalAssets/shop/`, yang dilayani server sebelum gambar milik client; `<icon> <tag> <picks>` menggambar satu lagi, untuk pak buatan halaman admin. Butuh Pillow. |
 | `tools/re/` | Alat bantu reverse engineering: `bigdir.py` (tabel arsip BIg4), `refpack.py` (codec RefPack), `eadb.py` (tabel database "DB" EA), `abc*.py` (parser / grep / penambang skema bytecode AS3), `gfxx.py` (SWF UI), `memgrab.py`, `dbwin.py` (output debug client), `relay_emu.py` (codec paket relay PvP dan relay uji), `gamectl.ps1` (mengendalikan jendela client untuk tes). |

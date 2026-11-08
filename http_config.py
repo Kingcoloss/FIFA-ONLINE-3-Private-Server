@@ -20,7 +20,7 @@ https://APSEODESK172 (port 443) for /info/server/locale etc. — no launch arg
 overrides it — so run `http_config.py 443 --tls` and map APSEODESK172 to
 127.0.0.1 in the hosts file.
 """
-import bisect, calendar, collections, copy, functools, gzip, html, http.server, math, os, random, re, socket, sqlite3, ssl, statistics, sys, threading, time
+import bisect, calendar, collections, copy, functools, gzip, html, http.server, math, os, random, re, socket, sqlite3, ssl, statistics, sys, threading, time, urllib.parse
 from contextlib import closing
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -84,14 +84,36 @@ CDN_PREFIX = "cdn/"
 # The server's own images, served first: the draft pack icons (tools/draft_icons.py; the client
 # cache has no draft pictures).
 OWN_ASSETS = os.path.join(HERE, "assets")
+# The login notice popup's picture (issue #36: "upload, replace, or delete announcement images"),
+# an 800x720 PNG the admin page's Pengumuman tab saves here. StartupNoticeScreen.configUI shows the
+# notice two ways: this client (LOCALE not KOR) GETs /game/inweburl/notice and opens its url in the
+# popup's web renderer (LoadWebAddress), so the url is the admin page's /notice (the picture fitted
+# to the window); the Korean client loads externalAssets/notice/notice.png instead (stretched to
+# 800x720), served from here too. Without a picture the popup stays empty (about:blank).
+NOTICE_IMAGE = os.path.join(HERE, "gamedata", "notice.png")
+ADMIN_PORT = int(os.environ.get("FO3_ADMIN_PORT", "8088"))  # the admin page (admin.py); 0 = none
+
+
+def notice_url():
+    """The login notice popup's page: the admin page's picture, or nothing."""
+    if ADMIN_PORT and os.path.isfile(NOTICE_IMAGE):
+        return f"http://127.0.0.1:{ADMIN_PORT}/notice?t={int(os.path.getmtime(NOTICE_IMAGE))}"
+    return "about:blank"
 
 
 def asset_path(rel):
     """OWN_ASSETS/rel or ASSETS/rel, whichever exists, else None. A club crest the cache lacks
     in one size is its other size (issue #29: the cache has 190 small crests but 49 large ones,
     and the cup screens ask for the large one: Napoli, Bayern, Man United showed none). A Rekrut
-    pack tile (shop/staffpack_<stfid>) is that staff's picture: the client has no staff pack art."""
+    pack tile (shop/staffpack_<stfid>) is that staff's picture: the client has no staff pack art.
+    Issue #36: the game setting screen's "Default ball" (ball 0) has no picture ("NOT FOUND"): it
+    shows the plain EA SPORTS ball's (ball 6); a small flag (countries/smallFlags, none cached) is
+    the nation's big one."""
+    if rel == "externalAssets/notice/notice.png":
+        return NOTICE_IMAGE if os.path.isfile(NOTICE_IMAGE) else None
     rel = re.sub(r"^externalAssets/shop/staffpack_(\d+)\.png$", r"externalAssets/staffs/\1.png", rel)
+    rel = re.sub(r"^externalAssets/balls/ball_0\.png$", "externalAssets/balls/ball_6.png", rel)
+    rel = re.sub(r"^externalAssets/countries/smallFlags/(\d+\.png)$", r"externalAssets/countries/\1", rel)
     other = re.sub(r"crests/(large|small)/", lambda m: f"crests/{'small' if m[1] == 'large' else 'large'}/", rel)
     for r in dict.fromkeys((rel, other)):
         for root in (OWN_ASSETS, ASSETS):
@@ -268,7 +290,7 @@ def purge_deleted_coaches(st):
         st["offers"] = [o for o in st.get("offers", []) if o.get("slot", ds) != c["slot"]]
         if c["_id"] == st["defaultcoachid"]:
             st["defaultcoachid"] = ""
-            for k in ("league2", "cups", "match", "trade"):
+            for k in ("league2", "cups", "match", "trade", "club"):
                 st.pop(k, None)
     if not st.get("offers"):
         st.pop("offers", None)
@@ -415,6 +437,10 @@ def ep_account(query, body):
     acc["option"] = account_option()
     if missions_cfg()["enabled"]:  # the Quest window's menu button (missions)
         acc["features"].setdefault("freeroambuttons", {})["quest"] = {}
+    # Multiple > Persahabatan's buttons (MultiplayQuickMatchScreen.checkMatchFeature reads
+    # featuresAt("/friendlymatch"); none = an empty screen): against AI, see room_kind
+    acc["features"]["friendlymatch"] = {"quickmatch": {}, "randommatch": {}, "custommatch": {}}
+    acc["features"].setdefault("esports", {})["regionalleague"] = {}  # King of the Hill (issue #36)
     return _json(acc)
 
 
@@ -494,10 +520,13 @@ def ep_match_squad(mid, side, query, body):
     resource, which the screen reads (side.<mine>.team.squad). result false shows reason."""
     st = _state(); slot = _default_slot(st); match = st.get("match") or {}
     s = (match.get("side") or {}).get(side) if match.get("id") == mid else None
-    team = st["teams"].get(str(slot))
+    exhibition = match.get("type") == "Exhibition_PvP"  # the club of that side, not mine
+    team = (s or {}).get("team") if exhibition else st["teams"].get(str(slot))
     if not s or not s["players"] or team is None or not apply_squad(team, json.loads(body or b"{}")):
         return _json({"result": False, "reason": "PLAYERLIST_CHANGEPLAYER_FAIL_POPUP_INFO_UNUSABLEPLAYER"})
     s.update(match_side(team, s["team"]["teamid"], s["players"][0], s["tactics"]), ready=s["ready"])
+    if exhibition:
+        s["team"]["teamcolors"] = []
     _save(st)
     return _json({"result": True, "resources": [{"uri": f"/match/{mid}", "body": match}] + coach_me_resources(st, slot)})
 
@@ -546,6 +575,12 @@ def match_side(raw, teamid, user=None, tactics=None):
     fetchMatchSide* read squad, tactics, ready. tactics is the preset ARRAY (as
     /game/my/tactic/all): native 0x949170 iterates it ({id, bus, cc, def, teammentality})."""
     team = owned_team(raw)
+    # the 18 first, the reserves after: in a match native names a card by its player id and the
+    # HUD's season badge takes the first card of that player here (tools/fo4_season.py's getSeason
+    # patch), so a reserve 26 LIVE Mbappe came before the WC18 one on the pitch and showed 26 (user:
+    # "Pada saat in game badge session pemain sudah sesuai?"). The pre-match screen still gets them all.
+    in18 = {str(s.get("id") or s["spid"]) for s in team["squad"]["positions"]}
+    team["players"].sort(key=lambda p: p["_id"] not in in18)
     # team color for the user's side only: an AI side is a whole club (+4 for free)
     team["teamcolors"] = active_teamcolors(team) if user else []
     if user:  # my working staff: native boosts the players from these two lists
@@ -1223,12 +1258,26 @@ TC_NAMED_NATIONS = (  # (TEAM<id>, nationality)
     (125, 46, ("fw", "shotpower", 2)), (126, 13, ("fw", "headingaccuracy", 2)), (127, 51, ("fw", "jumping", 2)),
     (128, 103, ("fw", "acceleration", 2)), (129, 133, ("fw", "sprintspeed", 1)), (130, 12, ("fw", "positioning", 2)),
 )
-# season colors the client names: card season code -> (TEAM<id>, boost); a season color keeps at
-# least its +3 (2002 Legends, '16 Europe/Copa and EU Legends say +1)
+# season colors the client names: card season code -> (TEAM<id> or a name of ours, boost); a season
+# color keeps at least its +3 (2002 Legends, '16 Europe/Copa and EU Legends say +1). A name the
+# client has no string for shows as given (Localization.getLocalizedString returns such a key itself):
+# WC18 (tools/fo4_season.py) is named as FO3's own "2014 WC All-Star" (TEAM42) and boosts as it does
+# (user: "Tambah tem color wc18")
 TC_SEASON_NAMES = {91: (18, ("", "ovr", 5)), 93: (100, ("", "ovr", 3)), 95: (19, ("", "ovr", 3)),
                    77: (42, ("", "reactions", 1)), 65: (140, ("", "ovr", 3)), 53: (141, ("", "ovr", 3)),
                    47: (142, ("", "ovr", 3)), 63: (143, ("", "ovr", 3)), 69: (137, ("", "ovr", 3)),
-                   67: (138, ("", "ovr", 3)), 35: (145, ("", "ovr", 3)), 27: (20044, ("", "ovr", 3))}
+                   67: (138, ("", "ovr", 3)), 35: (145, ("", "ovr", 3)), 27: (20044, ("", "ovr", 3)),
+                   78: ("2018 WC All-Star", ("", "reactions", 1))}
+# WC18's nations, named as FO3's "14 WC <nation>" colors (TEAM20..39, their spelling where they have
+# one): color 60000 + EA nation id (below the client's [Test] colors at 70000), the nation's WC18
+# cards, OVR +1 / +2 / +3 at 5-6 / 7-8 / 9-11 (a nation with fewer cards: all of them, +3)
+TC_WC18_NATIONS = {45: "Spain", 21: "Germany", 54: "Brazil", 38: "Portugal", 52: "Argentina", 60: "Uruguay",
+                   56: "Colombia", 14: "England", 7: "Belgium", 18: "Perancis", 10: "Kroasia", 40: "Russia",
+                   83: "Mexico", 167: "Korea Selatan", 163: "Japan", 13: "Denmark", 37: "Poland", 47: "Switzerland",
+                   46: "Sweden", 129: "Morocco", 24: "Iceland", 136: "Senegal", 51: "Serbia", 111: "Egypt",
+                   72: "Costa Rica", 133: "Nigeria", 161: "Iran", 59: "Peru", 145: "Tunisia", 195: "Australia",
+                   183: "Saudi Arabia", 87: "Panama"}
+TC_WC18 = 60000
 TC_LEGENDS = (93, 30, 27, 71, 51, 61, 89, 48, 55, 49)  # WL UL EL ML TL VL CL MUL MUA TCO92
 TC_YEARS = (6, 7, 8, 9, 10, 11, 14, 15, 16, 88)
 
@@ -1262,6 +1311,7 @@ TC_NAMED_SPECIALS = (  # (TEAM<id>, description, SQL condition on players p, boo
         (32, 18, ("", "strength", 1)), (33, 10, ("fw", "acceleration", 2)), (34, 40, ("", "positioning", 2)),
         (35, 83, ("", "headingaccuracy", 2)), (36, 108, ("", "marking", 3)), (37, 117, ("", "reactions", 2)),
         (38, 167, ("", "reactions", 2)), (39, 163, ("", "shortpassing", 2)))),
+    *((TC_WC18 + n, "Pemain WC18 dari negara ini", f"{_S(78)} AND p.nationality = {n}", _TC_OVR, None) for n in TC_WC18_NATIONS),
     *((tid, "50 kartu terbaik negara ini", f"p.nationality = {n}", _TC_OVR, 50) for tid, n in (
         (20007, 21), (20008, 45), (20009, 18), (20010, 27), (20011, 14), (20012, 54), (20013, 52),
         (20014, 7), (20015, 38), (20016, 56), (20017, 60))),
@@ -1309,7 +1359,8 @@ TC_NAMED_SPECIALS = (  # (TEAM<id>, description, SQL condition on players p, boo
     (20070, "Heading 85 ke atas", "p.headingaccuracy >= 85", ("", "strength", 5), None),
     (20071, "Reputasi internasional 4 bintang ke atas", "p.internationalrep >= 4", ("", "ovr", 4), None),
 )
-TC_KEYS = {34024: "TEAMCOLOR_ATTRIBUTES_EVOLVE34024"}  # every other name is TEAMCOLOR_ATTRIBUTES_TEAM<id>
+TC_KEYS = {34024: "TEAMCOLOR_ATTRIBUTES_EVOLVE34024",  # every other name is TEAMCOLOR_ATTRIBUTES_TEAM<id>
+           **{TC_WC18 + n: f"18 WC {name}" for n, name in TC_WC18_NATIONS.items()}}  # names of ours, shown as given
 
 
 def _tc_boost(groups, boost):
@@ -1368,7 +1419,8 @@ def tc_colors():
     for label, codes in tc_seasons():
         cid = TC_SEASON + codes[0]
         tid, b = TC_SEASON_NAMES.get(codes[0], (None, None))
-        specials.append({"teamcolorid": cid, "type": "special", "teamid": str(cid), "name": key(tid) if tid else f"Season {label}",
+        name = tid if isinstance(tid, str) else key(tid) if tid else f"Season {label}"
+        specials.append({"teamcolorid": cid, "type": "special", "teamid": str(cid), "name": name,
                          "description": f"Pemain season {label}", "boostgroups": _tc_special_groups(b) if b else TC_GROUPS})
     for cid, desc, _, b, _ in TC_NAMED_SPECIALS:
         if sets[cid][1]:
@@ -1731,15 +1783,18 @@ def coach_statistics(st, coach, slot):
     ladder["highrecords"].update(count=lad.get("count", 0), rank=lad.get("rank", [0] * LADDER_COUNT),
                                  winningstreak=lad.get("winningstreak", [0] * LADDER_COUNT))
     rows = lambda: {k: [0] * 5 for k in ("wins", "draws", "losses")}  # 1 vs 1 .. 5 vs 5
+    fr = coach.get("record", {}).get("friendly", {})  # friendly_record
+    frows = lambda k: {**rows(), **fr.get(k, {})}
     return {"ladder": ladder,
             # noramlbest (sic) / ultimatebest: the level shown is it - 10 / - 20; leaguewins: an
             # array the titles count sums (shown only when not empty)
             "league": {**{k: lg.get(k, 0) for k in ("wins", "draws", "losses", "goals", "goalsconceded", "normalwins",
                                                     "noramlbest", "ultimatewins", "ultimatebest")},
                        "winningstreak": {"max": lg.get("maxstreak", 0)}, "leaguewins": [0]},
-            "friendly": {"custom": rows(), "quick": {**rows(), "winningstreak": {"max": [0]}}, "vscom": rows()},
+            "friendly": {"custom": frows("custom"), "quick": {**frows("quick"), "winningstreak": {"max": [fr.get("best", 0)]}},
+                         "vscom": frows("vscom")},
             "simulation": {k: {"wins": 0, "draws": 0, "losses": 0} for k in ("custom", "quick", "vscom")},
-            "winstreak": [], "club": {},
+            "winstreak": [], "club": {}, "esports2": koth_statistics(st, coach),
             "cup": {**{k: cup.get(k, 0) for k in ("wins", "draws", "losses", "abandonments")},
                     "cupwins": cup.get("cupwins", [0] * CUP_LEVELS), **({"highrecords": cup["best"]} if cup.get("best") else {})}}
 
@@ -1816,7 +1871,7 @@ def coach_me(st, slot):
         # -> the market's player-slot check (TransferPurchaseTabPage._limitPlayerCount)
         # limits.firstTeam: Skuad tab moveToFirstTeam reads it first and silently gives up when
         # it is missing, so Tim Cadangan cards (packs, trades) could never reach Tim inti/Formasi
-        "club": {}, "uimode": 0, "limits": {"cups": 3, "players": MAX_PLAYERS, "baseplayers": MAX_PLAYERS,
+        "club": {"clubid": club_id(st)}, "uimode": 0, "limits": {"cups": 3, "players": MAX_PLAYERS, "baseplayers": MAX_PLAYERS,
                                              "firstTeam": FIRST_TEAM_MAX},
         "transferfavorites": [], "currdivision": "",
         # Manager > Info Manager > "Hasil tanding multiplayer": my Rank matches (ladder_record)
@@ -2658,7 +2713,7 @@ def match_cards_reward(st):
     return {"extra": {"selected": pick, "availables": [prize_item(p) for p in cards]}, "selected": pick}
 
 
-def match_reward(st, stats):
+def match_reward(st, stats, own=True):
     """match.reward for PostMatchRewardDefaultScene.onRewardReceived (paths it reads) and its
     player list (PlayerRewardListItemRenderer: id, spid, prev, current, reward.detail.extra).
     Credits EP, coach exp and exp for every player of mine in matchStats (in-match spid = the
@@ -2668,16 +2723,18 @@ def match_reward(st, stats):
     won, drew = g(me) > g(opp), g(me) == g(opp)
     r = match_reward_cfg()["result"]["win" if won else "draw" if drew else "loss"]
     ep, cexp, pexp = r["ep"], r["coach"], r["player"]
-    reward = lambda n: {"total": n, "detail": {"base": n, "extra": 0}}
-    prev, cur = coach_gain_exp(st, cexp)
+    boost = club_boosts(st)  # my club's points of this week (issue #36)
+    reward = lambda n, kind: {"total": n + round(n * boost.get(kind, 0)), "detail": {"base": n, "extra": round(n * boost.get(kind, 0))}}
+    coach = reward(cexp, "MATCH_PLUS_COACHEXP")
+    prev, cur = coach_gain_exp(st, coach["total"])
     players = []
-    for p, s in match_cards(st, stats):
-        n = pexp + 20 * int(s.get("goals") or 0) + 10 * int(s.get("assists") or 0)
-        pprev, pcur = gain_exp(p, n, player_need, PLAYER_MAX_LEVEL)
-        players.append({"id": iid(p), "spid": p["spid"], "prev": pprev, "current": pcur, "reward": reward(n)})
+    for p, s in match_cards(st, stats) if own else ():
+        n = reward(pexp + 20 * int(s.get("goals") or 0) + 10 * int(s.get("assists") or 0), "MATCH_PLUS_PLAYEREXP_ALL")
+        pprev, pcur = gain_exp(p, n["total"], player_need, PLAYER_MAX_LEVEL)
+        players.append({"id": iid(p), "spid": p["spid"], "prev": pprev, "current": pcur, "reward": n})
     return {"matchRewardBackType": 0, **match_cards_reward(st),
-            "coach": {"reward": reward(cexp), "prev": prev, "current": cur},
-            "money": {"reward": reward(ep)},
+            "coach": {"reward": coach, "prev": prev, "current": cur},
+            "money": {"reward": reward(ep, "MATCH_PLUS_GAMEMONEY")},
             "players": players, "missions": [], "exptankinfo": {}}
 
 
@@ -2753,7 +2810,8 @@ def ep_match_end(mid, query, body):
     if match is not None and match.get("stage") != "closed":  # credit once
         fill_players(match, req)
         match["result"] = {k: v for k, v in req.items() if k != "_method"}
-        match["reward"] = match_reward(st, req)
+        exhibition = (st.get("ladder_pending") or {}).get("id") == mid and st["ladder_pending"].get("kind") == "exhibition"
+        match["reward"] = match_reward(st, req, own=not exhibition)
         add_ep(st, match["reward"]["money"]["reward"]["total"])
         staff_after_match(st)
         ladder_result(st, mid, req)
@@ -2761,6 +2819,9 @@ def ep_match_end(mid, query, body):
         gf, ga = score(req.get("myTeam", "home")), score(req.get("opponentTeam", "away"))
         rank = str(match.get("type", "")).startswith("Ladder")
         mission_event(st, match=1, win=int(gf > ga), goal=gf, rank=int(rank), rankwin=int(rank and gf > ga))
+        mtype = str(match.get("type", ""))
+        club_after_match(st, gf, ga, "RANKED" if rank or mtype == "Regional_League" else "FRIENDLY" if mtype.startswith("Friendly")
+                         else "CUP" if (st.get("cup_pending") or {}).get("id") == mid else "LEAGUE")
     cp = st.get("cup_pending") or {}
     if cp.get("id") == mid and cp.get("cupid") in (st.get("cups") or {}):
         h, a = req.get("home") or {}, req.get("away") or {}
@@ -2960,8 +3021,11 @@ def cup_play_round(st, cup, mine=None):
 
 
 def cup_resources(cup):
+    """The cup with its meta's trophy and skin (issue #36: CupMainScreen draws
+    trophies/t<currentCup.trophy>.png, and cups saved without them asked for tundefined.png)."""
     uri = f"/cup/{cup['_id']}"
-    return [{"resource": uri, "uri": uri, "body": cup}]
+    meta = next((m for m in CUPS if m["metaid"] == cup.get("metaid")), {})
+    return [{"resource": uri, "uri": uri, "body": {"trophy": meta.get("trophy"), "skin": meta.get("skin"), **cup}}]
 
 
 def ep_cup_new(query, body):
@@ -4351,8 +4415,9 @@ FA_SEASONS = (
     ("CC", (24,), 8547), ("17TH", (44,), 8545), ("TCO92", (49,), 8546), ("MUA", (55,), 8547), ("ML", (71,), 8549),
     ("TL", (51,), 8549), ("VL", (61,), 8549), ("CL", (89,), 8549), ("KL02", (95,), 8546), ("CEL", (31, 33), 8335),
     ("U23", (29,), 8545), ("KXI", (97,), 8546), ("MUL", (48,), 8547), ("VS", (73,), 2000006),
-    # FIFA Online 4's 26 LIVE / 25 LIVE (tools/fo4_season.py; empty until it is installed)
-    ("26 LIVE", (300,), 45011), ("25 LIVE", (325,), 45013),
+    # FIFA Online 4's 26 LIVE / 25 LIVE and the 2018 World Cup's best 300 squad players (tools/fo4_season.py;
+    # empty until it is installed)
+    ("26 LIVE", (300,), 45011), ("25 LIVE", (325,), 45013), ("WC18", (78,), 880047),
 )
 # each one the season's 200 best cards (user: "all session pack  top 50 ganti menjadi top 200")
 PACKS.update({92000000 + codes[0]: (f"{label} Top 200", {"seasons": codes, "icon": icon, "top": 200, "all": True})
@@ -5840,7 +5905,7 @@ def ep_bag_unpackall(query, body):
 #    (stars), rewards [{todo, reward [{itemid, count}]}]}; the group's own def (id = the group)
 #    names its row. GET /static/db/BADGES [{itemid, category, itemicon, itemback, asset: group,
 #    image_effect}] lists a row ("misc" has no badge: the client adds that row itself). GET
-#    /static/db/ITEMNAMES {itemid: {ind, kor}}: a reward with no name throws. Progress entries:
+#    /static/db/ITEMNAMES {itemid: {<language>: name}}: a reward with no name throws. Progress entries:
 #    {id, aon: true (else 0 shows), complete, progress {grade from 1, detail {current, total}},
 #    rewards {available, grade}}; a row stops drawing at an id without one. Once a badge is earned,
 #    its group's {id, complete, completedat} too (the panel lights and dates a badge that has one). POST /achievement/<id>/reward/<grade> pays a grade; a group all paid
@@ -6070,9 +6135,11 @@ def ep_badges(query, body):
 
 
 def ep_itemnames(query, body):
-    """GET /static/db/ITEMNAMES {itemid: {ind, kor}}: the reward panels' (and Upgrade's) item names."""
+    """GET /static/db/ITEMNAMES {itemid: {<language>: name}}: the reward panels' (and Upgrade's) item
+    names. The client reads name[Localization.LOCALE] (= ep_locale's language), so every language
+    code gets one (issue #36: the Vietnamese pack's "vie" showed "undefined" and a UI error)."""
     ids = [EP_ITEM, ES_ITEM, *PACKS, *ITEMS, *PACKAGES, *MONTHLY]
-    return _json({str(i): {"ind": item_def(i)["name"], "kor": item_def(i)["name"]} for i in ids})
+    return _json({str(i): dict.fromkeys(("kor", "eng", "chi", "vie", "tha", "ind", "jpn"), item_def(i)["name"]) for i in ids})
 
 
 def ep_quest_bank(query, body):
@@ -6750,13 +6817,14 @@ def ep_tv_history(query, body):
     return _json({"values": values})
 
 
-def ep_rank_friends(query, body):
+def ep_rank_friends(query, body, vms=None):
     st = _state()
     coach, day = my_coach(st), vm_day()
     me, hist = coach_me(st, coach["slot"]), tv_history(st)
     _save(st)
-    rows = [(m["_id"], m["name"], m["level"], vm_ovr(m["_id"]), vm_value(m["_id"], day), vm_value(m["_id"], day - 1))
-            for m in vm_friends()]
+    rows = [(m["_id"], m["name"], m["level"], vm_ovr(m["_id"]), vm_value(m["_id"], day),
+             vm_value(m["_id"], day - 1 if vm_origin(m["_id"], day - 1) else day))
+            for m in (vm_friends() if vms is None else vms)]
     rows.append((coach["_id"], coach["name"], me["levelinfo"]["level"],
                  {k: (me["summary"].get("ovr") or {}).get(k, 0) for k in ("FW", "MF", "DF")}, hist[-1], hist[-2]))
     before = {r[0]: k for k, r in enumerate(sorted(rows, key=lambda r: (-r[5], -r[2])), 1)}
@@ -6825,7 +6893,10 @@ def presence_loop():
     while True:
         try:
             with STATE_LOCK:
-                now = {m["_id"]: vm_status(m) for m in vm_friends()}
+                st = _state()
+                v = club_view(st)
+                now = {m["_id"]: vm_status(m) for m in vm_friends() + [m["vm"] for m in (v["members"] if v else []) if m["vm"]]}
+                club_idle(st)
             for vid, s in now.items():
                 if last.get(vid) not in (None, s):
                     messenger_push(f"/presence/{vid}", {"status": s})
@@ -6913,6 +6984,37 @@ LADDER_TYPES = ("Ladder_PvP_1v1", "Ladder_PvP_2v2", "Ladder_PvP_3v3", "Ladder_MG
 
 def ladder_index(room_type):
     return 3 if "mgr" in str(room_type) else 0
+
+
+# Multiple > Persahabatan (issue #36: "Friendly Matches ... not working"; the screen was empty
+# without features.friendlymatch). Its rooms (RoomController.createARoom: POST /room {type}) play
+# against AI on the Rank path (the one-user session, see ladder_match): Quick match and Random
+# match (pvp_random) search and find a virtual manager; a custom room (pvp_referee / pvp_custom)
+# plays one invited from the friends list (POST /room/<id>/invite/<id>: he joins and gets ready);
+# vs COM (pve*, PUT /room/<id>/type) plays the club picked in the room's AI picker (PUT
+# /room/<id>/AI {index {nation, league, team, difficulty}}: indices into the client's SORTNATION,
+# SORTLEAGUE/<nation>, SORTTEAM/<league> lists without 2111, difficulty 0..4 = Amateur..Legendary)
+# once I press Mulai (PUT /room/<id>/side/left/ready). Results count in statistics.friendly
+# {quick, custom, vscom} (friendly_record), not in the Rank ratings.
+def room_kind(room_type):
+    t = str(room_type)
+    return ("ladder" if "ladder" in t else "koth" if t == "esports2" else "exhibition" if t == "pvp_exhibition"
+            else "vscom" if t.startswith("pve") else "friendly")
+
+
+def room_ai_team(room):
+    """The club the room's AI picker shows (RoomProxy's lists, 2111 dropped)."""
+    idx = (room.get("AI") or {}).get("index") or {}
+    pick = lambda xs, k: [x for x in xs if int(x) != 2111][max(0, min(int(idx.get(k) or 0), len([x for x in xs if int(x) != 2111]) - 1))]
+    nation = pick([n for n, _ in club_index()], "nation")
+    league = pick([lid for lid, _ in dict(club_index())[nation]], "league")
+    return int(pick(json.loads(ep_sortteam("", b"")[1]).get(str(league)) or [my_teamid(_state())], "team"))
+
+
+def room_vm(vm):
+    """A virtual manager as a room user (the custom room's slot reads summary.id and summary.ovr)."""
+    return {"id": vm["_id"], "_id": vm["_id"], "name": vm["name"], "teamid": vm["teamid"],
+            "levelinfo": {"level": vm["level"], "exp": 0}, "captain": True, "summary": {"id": vm["teamid"], "ovr": vm_ovr(vm["_id"])}}
 
 
 @functools.lru_cache(maxsize=None)
@@ -7028,6 +7130,73 @@ def ladder_room_reply(room):
     return _json({"result": True, "resources": [{"uri": f"/room/{room['roomid']}", "body": room}]})
 
 
+def room_change(change):
+    """A handler for PUT /room/<id>/...: change(st, room, request) on my room, the room back."""
+    def handler(*args):
+        *groups, query, body = args
+        st = _state(); room = st.get("room")
+        if room is None:
+            return _json({"result": False, "reason": "invalid room"})
+        out = change(st, room, json.loads(body or b"{}"), *groups)
+        _save(st)
+        return out or ladder_room_reply(room)
+    return handler
+
+
+def _room_type(st, room, req):
+    """PUT /room/<id>/type {type}: vs Teman / vs COM / vs Random in the custom room."""
+    room["type"] = str(req.get("type") or room["type"])
+    room["side"]["left"]["ready"] = room["side"]["right"]["ready"] = False
+    if room_kind(room["type"]) == "vscom":
+        room["side"]["right"]["players"] = []
+
+
+def _room_ai(st, room, req):
+    """PUT /room/<id>/AI {index}: the AI picker's nation / league / club / difficulty."""
+    room["AI"]["index"].update({k: int(v) for k, v in (req.get("index") or {}).items()
+                                if k in ("nation", "league", "team", "difficulty") and str(v).lstrip("-").isdigit()})
+
+
+def _room_ready(st, room, req, side):
+    """PUT /room/<id>/side/<side>/ready {ready}: Ready against the friend I invited, or Mulai vs
+    COM: the match comes a second later (ladder_found)."""
+    if side not in room["side"]:
+        return _json({"result": False, "reason": "invalid side"})
+    room["side"][side]["ready"] = ready = bool(req.get("ready", True))
+    kind = room_kind(room["type"])
+    if ready and side == "left" and room["stage"] == "room" and (
+            kind == "vscom" or kind in ("friendly", "exhibition") and room["side"]["right"]["players"]):
+        room["search"] = os.urandom(4).hex()
+        threading.Timer(1, ladder_found, (room["search"],)).start()
+
+
+def _room_leave(st, room, req):
+    """PUT /room/<id>/leave: out of the room (RoomProxy finds me gone: ON_LEAVE)."""
+    st.pop("room", None)
+    gone = dict(room, side={**room["side"], "left": {"players": [], "ready": False}})
+    return _json({"result": True, "resources": [{"uri": f"/room/{room['roomid']}", "body": gone}]})
+
+
+def _room_invite(st, room, req, vid):
+    """POST /room/<id>/invite/<coachid>: the friend joins the right side a few seconds later, ready."""
+    if not vm_by_id(vid) or room_kind(room["type"]) not in ("friendly", "exhibition"):
+        return _json({"result": False, "reason": "invalid coach"})
+    threading.Timer(random.uniform(2, 4), room_join, (room["roomid"], vid)).start()
+    return _json({"result": True})
+
+
+def room_join(roomid, vid):
+    with STATE_LOCK:
+        st = _state(); room = st.get("room"); vm = vm_by_id(vid)
+        if room and room["roomid"] == roomid and vm and room["stage"] == "room" and room_kind(room["type"]) in ("friendly", "exhibition"):
+            room["side"]["right"].update(players=[room_vm(vm)], ready=True)
+            if room_kind(room["type"]) == "exhibition":  # his own pick of the recommended clubs
+                mine = room["side"]["left"].get("authTeamId")
+                room["side"]["right"]["authTeamId"] = random.Random(vid).choice([t for t in EXHIBITION_TEAMS if t != mine])
+            _save(st)
+            messenger_push(f"/room/{roomid}", room)
+
+
 def ep_room(query, body):
     """POST /room {slotsize, type, properties}: my room, in stage "room"."""
     req = json.loads(body or b"{}")
@@ -7035,7 +7204,8 @@ def ep_room(query, body):
     i = ladder_index(req.get("type"))
     room = {"roomid": int(time.time()) % 1000000, "type": req.get("type", "pvp_ladder_mgr"), "stage": "room",
             "slotsize": int(req.get("slotsize") or 1), "option": {}, "publicset": True, "state": None,
-            "ladder": {"elo": my_ladder(st)["elo"][i]}, "matchmaking": None,
+            **({"ladder": {"elo": my_ladder(st)["elo"][i]}} if room_kind(req.get("type", "ladder")) == "ladder" else {}),
+            "AI": {"index": {"nation": 0, "league": 0, "team": 0, "difficulty": 2}}, "matchmaking": None,
             "side": {"left": {"players": [room_player(me)], "ready": False}, "center": {"players": []},
                      "right": {"players": [], "ready": False}, "referee": {"players": []}}}
     st["room"] = room
@@ -7120,7 +7290,9 @@ def ep_room_back(query, body):
     res = coach_me_resources(st, _default_slot(st)) + [{"uri": "/ladder/my/info", "body": ladder_my_info(st)}]
     if room:
         room.update(stage="room", matchmaking=None, search=None)
-        room["side"]["right"]["players"] = []
+        room["side"]["left"]["ready"] = False
+        if room_kind(room["type"]) in ("ladder", "koth") or room["type"] == "pvp_random":
+            room["side"]["right"]["players"] = []
         _save(st)
         res.append({"uri": f"/room/{room['roomid']}", "body": room})
     vm_say_result()
@@ -7132,7 +7304,8 @@ def ladder_found(search):
     goes to its squad stage (MatchController ON_SQUADING), as a PvP server does once both are in."""
     with STATE_LOCK:
         st = _state(); room = st.get("room")
-        if room and room.get("search") == search and room["stage"] == "searching":  # not cancelled
+        if room and room.get("search") == search and (  # not cancelled; a room's Ready not taken back
+                room["stage"] == "searching" or room["stage"] == "room" and room["side"]["left"].get("ready")):
             ladder_match(st, room)
             _save(st)
             mid = st["match"]["id"]
@@ -7156,26 +7329,60 @@ def ladder_squad(mid):
 
 
 def ladder_match(st, room):
-    """The match against the virtual manager nearest my rating, into the room (stage matched)."""
-    i = ladder_index(room["type"])
+    """The match into the room (stage matched): Rank against the virtual manager nearest my
+    rating; a friendly against the one invited or a near one; vs COM against the room's AI club
+    (room_kind)."""
+    i, kind = ladder_index(room["type"]), room_kind(room["type"])
     me = coach_me(st, _default_slot(st)); teamid = me["teamid"]
-    vm = ladder_opponent(st, i)
     user = {"id": me["id"], "name": me["name"], "levelinfo": me["levelinfo"]}
-    match = new_match("League_2_league_MGR" if i == 3 else "League_2_league",
-                      match_side(st["teams"][str(_default_slot(st))], teamid, user, _tactics(st)[1]), vm_side(vm))
+    mine = match_side(st["teams"][str(_default_slot(st))], teamid, user, _tactics(st)[1])
+    if kind == "vscom":
+        vm, ai = None, room_ai_team(room)
+        match = new_match("League_2_league", mine, match_side(roster_team(ai), ai))
+        away = ai
+    elif kind == "exhibition":  # each side the club picked in the room, at its own squad
+        guest = room["side"]["right"]["players"]
+        vm = (vm_by_id(guest[0]["id"]) if guest else None) or ladder_opponent(st, i)
+        lt = room["side"]["left"].get("authTeamId") or EXHIBITION_TEAMS[0]
+        away = room["side"]["right"].get("authTeamId") or EXHIBITION_TEAMS[1]
+        mine = match_side(roster_team(lt), lt, user, [default_tactic(0)])
+        theirs = match_side(roster_team(away), away, tactics=[style_tactic(vm_style(vm))])
+        theirs["players"] = [{"id": vm["_id"], "name": vm["name"], "levelinfo": {"level": vm["level"], "exp": 0}}]
+        mine["team"]["teamcolors"] = []
+        match = new_match("League_2_league", mine, theirs)
+    else:
+        guest = room["side"]["right"]["players"] if kind == "friendly" else []
+        vm = (vm_by_id(guest[0]["id"]) if guest else None) or (koth_opponent(st) if kind == "koth" else ladder_opponent(st, i))
+        i = KOTH_LADDER if kind == "koth" else i
+        match = new_match("League_2_league_MGR" if i == 3 else "League_2_league", mine, vm_side(vm))
+        away = vm["teamid"]
     apply_prematch(st, match)  # the game setting screen's stadium / time / weather / length steppers
-    match["gamesettings"]["difficulty"] = 10 + min(14, (vm["elo"][i] - LADDER_START) // 55)  # Liga levels 10..24
-    match["leagueparam"] = {"matchtype": "ladder", "round": 0, "home": teamid, "away": vm["teamid"], "leagueid": 0}
-    match["elo"] = {"left": {"rating": my_ladder(st)["elo"][i]}, "right": {"rating": vm["elo"][i]}}
+    # Liga levels 10..24 by his rating; vs COM the picker's 0..4 (Amateur..Legendary, the game's own)
+    match["gamesettings"]["difficulty"] = (max(0, min(4, int(room["AI"]["index"].get("difficulty") or 0))) if kind == "vscom"
+                                           else 10 + min(14, (vm["elo"][i] - LADDER_START) // 55))
+    match["leagueparam"] = {"matchtype": "ladder" if kind == "ladder" else "friendly", "round": 0, "home": teamid,
+                            "away": away, "leagueid": 0}
+    if vm:
+        mine_elo = my_koth(st)["elo"] if kind == "koth" else my_ladder(st)["elo"][i]
+        match["elo"] = {"left": {"rating": mine_elo}, "right": {"rating": vm["elo"][i]}}
     # The PvP type: MatchController.connectToTheSession opens the native session
     # (LobbyManager::ConnectSession), whose user reader (fifazf 0x93d200) takes "ip", "id",
     # "name" as strings (jsoncpp asCString crashes on a missing one), "privateip" as a list and,
     # for ladder types, summary.ladderelo as the 5 ratings (the manager one is ladderelo[len - 2]).
-    match["type"] = "Ladder_MGR_PvP_1v1" if i == 3 else "Ladder_PvP_1v1"
+    match["type"] = {"ladder": "Ladder_MGR_PvP_1v1" if i == 3 else "Ladder_PvP_1v1", "friendly": "Friendly_PvP_1v1",
+                     "vscom": "Friendly_PvE_1v1", "koth": "Regional_League", "exhibition": "Exhibition_PvP"}[kind]
     match["id"] = str(int(time.time()) % 1000000000)  # relaySessionInfo.matchid = parseInt(resourceId)
     match["relayServer"] = {"address": "127.0.0.1:28010", "forceRelay": True}  # read, never contacted
     for p in match["side"]["left"]["players"]:
         p.update(ip="127.0.0.1", privateip=[], summary={"ladderelo": my_ladder(st)["elo"][:5]})
+    if kind == "koth":  # the native user reader's KOTH rating (matchstats type Regional_League)
+        for side, elo in (("left", my_koth(st)["elo"]), ("right", vm["elo"][KOTH_LADDER])):
+            for p in match["side"][side]["players"]:
+                p["matchstats"] = [{"type": "Regional_League", "elorating": elo}]
+            # PlayerListUtil takes a Regional_League card's stamina from es2stamina (no default:
+            # my squad screen showed empty stamina bars)
+            for card in match["side"][side]["team"]["players"]:
+                card["es2stamina"] = card.get("stamina", 1)
     # The opponent stays a side user (generateCaptainFromMatchInfo, the game setting screen) but
     # nameless while the match is "created": connectToTheSession leaves users whose name is
     # undefined out of the native session, so it has one user and nobody to wait for (no relay
@@ -7185,10 +7392,11 @@ def ladder_match(st, room):
         p.pop("name", None)
     match["side"]["right"]["ready"] = False
     st["match"] = match
-    st["ladder_pending"] = {"id": match["id"], "index": i, "opponent": vm["_id"]}
+    st["ladder_pending"] = {"id": match["id"], "index": i, "opponent": vm["_id"] if vm else None, "kind": kind,
+                            "teamid": away, "record": {"vscom": "vscom", "koth": "koth", "exhibition": "exhibition"}.get(
+                                kind, "quick" if room["type"] == "pvp_random" else "custom")}
     VM_CHAT_AFTER.clear()  # a result whose Rank screen never came back is not said on a later one
-    room["side"]["right"]["players"] = [{"id": vm["_id"], "_id": vm["_id"], "name": vm["name"], "teamid": vm["teamid"],
-                                         "levelinfo": {"level": vm["level"], "exp": 0}, "captain": True}]
+    room["side"]["right"]["players"] = [room_vm(vm)] if vm else []
     room.update(stage="matched", search=None, matchmaking={"resources": [{"uri": f"/match/{match['id']}", "body": match}]})
 
 
@@ -7199,23 +7407,60 @@ def ladder_result(st, mid, req):
         return
     # an opponent this server version does not know (the crowd changed while a match was pending)
     # plays at the start rating
-    vm = vm_by_id(p["opponent"]) or {"elo": [LADDER_START] * LADDER_COUNT, "teamid": None}
+    vm = vm_by_id(p["opponent"]) or {"elo": [LADDER_START] * LADDER_COUNT, "teamid": p.get("teamid")}
+    if p.get("kind") == "exhibition":  # he played the club he picked
+        vm = {**vm, "teamid": p["teamid"]}
+        exhibition_played(st, 1)
     h, a = req.get("home") or {}, req.get("away") or {}
     mine, theirs = int(h.get("score") or 0), int(a.get("score") or 0)
     sh, sa = int(h.get("shootout") or 0), int(a.get("shootout") or 0)
     if str(h.get("id")) == str(vm["teamid"]) and str(a.get("id")) != str(h.get("id")):
         mine, theirs, sh, sa = theirs, mine, sa, sh
-    ladder_record(st, p["index"], vm, mine, theirs, sh, sa)
+    if p.get("kind", "ladder") == "ladder":
+        ladder_record(st, p["index"], vm, mine, theirs, sh, sa)
+    elif p["kind"] == "koth":
+        old, new, streak = koth_record(st, vm, mine, theirs, sh, sa)
+        if (st.get("match") or {}).get("id") == mid and "reward" in st["match"]:  # the reward screen's "Poin Divisi"
+            st["match"]["reward"].update(preveloinfo={"elo": old}, eloinfo={"elo": new, "streak": streak, "goaldiff": mine - theirs})
+    else:
+        friendly_record(st, p, vm, mine, theirs, sh, sa)
     st.pop("ladder_pending")
     VM_CHAT.pop(mid, None)
     if "_id" in vm:  # his word on it once I am back on the Rank screen (vm_say_result)
         VM_CHAT_AFTER["last"] = {"vm": vm["_id"], "outcome": "win" if theirs > mine else "loss" if mine > theirs else "draw"}
     if st.get("room"):
-        st["room"].update(stage="room", matchmaking=None, ladder={"elo": my_ladder(st)["elo"][p["index"]]})
+        st["room"].update(stage="room", matchmaking=None)
+        if "ladder" in st["room"]:
+            st["room"]["ladder"] = {"elo": my_ladder(st)["elo"][p["index"]]}
 
 
 def vm_by_id(vid):
     return next((m for m in virtual_managers() if m["_id"] == vid), None)
+
+
+def multiplay_add(st, mtype, vm, mine, theirs, sh, sa):
+    """Manager > Info Manager > "Hasil tanding multiplayer" (CoachMultiResultTabPage): his crest,
+    club, score and the type (Ranking / Rank Manager / Persahabatan); a coachid opens his profile."""
+    me = my_coach(st)
+    me["multiplay"] = (me.get("multiplay", []) + [{
+        "type": mtype, "date": w3c(time.time()), "forfeits": 0,
+        "team": {"teamid": me["teamid"], "score": mine, "shootout": sh, "coaches": [{"coachid": me["_id"], "name": me["name"]}]},
+        "opponent": {"teamid": vm.get("teamid"), "score": theirs, "shootout": sa, "clubname": "",
+                     "coaches": [{"coachid": vm["_id"], "name": vm["name"]}] if vm.get("_id") else []}}])[-MULTIPLAY_MAX:]
+
+
+def friendly_record(st, p, vm, mine, theirs, sh, sa):
+    """A friendly's result: statistics.friendly[quick | custom | vscom] (1 vs 1 row) and the
+    multiplay list."""
+    r = coach_record(my_coach(st), "friendly")
+    row = r.setdefault(p["record"], {k: [0] * 5 for k in ("wins", "draws", "losses")})
+    res = "wins" if (mine, sh) > (theirs, sa) else "losses" if (mine, sh) < (theirs, sa) else "draws"
+    row[res][0] += 1
+    if p["record"] == "quick":  # Quick match's best win streak
+        r["streak"] = r.get("streak", 0) + 1 if res == "wins" else 0
+        r["best"] = max(r.get("best", 0), r["streak"])
+    multiplay_add(st, {"vscom": "Friendly_PvE_1v1", "exhibition": "Exhibition_PvP"}.get(p["kind"], "Friendly_PvP_1v1"),
+                  vm, mine, theirs, sh, sa)
 
 
 LADDER_RECENT, MULTIPLAY_MAX = 3, 20  # record screen's last matches (RANKEDMATCH_RECENT_MATCH_MAX); Info Manager's list
@@ -7251,14 +7496,8 @@ def ladder_record(st, i, vm, mine, theirs, sh=0, sa=0):
                                    "elo": lad["elo"][i], "forfeits": 0}])[-LADDER_RECENT:]
         if sh or sa:  # "(Penalti x Menang y Kalah)"
             lad.setdefault("swins" if score == 1 else "slosses", [0] * LADDER_COUNT)[i] += 1
-    # Manager > Info Manager > "Hasil tanding multiplayer" (CoachMultiResultTabPage): his crest,
-    # club, score and the type (Ranking / Rank Manager); a coachid opens his profile
+    multiplay_add(st, LADDER_TYPES[i] if i < len(LADDER_TYPES) else LADDER_TYPES[0], vm, mine, theirs, sh, sa)
     me = my_coach(st)
-    me["multiplay"] = (me.get("multiplay", []) + [{
-        "type": LADDER_TYPES[i] if i < len(LADDER_TYPES) else LADDER_TYPES[0], "date": now, "forfeits": 0,
-        "team": {"teamid": me["teamid"], "score": mine, "shootout": sh, "coaches": [{"coachid": me["_id"], "name": me["name"]}]},
-        "opponent": {"teamid": vm.get("teamid"), "score": theirs, "shootout": sa, "clubname": "",
-                     "coaches": [{"coachid": vm.get("_id", ""), "name": vm.get("name", "")}]}}])[-MULTIPLAY_MAX:]
     # Info Manager's Rank record: matches, and per ladder the best rank and the best win streak
     r = coach_record(me, "ladder")
     r["count"] = r.get("count", 0) + 1
@@ -7399,6 +7638,870 @@ def vm_say_result():
 
 
 # Path-pattern routes (ids in the path); checked after the exact ENDPOINTS.
+# --------------------------------------------------------------------------- #
+# Clubs (issue #36: "Team creation not working ... add AI members and AI-controlled teams").
+# Komunitas > Klub (ClubScreen and its tab pages; ClubProxy, ClubController) reads /club/me
+# (ClubProxy.clubInfo; _id must be a string or clubid stays null) and the coach's club {clubid}
+# (/coach/me; null = none, the list's create button). Founding: GET /club/fee/creation {fee}
+# (the confirm dialog's EP), POST /club/create {name, description}. "Klub telah dibuat"'s
+# Konfirmasi is enabled by ClubEvent.ON_CLUB_INFO_CHANGED, which only a /club/me fed by a write
+# reply's resources sends (a GET fires ON_COMPLETE only), so every write reply here carries
+# /club/me and /coach/me. A failure is {result false, reason} with ClubCreationScreen's reasons
+# ("name is already used", "not enough money", "invalid name", ...). ClubScreen.refreshTabButton
+# reads clubInfo.member.grade unguarded (master 10, submaster 8, manager 6, member 1; the
+# Manajemen tab from 6); the info page reads rewards[i] (the week's club rewards: MATCH_PLUS_*
+# boosts, value x100 = %) and member.rewards[day] (seven, one per weekday counted from resetat =
+# the club day's start in minutes after 00:00 UTC).
+# AI clubs (CLUB_AI): virtual managers, seeded and not stored. CLUB_IN of the crowd belong to one
+# (drawn once per manager), the master is its highest level member; descriptions, news, board
+# posts and chat come from responses/vm_club_chat.json in the chat language (admin Chat AI tab).
+# I join one at once (POST /club/<id>/join) or found my own (st["club"]): managers without a club
+# ask to join it over time (Manajemen > permohonan; they join at once while it takes members
+# without a check). Members are online by their Rank hours (vm_status), earn activity points by
+# their seeded days, and talk in the Klub chat tab: POST /club/me/message {message} comes back as
+# one push to /club/me/message {type "chat", coachid, coachname, message} (MessagingGroupProxy's
+# observer; a clubid other than mine would be filtered), online members answer it, greet newcomers
+# and cheer my results. The week's club points give their boosts to my match rewards, and my own
+# points of a day (CLUB_DAY_GOAL) pay CLUB_DAY_REWARD EP to the Bag.
+# Left out: the club facility and club ranking (their features are off in account_base.json),
+# club matches (PvP rooms) and emblems (the default crest shows).
+# --------------------------------------------------------------------------- #
+CLUB_FEE, CLUB_EXPAND_FEE = 10000, 5000  # EP: founding a club; one expansion
+CLUB_LIMIT, CLUB_EXPAND, CLUB_LIMIT_MAX = 30, 10, 60  # members: a new club, one expansion, at most
+CLUB_AI, CLUB_IN = 60, 0.6  # AI clubs; the share of virtual managers in one
+CLUB_SUFFIX = ("FC", "United", "Squad", "Legends", "Warriors", "Elite", "Academy", "Stars", "Family", "Army",
+               "Crew", "Club", "Brothers", "Rangers", "Titans")
+CLUB_COLORS = (1203168, 13382451, 3381555, 16750848, 10027161, 39372, 16737843, 6697932, 13421619, 3355647)
+CLUB_LEVELS = (0, 1500, 5000, 11000, 20000, 32000, 48000, 68000, 92000, 120000)  # total points of Lv.1..10
+CLUB_REWARDS = ((300, "MATCH_PLUS_COACHEXP", 0.05), (800, "MATCH_PLUS_GAMEMONEY", 0.05),
+                (1500, "MATCH_PLUS_PLAYEREXP_ALL", 0.05), (2500, "MATCH_PLUS_GAMEMONEY", 0.1))  # week's points -> boost
+CLUB_DAY_GOAL, CLUB_DAY_REWARD = 30, 1000  # my points of a day -> EP to the Bag
+CLUB_DAY_LIMIT, CLUB_WEEK_LIMIT, CLUB_MEMBER_DAY = 3000, 15000, 100  # point caps: club a day / a week, me a day
+CLUB_ASK = 3 * 3600  # s: about one manager without a club asks to join my open club this often
+CLUB_RESET = 17 * 60  # resetat: the club day starts 00:00 WIB = 17:00 UTC (minutes)
+CLUB_STATIC = {"club_pre_members_max": 20, "club_dissolution_time": 60, "club_instant_dissolution_lv": 1}  # minutes
+CLUB_REPLY = (0.8, 0.3)  # odds that an online member answers my chat line; that a second one does too
+REQUEST = {"method": "GET"}  # the request being handled (H._respond, under STATE_LOCK)
+
+
+def club_day(ts=None):
+    """The club day number (WIB days since 1970)."""
+    return int((time.time() if ts is None else ts) + WIB) // 86400
+
+
+def club_activity():
+    """CLUBACTIVITYPOINTS {kind: {points}} (the info page's tooltip lists them)."""
+    with open(os.path.join(RESPONSES, "static_db_CLUBACTIVITYPOINTS.json"), encoding="utf-8") as f:
+        return {k: v["points"] for k, v in json.load(f).items()}
+
+
+@functools.lru_cache(maxsize=1)
+def club_chat_file(mtime):
+    with open(os.path.join(RESPONSES, "vm_club_chat.json"), encoding="utf-8") as f:
+        return json.load(f)
+
+
+def club_line(vm, trigger, seed=None):
+    """His line for trigger in the chat language and his personality (seed: the same line for
+    the same seed)."""
+    lines = club_chat_file(os.path.getmtime(os.path.join(RESPONSES, "vm_club_chat.json")))[
+        vm_chat_cfg()["lang"]][trigger][vm_personality(vm)]
+    return (random.Random(seed) if seed is not None else random).choice(lines)
+
+
+def club_vm_day(vid, day, keen):
+    r = random.Random(f"clubpts:{vid}:{day}")
+    return (10 if r.random() < 0.8 else 0) + 2 * round(keen * r.choice((0, 1, 2, 3, 4, 6)))
+
+
+@functools.lru_cache(maxsize=8192)
+def club_vm_points(vid, d0, d1):
+    """Points manager vid earned on club days d0..d1: day by day for the last week, his average before
+    (a club's history goes back before the crowd's VM_EPOCH)."""
+    keen = random.Random("clubkeen" + vid).uniform(0.5, 1.5)
+    exact = max(d0, d1 - 7)
+    return max(0, exact - d0) * round(8 + 6 * keen) + sum(club_vm_day(vid, d, keen) for d in range(exact, d1 + 1))
+
+
+def club_level(total):
+    """(level, its first points, the next level's) for a club's total points."""
+    lv = sum(total >= p for p in CLUB_LEVELS)
+    return lv, CLUB_LEVELS[lv - 1], CLUB_LEVELS[lv] if lv < len(CLUB_LEVELS) else CLUB_LEVELS[-1]
+
+
+def ai_clubs_now():
+    return ai_clubs(club_day(), vm_chat_cfg()["lang"])
+
+
+@functools.lru_cache(maxsize=2)
+def ai_clubs(day, lang):
+    """The AI clubs on club day `day` (texts in lang): {id: view} (club_view's shape). Who is in
+    which club is drawn once per manager (seeded by his id), the first clubs the biggest; grades
+    by level."""
+    names = [f"{w} {s}" for w in VM_WORDS2 for s in CLUB_SUFFIX]
+    random.Random("clubnames").shuffle(names)
+    weights = [1 / (k + 10) for k in range(CLUB_AI)]
+    clubs = {}
+    for k in range(CLUB_AI):
+        r = random.Random(f"club{k}")
+        created = VM_EPOCH - r.randint(20, 700) * 86400
+        clubs[f"club{k + 1:04d}"] = {
+            "_id": f"club{k + 1:04d}", "name": names[k], "created": created, "color": r.choice(CLUB_COLORS),
+            "allowjoin": r.random() < 0.85, "skipjudgement": True, "limit": CLUB_LIMIT + CLUB_EXPAND * (k < 8),
+            "seed": k, "members": []}
+    for m in sorted(virtual_managers(), key=lambda m: (-m["level"], m["_id"])):
+        r = random.Random("clubof" + m["_id"])
+        if r.random() < CLUB_IN:
+            c = clubs[f"club{r.choices(range(CLUB_AI), weights)[0] + 1:04d}"]
+            if len(c["members"]) < c["limit"]:
+                c["members"].append({"id": m["_id"], "name": m["name"], "level": m["level"], "vm": m,  # joined in its life
+                                     "joined": c["created"] + r.randint(0, max(0, (VM_EPOCH - c["created"]) // 86400)) * 86400})
+    for c in clubs.values():
+        for i, m in enumerate(c["members"]):
+            m["grade"] = 10 if i == 0 else 8 if i == 1 else 6 if i < 4 else 1
+        master = c["members"][0]["vm"] if c["members"] else {"_id": "vm0000"}
+        c.update(description=club_line(master, "description", c["_id"]), descat=c["created"],
+                 news=club_line(master, "news", f"{c['_id']}:{day // 7}"),
+                 newsby=c["members"][0]["name"] if c["members"] else "", newsat=day // 7 * 7 * 86400 - WIB + 9 * 3600)
+    return {k: c for k, c in clubs.items() if c["members"]}
+
+
+def club_free(st):
+    """Virtual managers in no club (AI or mine), weakest first."""
+    taken = {m["id"] for c in ai_clubs_now().values() for m in c["members"]}
+    c = st.get("club") or {}
+    taken |= {m["id"] for m in c.get("members", [])} | {r["id"] for r in c.get("requests", [])}
+    return [m for m in virtual_managers() if m["_id"] not in taken]
+
+
+def club_me(st):
+    """My own club activity record (in st["club"]["me"]): {days {day: {act: points}}, total}."""
+    return st["club"].setdefault("me", {"days": {}, "total": 0})
+
+
+def club_earn(st, act, kind=None):
+    """My club activity: act (CLUB_POINT_LIST_<act>) worth CLUBACTIVITYPOINTS[kind or act]; the
+    day's goal pays its EP once."""
+    if not st.get("club"):
+        return
+    me, today = club_me(st), str(club_day())
+    day = me["days"].setdefault(today, {})
+    n = min(club_activity().get(kind or act.title(), 0), CLUB_MEMBER_DAY - sum(day.values()))
+    if n <= 0:
+        return
+    day[act] = day.get(act, 0) + n
+    me["total"] += n
+    me["days"] = {d: v for d, v in me["days"].items() if int(d) > int(today) - 8}
+    coach = my_coach(st)  # on the manager: leaving and joining again starts a new club record
+    if sum(day.values()) >= CLUB_DAY_GOAL and coach.get("clubpaid") != int(today):
+        coach["clubpaid"] = int(today)
+        bag_add(st, "Hadiah klub harian", [{"itemid": EP_ITEM, "count": CLUB_DAY_REWARD}])
+
+
+def club_view(st):
+    """My club as club_body takes it ({_id, name, created, members [{id, name, level, grade,
+    joined, vm}], ...}; me first in my own club), or None."""
+    c = st.get("club")
+    if not c:
+        return None
+    coach = my_coach(st)
+    me = {"id": coach["_id"], "name": coach["name"], "level": coach_levelinfo(coach)["level"], "vm": None}
+    vms = {m["_id"]: m for m in virtual_managers()}
+    if c.get("ai"):
+        v = ai_clubs_now().get(c["ai"])
+        if v is None:  # gone (its members all left): so am I
+            st["club"] = None
+            return None
+        return {**v, "members": [{**m, "vm": vms.get(m["id"], m["vm"])} for m in v["members"]]
+                + [{**me, "grade": 1, "joined": c["joined"]}]}
+    members = [{**me, "grade": 10, "joined": c["created"]}] + [
+        {"id": m["id"], "name": vms[m["id"]]["name"], "level": vms[m["id"]]["level"], "grade": m["grade"],
+         "joined": m["joined"], "vm": vms[m["id"]]} for m in c["members"] if m["id"] in vms]
+    return {**c, "members": members}
+
+
+def club_points(st, v, member):
+    """(total, weekly, today) points of club view v, or of one member of it."""
+    today, week0 = club_day(), club_day(week_end() - 7 * 86400)
+    out = [0, 0, 0]
+    for m in [member] if member else v["members"]:
+        if m["vm"] is None:
+            me = club_me(st)
+            days = {int(d): sum(x.values()) for d, x in me["days"].items()}
+            pts = (me["total"], sum(n for d, n in days.items() if d >= week0), days.get(today, 0))
+        else:
+            d0 = club_day(m["joined"])
+            pts = (club_vm_points(m["id"], d0, today), club_vm_points(m["id"], max(d0, week0), today) if today >= d0 else 0,
+                   club_vm_day(m["id"], today, random.Random("clubkeen" + m["id"]).uniform(0.5, 1.5)) if today >= d0 else 0)
+        out = [a + b for a, b in zip(out, pts)]
+    return out
+
+
+def club_member_row(st, m):
+    """A row of GET /club/me/members (ClubMemberListTabPage)."""
+    total, weekly, _ = club_points(st, None, m)
+    if m["vm"] is None:
+        coach = my_coach(st)
+        div, status = ladder_division(my_ladder(st)["elo"][0]), "online"
+    else:
+        div, status = ladder_division(m["vm"]["elo"][0]), vm_status(m["vm"])
+    seen = time.time() if status != "offline" else time.time() - random.Random(f"seen:{m['id']}:{club_day()}").randint(3600, 20 * 3600)
+    return {"_id": m["id"], "coachid": m["id"], "name": m["name"], "level": m["level"],
+            "division": f"DIVISION_{div}", "currdivision": f"DIVISION_{div}", "actpoints": {"weekly": weekly, "total": total},
+            "joinedat": w3c(m["joined"]), "connectedat": w3c(seen), "donates": None, "grade": m["grade"],
+            "online": status != "offline"}
+
+
+def club_body(st, v, mine=False):
+    """The club resource (/club/me, /club/<id>, the list's rows)."""
+    total, weekly, today = club_points(st, v, None)
+    level, lo, hi = club_level(total)
+    master = v["members"][0]
+    end = week_end()
+    month = int(time.strftime("%Y%m", time.gmtime(time.time() + WIB)))
+    body = {
+        "_id": v["_id"], "name": v["name"], "createdat": w3c(v["created"]), "state": "inactive" if v.get("deleteat") else "active",
+        "description": {"message": v["description"], "changedat": w3c(v["descat"])},
+        "news": {"message": v["news"], "coachname": v["newsby"], "changedat": w3c(v["newsat"])},
+        "allowjoin": v["allowjoin"], "skipjudgement": v["skipjudgement"], "color": v["color"],
+        "masterid": master["id"], "mastername": master["name"], "masterlevel": master["level"],
+        "membercount": len(v["members"]), "limits": {"members": v["limit"], "submasters": 2},
+        "levelinfo": {"level": level, "from": lo, "to": hi, "actpoints": {
+            "total": total, "weekly": weekly, "today": today, "weeklycached": weekly,
+            "limits": {"weekly": CLUB_WEEK_LIMIT, "today": CLUB_DAY_LIMIT}, "resetat": CLUB_RESET,
+            "weeklybegindate": w3c(end - 7 * 86400), "weeklyenddate": w3c(end - 1)}},
+        "rewards": [{"points": p, "boost": {"type": t, "value": x}} for p, t, x in CLUB_REWARDS],
+        "statistics": {"friendly": {"wins": 0, "total": 0, "forfeitwins": 0, "recent": {"month": month, "wins": 0, "forfeitwins": 0}},
+                       "ranked": {"recent": {"wins": 0, "losses": 0, "total": 0, "wprating": 0, "sid": 0, "highrecord": {"wp": 0}},
+                                  "highrecord": {"wp": 0, "rank": 0}, "last": {"rank": 0, "wprating": 0}}},
+        "member": {"grade": -2}}  # the list's status: -2 none (may ask), -1 "Ditolak", 0 "Menunggu", 1+ "Bergabung"
+    if v.get("deleteat"):
+        body["willbedeletedat"] = w3c(v["deleteat"])
+    if mine:
+        me = next(m for m in v["members"] if m["vm"] is None)
+        mt, mw, md = club_points(st, v, me)
+        acts = club_me(st)["days"].get(str(club_day()), {})
+        body["member"] = {
+            "grade": me["grade"], "limits": {"today": CLUB_MEMBER_DAY},
+            "actpoints": {"today": md, "weekly": mw, "total": mt, "activities": [{"actName": k, "point": n} for k, n in acts.items()]},
+            "rewards": [{"goalpoints": CLUB_DAY_GOAL, "reward": {"name": "EP", "count": CLUB_DAY_REWARD}}] * 7,
+            "reward": {"todaypoint": md, "prev": {"step": 0, "goalpoints": 0},
+                       "next": {"step": 1, "goalpoints": CLUB_DAY_GOAL, "reward": {"clubep": 0, "expandme": 0}}},
+            "statistics": {"ranked": {"recent": {"wins": 0, "losses": 0, "sid": 0}}}}
+    return body
+
+
+def club_boosts(st):
+    """{boost type: value} my club's points of this week give my matches."""
+    v = club_view(st)
+    if not v:
+        return {}
+    weekly = club_points(st, v, None)[1]
+    out = {}
+    for p, t, x in CLUB_REWARDS:
+        if weekly >= p:
+            out[t] = out.get(t, 0) + x
+    return out
+
+
+def club_tick(st, now=None):
+    """What happened in my club since the last look: the day's login points, managers who asked
+    to join (joined at once while it takes members without a check), a dissolution that came due."""
+    c = st.get("club")
+    if not c:
+        return
+    now = time.time() if now is None else now
+    if c.get("deleteat") and now >= c["deleteat"]:
+        st["club"] = None
+        return
+    if "LOGIN" not in club_me(st)["days"].get(str(club_day()), {}):
+        club_earn(st, "LOGIN", "Login")
+    if c.get("ai") or not c.get("allowjoin"):
+        c["next"] = max(c.get("next", now), now)  # closed: nobody queues up meanwhile
+        return
+    c["next"] = max(c.get("next", now), now - 4 * CLUB_ASK)  # a long absence brings a few, not a flood
+    free = club_free(st)
+    while free and c["next"] <= now and len(c["requests"]) < CLUB_STATIC["club_pre_members_max"] and len(c["members"]) + 1 < c["limit"]:
+        at = c["next"]
+        rnd = random.Random(f"{c['_id']}:{int(at)}")  # the same arrivals however often it is looked at
+        c["next"] = at + CLUB_ASK * rnd.uniform(0.3, 1.7)
+        vm = free.pop(rnd.randrange(len(free)))
+        if c["skipjudgement"]:
+            club_add_member(st, vm, at)
+        else:
+            c["requests"].append({"id": vm["_id"], "at": at})
+
+
+def club_add_member(st, vm, at=None):
+    c = st["club"]
+    c["members"].append({"id": vm["_id"], "grade": 1, "joined": time.time() if at is None else at})
+    c["requests"] = [r for r in c["requests"] if r["id"] != vm["_id"]]
+    if at is None or time.time() - at < 60:  # one joining now says hello, a member welcomes him
+        club_say(vm, "joined", 2)
+        club_chat_reply(st, "welcome", 5, besides=vm["_id"])
+
+
+def club_say(vm, trigger, delay):
+    """Member vm's line for trigger into the Klub chat tab after delay s."""
+    if vm_chat_cfg()["enabled"]:
+        threading.Timer(delay, messenger_push, ("/club/me/message", {
+            "type": "chat", "coachid": vm["_id"], "coachname": vm["name"], "message": club_line(vm, trigger)})).start()
+
+
+def club_online(st, besides=None):
+    v = club_view(st)
+    return [m["vm"] for m in v["members"] if m["vm"] and m["id"] != besides and vm_status(m["vm"]) != "offline"] if v else []
+
+
+def club_chat_reply(st, trigger, delay, besides=None, odds=(1, 0)):
+    """One online member (maybe a second) says trigger's line."""
+    online = club_online(st, besides)
+    random.shuffle(online)
+    for i, vm in enumerate(online[:2]):
+        if random.random() < odds[i]:
+            club_say(vm, trigger, delay + 3 * i + random.uniform(0, 3))
+
+
+CLUB_HELLO = ("halo", "hai", "hi", "hello", "hey", "pagi", "siang", "sore", "malam", "chao", "chào", "xin chào", "assalam")
+CLUB_THANKS = ("makasih", "terima kasih", "thanks", "thank", "thx", "cảm ơn", "cam on", "tq")
+
+
+def ep_club_message(query, body):
+    """POST /club/me/message {message, hint}: my line comes back to me (the client shows nothing
+    of its own) and online members may answer."""
+    req = json.loads(body or b"{}")
+    text = str(req.get("message") or "")[:200]
+    st = _state()
+    if text and st.get("club"):
+        coach = my_coach(st)
+        messenger_push("/club/me/message", {"type": "chat", "coachid": coach["_id"], "coachname": coach["name"],
+                                            "message": text, "hint": req.get("hint")})
+        low = text.lower()
+        trigger = ("thanks" if any(w in low for w in CLUB_THANKS) else
+                   "hello" if any(re.search(rf"\b{re.escape(w)}\b", low) for w in CLUB_HELLO) else "reply")
+        club_chat_reply(st, trigger, 2, odds=CLUB_REPLY)
+    return _json({"result": True})
+
+
+def club_after_match(st, gf, ga, act):
+    """A match of mine just ended: its activity points, and my club cheers the result."""
+    if not st.get("club"):
+        return
+    club_earn(st, act, {"LEAGUE": "Match_League_league", "CUP": "Match_Cup_PvE"}.get(act, "Match_general"))
+    club_chat_reply(st, "win" if gf > ga else "loss" if gf < ga else "draw", 8, odds=(0.7, 0.2))
+
+
+def club_idle(st):
+    """Once a minute (presence_loop): now and then an online member chats by himself."""
+    if st.get("club") and random.random() < 0.15:
+        club_chat_reply(st, "idle", 0)
+
+
+def club_resources(st):
+    """/club/me and /coach/me for a write reply (fires ON_CLUB_INFO_CHANGED)."""
+    v = club_view(st)
+    return [{"uri": "/club/me", "body": club_body(st, v, True) if v else {}}] + coach_me_resources(st, _default_slot(st))
+
+
+def club_reply(st, ok=True, reason=None, **extra):
+    _save(st)
+    return _json({"result": ok, **({"reason": reason} if reason else {}), **extra,
+                  **({"resources": club_resources(st)} if ok else {})})
+
+
+def club_name_ok(name):
+    n = len(name.encode("utf-8"))
+    return 4 <= n <= 20 and name.strip() == name and not set(name) & set("<>&\"'\\/")
+
+
+def ep_club_create(query, body):
+    """POST /club/create {name, description}."""
+    req = json.loads(body or b"{}")
+    name, desc = str(req.get("name") or ""), str(req.get("description") or "")[:200]
+    st = _state()
+    coach = my_coach(st)
+    if st.get("club"):
+        return _json({"result": False, "reason": "already have a club"})
+    if not club_name_ok(name):
+        return _json({"result": False, "reason": "invalid name"})
+    if name.lower() in {c["name"].lower() for c in ai_clubs_now().values()}:
+        return _json({"result": False, "reason": "name is already used"})
+    if coach.get("ep", START_EP) < CLUB_FEE:
+        return _json({"result": False, "reason": "not enough money"})
+    add_ep(st, -CLUB_FEE)
+    now = time.time()
+    st["club"] = {"_id": os.urandom(12).hex(), "name": name, "created": now, "description": desc, "descat": now,
+                  "news": "", "newsby": coach["name"], "newsat": now, "allowjoin": True, "skipjudgement": False,
+                  "color": CLUB_COLORS[0], "limit": CLUB_LIMIT, "members": [], "requests": [], "posts": [],
+                  "next": now + CLUB_ASK / 2}
+    club_earn(st, "CLUB_JOIN", "Club_Join")
+    return club_reply(st, clubid=st["club"]["_id"], name=name)
+
+
+def ep_club_me(query, body):
+    """GET /club/me (or DELETE /club/me: close my club, after CLUB_STATIC's time)."""
+    st = _state()
+    if REQUEST["method"] == "DELETE":
+        c = st.get("club")
+        if not c or c.get("ai"):
+            return _json({"result": False, "reason": "invalid request"})
+        c["deleteat"] = time.time() + 60 * CLUB_STATIC["club_dissolution_time"]
+        return club_reply(st)
+    club_tick(st)
+    _save(st)
+    v = club_view(st)
+    return _json(club_body(st, v, True) if v else {})
+
+
+def ep_club_find(query, body):
+    """GET /club/find?keyword&sort&order&allowjoin&skipjudgement&membernumfrom&membernumto:
+    {clubs, count}; member.grade = me there (0 asked, -1 may ask, else my grade)."""
+    q = urllib.parse.parse_qs(query)
+    arg = lambda k, d="": (q.get(k) or [d])[0]
+    st = _state()
+    mine = club_view(st)
+    views = list(ai_clubs_now().values())
+    if mine:
+        views = [mine if v["_id"] == mine["_id"] else v for v in views] + ([] if st["club"].get("ai") else [mine])
+    rows = []
+    for v in views:
+        rows.append(club_body(st, v))
+        if mine and v["_id"] == mine["_id"]:
+            rows[-1]["member"] = {"grade": club_my_grade(st)}
+    kw = arg("keyword").lower()
+    lo, hi = int(arg("membernumfrom", "0") or 0), int(arg("membernumto", "0") or 0)
+    rows = [r for r in rows if kw in r["name"].lower() and (arg("allowjoin") != "true" or r["allowjoin"])
+            and (arg("skipjudgement") != "true" or r["skipjudgement"]) and r["membercount"] >= lo and (not hi or r["membercount"] <= hi)]
+    key = {"name": lambda r: r["name"].lower(), "level": lambda r: r["levelinfo"]["level"],
+           "weeklypoints": lambda r: r["levelinfo"]["actpoints"]["weeklycached"], "member": lambda r: r["membercount"]}
+    rows.sort(key=key.get(arg("sort"), key["level"]), reverse=arg("order", "-1") == "-1")
+    return _json({"clubs": rows, "count": len(rows)})
+
+
+def ep_club_get(cid, query, body):
+    """GET /club/<id>: a club's page (the list's detail popup)."""
+    st = _state()
+    v = ai_clubs_now().get(cid)
+    mine = club_view(st)
+    if mine and mine["_id"] == cid:
+        return _json(club_body(st, mine, True))
+    return _json(club_body(st, v) if v else {"result": False, "reason": "deleted club"})
+
+
+def ep_club_join(cid, query, body):
+    """POST /club/<id>/join: an AI club takes me at once (DELETE: an ask taken back)."""
+    st = _state()
+    if REQUEST["method"] == "DELETE":
+        return _json({"result": True})
+    v = ai_clubs_now().get(cid)
+    if st.get("club"):
+        return _json({"result": False, "reason": "already have a club"})
+    if not v or not v["allowjoin"] or len(v["members"]) >= v["limit"]:
+        return _json({"result": False, "reason": "invalid request"})
+    st["club"] = {"ai": cid, "joined": time.time(), "posts": []}
+    club_earn(st, "CLUB_JOIN", "Club_Join")
+    club_chat_reply(st, "welcome", 4, odds=(1, 0.5))
+    return club_reply(st)
+
+
+def ep_club_leave(query, body):
+    """PUT /club/me/member/leave: out of the AI club I joined."""
+    st = _state()
+    if not (st.get("club") or {}).get("ai"):
+        return _json({"result": False, "reason": "invalid request"})
+    st["club"] = None
+    return club_reply(st)
+
+
+def ep_club_members(query, body):
+    st = _state()
+    club_tick(st)
+    _save(st)
+    v = club_view(st)
+    return _json([club_member_row(st, m) for m in v["members"]] if v else [])
+
+
+def club_my_grade(st):
+    v = club_view(st)
+    return next((m["grade"] for m in v["members"] if m["vm"] is None), 0) if v else 0
+
+
+def ep_club_member(mid, query, body):
+    """POST /club/me/member/<memberid> {grade}: a member's grade in my club."""
+    req = json.loads(body or b"{}")
+    st = _state()
+    c = st.get("club") or {}
+    m = next((m for m in c.get("members", []) if m["id"] == mid), None)
+    if c.get("ai") or not m or req.get("grade") not in (8, 6, 1):
+        return _json({"result": False, "reason": "invalid request"})
+    m["grade"] = req["grade"]
+    return club_reply(st)
+
+
+def ep_club_exclude(mid, query, body):
+    """PUT /club/me/member/exclude/<memberid>: out of my club."""
+    st = _state()
+    c = st.get("club") or {}
+    if c.get("ai") or not any(m["id"] == mid for m in c.get("members", [])):
+        return _json({"result": False, "reason": "invalid request"})
+    c["members"] = [m for m in c["members"] if m["id"] != mid]
+    return club_reply(st)
+
+
+def ep_club_requests(query, body):
+    """GET /club/me/join/requests: managers asking to join my club."""
+    st = _state()
+    club_tick(st)
+    _save(st)
+    vms = {m["_id"]: m for m in virtual_managers()}
+    return _json([{"id": r["id"], "coachid": r["id"], "name": vms[r["id"]]["name"], "level": vms[r["id"]]["level"],
+                   "division": f"DIVISION_{ladder_division(vms[r['id']]['elo'][0])}", "ovr": vm_ovr(r["id"]),
+                   "requestedat": w3c(r["at"]), "teamid": vms[r["id"]]["teamid"]}
+                  for r in (st.get("club") or {}).get("requests", []) if r["id"] in vms])
+
+
+def ep_club_request(rid, query, body):
+    """PUT /club/me/join/<id> takes the manager in, DELETE turns him down."""
+    st = _state()
+    c = st.get("club") or {}
+    if c.get("ai") or not any(r["id"] == rid for r in c.get("requests", [])):
+        return _json({"result": False, "reason": "invalid request"})
+    vm = vm_by_id(rid)
+    if REQUEST["method"] == "DELETE" or not vm:
+        c["requests"] = [r for r in c["requests"] if r["id"] != rid]
+    elif len(c["members"]) + 1 >= c["limit"]:
+        return _json({"result": False, "reason": "club is full"})
+    else:
+        club_add_member(st, vm)
+    return club_reply(st)
+
+
+def ep_club_settings(what, value, query, body):
+    """POST /club/me/settings/description {description} | news {message} | allowjoin/<bool>,
+    PUT .../color {color}."""
+    req = json.loads(body or b"{}")
+    st = _state()
+    c = st.get("club") or {}
+    if not c or c.get("ai"):
+        return _json({"result": False, "reason": "invalid request"})
+    now = time.time()
+    if what == "description":
+        c.update(description=str(req.get("description") or "")[:200], descat=now)
+    elif what == "news":
+        c.update(news=str(req.get("message") or "")[:200], newsby=my_coach(st)["name"], newsat=now)
+    elif what == "allowjoin":
+        c["allowjoin"] = value == "true"
+    elif what == "skipjudgement":
+        c["skipjudgement"] = value == "true"
+    elif what == "color" and isinstance(req.get("color"), int):
+        c["color"] = req["color"]
+    return club_reply(st)
+
+
+def ep_club_expand(n, query, body):
+    """POST /club/me/expand/<n>: CLUB_EXPAND more members for CLUB_EXPAND_FEE EP."""
+    st = _state()
+    c = st.get("club") or {}
+    if c.get("ai") or not c or c["limit"] >= CLUB_LIMIT_MAX:
+        return _json({"result": False, "reason": "invalid request"})
+    if my_coach(st).get("ep", START_EP) < CLUB_EXPAND_FEE:
+        return _json({"result": False, "reason": "not enough money"})
+    add_ep(st, -CLUB_EXPAND_FEE)
+    c["limit"] += CLUB_EXPAND
+    return club_reply(st)
+
+
+def ep_club_undelete(query, body):
+    st = _state()
+    (st.get("club") or {}).pop("deleteat", None)
+    return club_reply(st)
+
+
+def club_board(st):
+    """The board: my posts and the members' (seeded, a few a day), newest first."""
+    v = club_view(st)
+    if not v:
+        return []
+    posts = [{**p} for p in st["club"].get("posts", [])]
+    today = club_day()
+    for m in v["members"]:
+        if m["vm"] is None:
+            continue
+        for d in range(max(club_day(m["joined"]), today - 6), today + 1):
+            r = random.Random(f"board:{m['id']}:{d}")
+            if r.random() < 0.12:
+                at = d * 86400 - WIB + r.randint(9, 23) * 3600
+                if at < time.time():
+                    posts.append({"_id": f"{m['id']}x{d}", "coachid": m["id"], "name": m["name"],
+                                  "message": club_line(m["vm"], "board", f"board:{m['id']}:{d}"), "at": at})
+    posts.sort(key=lambda p: -p["at"])
+    return [{"_id": p["_id"], "name": p["name"], "message": p["message"], "createdat": w3c(p["at"])} for p in posts[:50]]
+
+
+def ep_club_posts(query, body):
+    return _json(club_board(_state()))
+
+
+def ep_club_post(pid, query, body):
+    """POST /club/me/post/ {msg}: my post on the board; DELETE /club/me/post/<id>: one of mine gone."""
+    req = json.loads(body or b"{}")
+    st = _state()
+    c = st.get("club")
+    if not c:
+        return _json({"result": False, "reason": "invalid request"})
+    if REQUEST["method"] == "DELETE":
+        c["posts"] = [p for p in c.get("posts", []) if p["_id"] != pid]
+    else:
+        text = str(req.get("msg") or req.get("message") or "")[:200]
+        if not text:
+            return _json({"result": False, "reason": "invalid request"})
+        coach = my_coach(st)
+        c.setdefault("posts", []).append({"_id": os.urandom(12).hex(), "coachid": coach["_id"], "name": coach["name"],
+                                          "message": text, "at": time.time()})
+        c["posts"] = c["posts"][-30:]
+        club_earn(st, "CLUB_BOARD", "Club_Board")
+    return club_reply(st)
+
+
+def ep_contact_club(query, body):
+    """GET /contact/club {members}: the chat window's Klub member list; their presence follows as
+    /presence/<id> pushes (now, and from presence_loop on change)."""
+    st = _state()
+    v = club_view(st)
+    members = [m for m in (v["members"] if v else []) if m["vm"]]
+    threading.Timer(1, lambda: [messenger_push(f"/presence/{m['id']}", {"status": vm_status(m["vm"])}) for m in members]).start()
+    return _json({"members": [{"_id": m["id"], "coachname": m["name"]} for m in members]})
+
+
+def ep_club_record(what, query, body):
+    """GET /club/record/members | opponent | recent | leaderboard (no club matches here)."""
+    st = _state()
+    v = club_view(st)
+    month = int(time.strftime("%Y%m", time.gmtime(time.time() + WIB)))
+    if what == "members":
+        mine = coach_me(st, _default_slot(st))["summary"].get("ovr") or {}
+        rows = [{"coachid": m["id"], "name": m["name"], "level": m["level"], "grade": m["grade"], "ranking": i + 1,
+                 "ovr": vm_ovr(m["id"]) if m["vm"] else {k: mine.get(k, 0) for k in ("FW", "MF", "DF")},
+                 "statistics": {"friendly": {"recent": {"wins": 0, "forfeitwins": 0}}}} for i, m in enumerate(v["members"] if v else [])]
+        return _json({"month": month, "members": rows})
+    if what == "leaderboard":
+        clubs = sorted(ai_clubs_now().values(), key=lambda c: -club_points(st, c, None)[1])
+        return _json({"month": month, "leaderboardlist": [
+            {"clubid": c["_id"], "clubname": c["name"], "level": club_level(club_points(st, c, None)[0])[0], "rank": i + 1,
+             "wins": 0, "forfeitwins": 0, "totalwins": 0, "totalforfeitwins": 0, "total": 0, "wp": 0} for i, c in enumerate(clubs)]})
+    return _json({"month": month, "opponentrecords": [], "recentmatches": []})
+
+
+def club_id(st):
+    """My club's id for /coach/me club.clubid (None: in no club)."""
+    c = st.get("club") or {}
+    return c.get("ai") or c.get("_id")
+
+
+def ep_rank_club(query, body):
+    """GET /rank/teamvalue/club: Peringkat manajer's club tab, my club's members and me."""
+    v = club_view(_state())
+    return ep_rank_friends(query, body, [m["vm"] for m in v["members"] if m["vm"]]) if v else _json([])
+
+
+# --------------------------------------------------------------------------- #
+# King of the Hill (issue #36: "King of the Hill Mode Cannot Be Started"): the Esports
+# "Grassroot" Regional League (RegionalLeagueController / Proxy; room type esports2, match type
+# Regional_League). RegionalLeagueProxy starts only with features.esports.regionalleague (without
+# it the main screen said "Musim sedang tidak aktif"); then GET /esports2/region/seasons/presently
+# {seasons, regiongrouptrees, prev}: the season with startdt <= now < enddt (local dates
+# "YYYYMMDD") is current, one a month here, open all day ("0000".."2400"). Its regiongroup.id
+# names the region tree {major: {id, name, rewardgroupid, children {id: {id, name, parent}}}}.
+# I pick a region (POST /esports2/region/register {regiongroupid = the region}), its board is GET
+# /esports2/region/leaderboard/<region> (an array of {cid, name, elo, wins, losses}: the virtual
+# managers there on their KOTH rating, ladder index KOTH_LADDER, which the Rank screens never
+# show). /coach/me statistics.esports2 {seasonid, regionid (only once registered: isInSeason
+# reads hasOwnProperty), introid (= the season once its intro was left: PUT
+# /esports2/region/intro), elo, wins, losses, ...; rewarded true and midrewarded [] keep the
+# reward screen away}. CoachProxy grades that elo with /static/db/ESPORTS2_BALANCING_DEFAULT
+# synchronously, so GET /static/initialize preloads it (an async null was a TypeError inside
+# onChangeCoachMeResource: the black FREEROAM). Mulai: POST /room {type esports2}, matchmaking,
+# then the Rank path (ladder_match, the one-user session) against a manager of my region near my
+# rating; the result moves my KOTH rating (Elo) and fills the reward screen's "Poin Divisi" box
+# (match.reward preveloinfo / eloinfo). No weekly or season reward items.
+# --------------------------------------------------------------------------- #
+KOTH_GROUP, KOTH_LADDER = "1", 5
+KOTH_REGIONS = (("1", "Sumatera", (("101", "Medan"), ("102", "Padang"), ("103", "Palembang"), ("104", "Pekanbaru"))),
+                ("2", "Jawa", (("201", "Jakarta"), ("202", "Bandung"), ("203", "Semarang"), ("204", "Yogyakarta"),
+                               ("205", "Surabaya"), ("206", "Malang"))),
+                ("3", "Kalimantan", (("301", "Pontianak"), ("302", "Balikpapan"), ("303", "Banjarmasin"))),
+                ("4", "Sulawesi", (("401", "Makassar"), ("402", "Manado"))),
+                ("5", "Bali Nusra", (("501", "Denpasar"), ("502", "Mataram"))),
+                ("6", "Maluku Papua", (("601", "Ambon"), ("602", "Jayapura"))))
+KOTH_LEAVES = {sid: (name, mid, mname) for mid, mname, subs in KOTH_REGIONS for sid, name in subs}
+KOTH_GOALS = {"weekly_winning_reward_condition": 10, "weekly_match_reward_condition": 20,
+              "weekly_grade_reward_condition": 20, "season_grade_reward_condition": 50}  # the head tab's gauges
+
+
+def vm_region(vid):
+    return random.Random("region" + vid).choice(sorted(KOTH_LEAVES))
+
+
+def koth_season(sid):
+    y, m = divmod(sid, 100)
+    ny, nm = (y + m // 12, m % 12 + 1)
+    divs = len(ladder_divisions())
+    return {"_id": str(sid), "title": f"King of the Hill {m:02d}/{y}",
+            "schedule": {"startdt": f"{y}{m:02d}01", "enddt": f"{ny}{nm:02d}01", "week": [True] * 7, "midreward": [],
+                         "weekdays": {"starttime": "0000", "endtime": "2400"}, "weekend": {"starttime": "0000", "endtime": "2400"}},
+            "regiongroup": {"id": KOTH_GROUP}, "scale": {"medium": 30, "large": 60, "exlarge": 100},
+            "condition": {"autoreg": False, "regonlyigr": False, "playonlyigr": False},
+            "reward": {"popup": False, "config": KOTH_GOALS,
+                       "week": {"type": "winning", "win": [], "match": [], "grade": [[] for _ in range(divs)]},
+                       "season": {"grade": {"1": [[] for _ in range(divs)]},
+                                  "ranking": {"1": {"normal": [], "medium": [], "large": [], "exlarge": []}}}}}
+
+
+def koth_sid():
+    """This King of the Hill season: the WIB month (the client picks the season by its own date)."""
+    return ladder_season(time.time() + WIB)[0]
+
+
+def ep_koth_presently(query, body):
+    sid = koth_sid()
+    nxt = sid + 1 if sid % 100 < 12 else sid + 89
+    # keyed by name: the region pickers list the keys (RegionalLeagueProxy.mainRegionList / subRegionList)
+    tree = {mname: {"id": mid, "name": mname, "rewardgroupid": 1,
+                    "children": {n: {"id": s, "name": n, "parent": mname} for s, n in subs}} for mid, mname, subs in KOTH_REGIONS}
+    return _json({"seasons": [koth_season(sid), koth_season(nxt)], "regiongrouptrees": {KOTH_GROUP: tree}, "prev": []})
+
+
+def my_koth(st, coach=None):
+    """My KOTH record of this season {sid, regionid, introid, elo, wins, draws, losses, streak,
+    week, weekwins, weekgames}: a new month starts at the start rating in the same region."""
+    sid = koth_sid()
+    r = (coach or my_coach(st)).setdefault("es2", {})
+    if r.get("sid") != sid:
+        r.update(sid=sid, elo=LADDER_START, wins=0, draws=0, losses=0, streak=0, introid="")
+    week = time.strftime("%G%V", time.gmtime())
+    if r.get("week") != week:
+        r.update(week=week, weekwins=0, weekgames=0)
+    return r
+
+
+def koth_board(st, region):
+    """[(elo, wins, losses, id, name)] of a region (a major one: all of its own), best first: its
+    virtual managers, and me."""
+    within = lambda leaf: leaf == region or (KOTH_LEAVES.get(leaf) or (0, 0))[1] == region
+    rows = [(m["elo"][KOTH_LADDER], m["wins"][KOTH_LADDER], m["losses"][KOTH_LADDER], m["_id"], m["name"])
+            for m in virtual_managers() if within(vm_region(m["_id"]))]
+    r, coach = my_koth(st), my_coach(st)
+    if within(r.get("regionid")):
+        rows.append((r["elo"], r["wins"], r["losses"], coach["_id"], coach["name"]))
+    return sorted(rows, key=lambda x: (-x[0], -x[1], x[3]))
+
+
+def koth_statistics(st, coach):
+    r = my_koth(st, coach)
+    # seasonid only once a region is picked: the main screen shows its "pick a region" panel while
+    # the season is not mine (isCurrentSeasonRegistered), and Mulai Laga needs regionid too
+    out = {"seasonid": str(r["sid"]) if r.get("regionid") in KOTH_LEAVES else "", "introid": r.get("introid", ""),
+           "elo": r["elo"], "wins": r["wins"],
+           "losses": r["losses"], "forfeits": 0, "midwins": r["weekwins"], "midmatches": r["weekgames"],
+           "rank": 0, "rewarded": True, "midrewarded": []}
+    if r.get("regionid") in KOTH_LEAVES:
+        name, _, parent = KOTH_LEAVES[r["regionid"]]
+        out.update(regionid=r["regionid"], regionname={"name": name, "parent": parent})
+        if coach is my_coach(st):
+            out["rank"] = next(k for k, x in enumerate(koth_board(st, r["regionid"]), 1) if x[3] == coach["_id"])
+    return out
+
+
+def ep_koth_register_counts(sid, query, body):
+    """GET /esports2/region/register/<season>: players per region (the region picker shows them)."""
+    count = collections.Counter(vm_region(m["_id"]) for m in virtual_managers())
+    r = my_koth(_state())
+    if r.get("regionid"):
+        count[r["regionid"]] += 1
+    return _json({"result": True, "registeredplayer": {k: count[k] for k in KOTH_LEAVES}})
+
+
+def ep_koth_register(query, body):
+    """POST /esports2/region/register {regiongroupid}: my region for the season (and after)."""
+    region = str(json.loads(body or b"{}").get("regiongroupid") or "")
+    if region not in KOTH_LEAVES:
+        return _json({"result": False, "reason": "Esports_Grassroot_RegionSelect_Fail"})
+    st = _state()
+    my_koth(st)["regionid"] = region
+    _save(st)
+    return _json({"result": True, "resources": coach_me_resources(st, _default_slot(st))})
+
+
+def ep_koth_intro(query, body):
+    """PUT /esports2/region/intro {seasonid}: the intro was left; the menu opens the main screen."""
+    st = _state()
+    my_koth(st)["introid"] = str(json.loads(body or b"{}").get("seasonid") or koth_sid())
+    _save(st)
+    return _json({"result": True, "resources": coach_me_resources(st, _default_slot(st))})
+
+
+def ep_koth_leaderboard(region, query, body):
+    return _json([{"cid": i, "name": n, "elo": e, "wins": w, "losses": l} for e, w, l, i, n in koth_board(_state(), region)[:100]])
+
+
+def koth_opponent(st):
+    """One of the five managers of my region nearest my KOTH rating (anyone if the region has none)."""
+    r = my_koth(st)
+    pool = [m for m in virtual_managers() if vm_region(m["_id"]) == r.get("regionid")] or virtual_managers()
+    return random.choice(sorted(pool, key=lambda m: abs(m["elo"][KOTH_LADDER] - r["elo"]))[:5])
+
+
+def koth_record(st, vm, mine, theirs, sh, sa):
+    """A KOTH result: my rating moves (Elo, K 32), the record and the multiplay list count it;
+    (rating before, rating after, streak) for the reward screen."""
+    r = my_koth(st)
+    score = 1 if (mine, sh) > (theirs, sa) else 0 if (mine, sh) < (theirs, sa) else 0.5
+    old = r["elo"]
+    expect = 1 / (1 + 10 ** ((vm["elo"][KOTH_LADDER] - old) / 400))
+    r["elo"] = max(LADDER_START, round(old + LADDER_K * (score - expect)))
+    r[{1: "wins", 0: "losses", 0.5: "draws"}[score]] += 1
+    r["streak"] = (max(r["streak"], 0) + 1 if score == 1 else min(r["streak"], 0) - 1 if score == 0 else 0)
+    r["weekgames"] += 1
+    r["weekwins"] += score == 1
+    multiplay_add(st, "Regional_League", vm, mine, theirs, sh, sa)
+    return old, r["elo"], r["streak"]
+
+
+# Multiple > Exhibition (see the Live Center note by its ENDPOINTS)
+EXHIBITION_PLAYS = 5
+EXHIBITION_TEAMS = tuple(VM_TOP_CLUBS[:8])
+
+
+def exhibition_played(st, add=0):
+    """Exhibition matches I played today (WIB)."""
+    r = my_coach(st).setdefault("exhibition", {})
+    if r.get("day") != today_wib():
+        r.update(day=today_wib(), played=0)
+    r["played"] += add
+    return r["played"]
+
+
+def ep_exhibition_room(query, body):
+    """POST /exhibition/room: my Exhibition room, my side on the first recommended club."""
+    st = _state()
+    if exhibition_played(st) >= EXHIBITION_PLAYS:
+        return _json({"result": False, "reason": "the point is not enough"})
+    ep_room(query, json.dumps({**json.loads(body or b"{}"), "type": "pvp_exhibition"}).encode())
+    st = _state(); room = st["room"]
+    room["side"]["left"]["authTeamId"] = EXHIBITION_TEAMS[0]
+    _save(st)
+    return ladder_room_reply(room)
+
+
+def _room_team(st, room, req):
+    """POST /exhibition/room/<id>/team {teamid, side}: the club that side plays."""
+    side, teamid = req.get("side"), int(req.get("teamid") or 0)
+    if side not in ("left", "right") or not roster(teamid)["team"]["players"]:
+        return _json({"result": False, "reason": "invalid team"})
+    room["side"][side]["authTeamId"] = teamid
+    room["side"]["left"]["ready"] = False
+
+
 ROUTES = [
     (re.compile(r"/item/(\w+)/use"), ep_item_use),
     (re.compile(r"/item/draftpack/(\d+)/players/(\d+)"), ep_draftpack_players),
@@ -7449,24 +8552,41 @@ ROUTES = [
     # GET /game/inweburl/<notice|webevent|cookie|vip_purchase|...> {url}: StartupNoticeScreen
     # .onReceivedNoticeUrl hands url straight to native LoadWebAddress, and a missing one (the
     # old "{}") is a NULL string there -> crash on the manager select screen whenever the notice
-    # popup opens. Garena's pages are gone: an empty page.
-    (re.compile(r"/game/inweburl/(\w+)"), lambda name, q, b: _json({"result": True, "url": "about:blank"})),
+    # popup opens. Garena's pages are gone: an empty page, or for the notice the admin page's picture.
+    (re.compile(r"/game/inweburl/(\w+)"), lambda name, q, b: _json({"result": True, "url": notice_url() if name == "notice" else "about:blank"})),
     (re.compile(r"/match/([0-9a-f]{9,24})"), ep_match_get),
     (re.compile(r"/league2/sponsor/(\d+)"), ep_l2_sponsor),
     (re.compile(r"/cup/([0-9a-f]{24})/match"), ep_cup_match),
     (re.compile(r"/cup/([0-9a-f]{24})/next"), ep_cup_next),
     (re.compile(r"/cup/([0-9a-f]{24})/(?:resume|test)"), ep_cup_resume),
     (re.compile(r"/cup/([0-9a-f]{24})/leave"), ep_cup_leave),
-    (re.compile(r"/cup/([0-9a-f]{24})"), lambda cupid, q, b: _json((_state().get("cups") or {}).get(cupid, {}))),
+    (re.compile(r"/cup/([0-9a-f]{24})"), lambda cupid, q, b: _json(next(
+        (r["body"] for c in [(_state().get("cups") or {}).get(cupid)] if c for r in cup_resources(c)), {}))),
     # the ladder room (RoomController paths under /room/<id>) and its AI picker (RoomProxy
     # StaticData.fetch "SORT" + NATION | LEAGUE | TEAM, id): one list of ids each
     (re.compile(r"/room/\d+/matchmaking"), ep_matchmaking),
     (re.compile(r"/room/\d+/back"), ep_room_back),
+    (re.compile(r"/room/\d+/type"), room_change(_room_type)), (re.compile(r"/room/\d+/AI"), room_change(_room_ai)),
+    (re.compile(r"/room/\d+/side/(\w+)/ready"), room_change(_room_ready)),
+    (re.compile(r"/room/\d+/leave"), room_change(_room_leave)), (re.compile(r"/room/\d+/invite/(\w+)"), room_change(_room_invite)),
+    (re.compile(r"/room/\d+/[\w/]+"), room_change(lambda st, room, req: None)),  # slotsize, drawmode, ...: as it is
     (re.compile(r"/static/db/SORTLEAGUE/(\d+)"), lambda n, q, b: _json(json.loads(ep_sortleague(q, b)[1]).get(n, []))),
     (re.compile(r"/static/db/SORTTEAM/(\d+)"), lambda l, q, b: _json(json.loads(ep_sortteam(q, b)[1]).get(l, []))),
     (re.compile(r"/staff/recruit/(\d+)"), ep_staff_recruit), (re.compile(r"/staff/appoint/(\w+)"), ep_staff_appoint),
     (re.compile(r"/staff/study/(\w+)/complete"), ep_staff_study_complete), (re.compile(r"/staff/study/(\w+)"), ep_staff_study),
     (re.compile(r"/staff/enhance/(\w+)"), ep_staff_enhance), (re.compile(r"/staff/([0-9a-f]{24})"), ep_staff_fire),
+    (re.compile(r"/exhibition/room/\d+/team"), room_change(_room_team)),  # Exhibition
+    (re.compile(r"/exhibition/info/authentic/team/(\d+)"), lambda t, q, b: ep_authentic_team("all", t, q, b)),
+    (re.compile(r"/esports2/region/register/(\w+)"), ep_koth_register_counts),  # King of the Hill
+    (re.compile(r"/esports2/region/leaderboard/(\w+)"), ep_koth_leaderboard),
+    # Komunitas > Klub (issue #36); /club/me, /club/find, ... are ENDPOINTS
+    (re.compile(r"/club/fee/expansion/(\d+)"),
+     lambda n, q, b: _json({"fee": CLUB_EXPAND_FEE, "newLimit": min(int(n) + CLUB_EXPAND, CLUB_LIMIT_MAX)})),
+    (re.compile(r"/club/me/member/exclude/(\w+)"), ep_club_exclude), (re.compile(r"/club/me/member/(\w+)"), ep_club_member),
+    (re.compile(r"/club/me/join/(\w+)"), ep_club_request), (re.compile(r"/club/me/expand/(\d+)"), ep_club_expand),
+    (re.compile(r"/club/me/settings/(description|news|allowjoin|skipjudgement|color)(?:/(\w+))?"), ep_club_settings),
+    (re.compile(r"/club/me/post/(\w*)"), ep_club_post), (re.compile(r"/club/record/(\w+)"), ep_club_record),
+    (re.compile(r"/club/(\w+)/join"), ep_club_join), (re.compile(r"/club/(\w+)"), ep_club_get),
 ]
 
 
@@ -7495,8 +8615,35 @@ ENDPOINTS.update({"/ladder/leaderboard": ep_ladder_leaderboard, "/ladder/friends
                   "/room": ep_room, "/matchmaking": ep_matchmaking})
 ENDPOINTS["/coaches"] = ep_coaches
 ENDPOINTS["/coach/me"] = ep_coach_me
+# Multiple > Live Center (issue #36): its front screen read these unguarded, and {} gave two UI
+# error popups (EXHIBITIONMATCH entrycondition.NORMAL_use, fixture curr.length). No live matches.
+# Exhibition: EXHIBITION_PLAYS a day (/exhibition/info/points {point = played, maxpoint}; the button
+# is on while plays are left). Its room (POST /exhibition/room, type pvp_exhibition) puts a licensed
+# club on each side (side.<side>.authTeamId; the room's arrows walk recommendteams, "all teams"
+# picks any: POST /exhibition/room/<id>/team {teamid, side}); the opponent is a friend invited from
+# the list (a virtual manager, who joins with a club of his own and is ready), then my Ready plays
+# Exhibition_PvP on the Rank path (ladder_match), each side the club's own squad, no team colors
+# or staff; a squad change goes to that club (ep_match_squad).
+ENDPOINTS.update({
+    "/static/db/EXHIBITIONMATCH": lambda q, b: _json({"entrycondition": {"NORMAL_use": True, "IGR_use": False, "VIP_use": False},
+                                                      "recommendteams": list(EXHIBITION_TEAMS),
+                                                      "staticvalues": {k: EXHIBITION_PLAYS for k in ("Normal_count", "IGR_count", "VIP1_count")}}),
+    "/exhibition/info/points": lambda q, b: _json({"point": exhibition_played(_state()), "maxpoint": EXHIBITION_PLAYS}),
+    "/exhibition/room": ep_exhibition_room,
+    "/livematch/info/fixture": lambda q, b: _json({"prev": [], "curr": [], "remainedsecs": 86400})})
+ENDPOINTS.update({  # King of the Hill (issue #36)
+    "/static/initialize": lambda q, b: _json({"resources": [
+        {"uri": "/static/db/ESPORTS2_BALANCING_DEFAULT", "body": {"divisions": ladder_divisions()}}]}),
+    "/static/db/ESPORTS2_BALANCING_DEFAULT": lambda q, b: _json({"divisions": ladder_divisions()}),
+    "/esports2/region/seasons/presently": ep_koth_presently, "/esports2/region/igrregion": lambda q, b: _json({"result": True}),
+    "/esports2/region/register": ep_koth_register, "/esports2/region/intro": ep_koth_intro})
+ENDPOINTS.update({"/club/fee/creation": lambda q, b: _json({"fee": CLUB_FEE}), "/club/create": ep_club_create,
+                  "/club/me": ep_club_me, "/club/find": ep_club_find, "/club/me/members": ep_club_members,
+                  "/club/me/member/leave": ep_club_leave, "/club/me/join/requests": ep_club_requests,
+                  "/club/me/posts": ep_club_posts, "/club/me/message": ep_club_message,
+                  "/club/me/delete/cancel": ep_club_undelete, "/contact/club": ep_contact_club})
 ENDPOINTS.update({"/coach/me/teamvalue/history": ep_tv_history, "/rank/teamvalue/friend": ep_rank_friends,
-                  "/rank/teamvalue/club": lambda query, body: _json([]), "/coach/me/hiderank": ep_hiderank,
+                  "/rank/teamvalue/club": ep_rank_club, "/coach/me/hiderank": ep_hiderank,
                   "/coach/me/profile": ep_coach_profile})
 ENDPOINTS.update({"/achievement/me": ep_achievement_me, "/static/info/ACHIEVEMENT": ep_static_achievement,
                   "/static/db/BADGES": ep_badges, "/static/db/ITEMNAMES": ep_itemnames, "/static/info/request": ep_quest_bank,
@@ -7611,6 +8758,12 @@ class H(http.server.BaseHTTPRequestHandler):
             try:
                 with STATE_LOCK:
                     note_activity()
+                    REQUEST["method"] = self.command
+                    if b'"_method"' in body:
+                        try:
+                            REQUEST["method"] = str(json.loads(body).get("_method") or self.command).upper()
+                        except (ValueError, AttributeError):
+                            pass
                     ctype, data = from_file(path) or (ENDPOINTS.get(path) or route(path) or fallback)(query, body)
             except Exception:
                 # an empty reply is a curl error and the client quits (CLIENT_CLOSE); answer
@@ -7648,11 +8801,10 @@ if __name__ == "__main__":
     if not os.path.isdir(os.path.join(ASSETS, "externalAssets")):
         print(f"WARNING: no client cache at {ASSETS}: crests, faces and shop images will show the "
               "game's defaults. Set FO3_GAME to your FO3 ID folder (or FO3_ASSETS).", flush=True)
-    admin_port = int(os.environ.get("FO3_ADMIN_PORT", "8088"))  # 0 = no admin page
-    if admin_port:
+    if ADMIN_PORT:
         import admin
-        admin.start(sys.modules[__name__], admin_port)
-        print(f"admin page on http://127.0.0.1:{admin_port}/", flush=True)
+        admin.start(sys.modules[__name__], ADMIN_PORT)
+        print(f"admin page on http://127.0.0.1:{ADMIN_PORT}/", flush=True)
     threading.Thread(target=warm_packs, daemon=True, name="packs").start()
     threading.Thread(target=presence_loop, daemon=True, name="presence").start()
     threading.Thread(target=market_loop, daemon=True, name="market").start()

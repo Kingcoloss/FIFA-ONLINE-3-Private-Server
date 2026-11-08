@@ -1,4 +1,4 @@
-[![SEASON UPGRADE 25, 26](docs/season-upgrade-25-26.svg)](https://www.mediafire.com/file/7yteho45esxfnu8/FO3ID-Season-25-26-LIVE-client.rar/file)
+[![SEASON UPGRADE 25, 26, WC18](docs/season-upgrade-25-26-wc18.svg)](https://www.mediafire.com/file/505f9vtgtkfu69w/FO3ID-Season-25-26-LIVE-WC18-client.rar/file)
 
 # FO3ID Private Server
 
@@ -6,7 +6,7 @@
 
 > 本文译自 [README.md](README.md)。如有出入，以 README.md 为准。
 
-**新增：** FIFA Online 4 的 25 LIVE 和 26 LIVE 球员卡作为两个新赛季（属性按 +0 计，使用 FO4 的特性和赛季徽章），26 LIVE 为默认赛季。见 `tools/fo4_season.py`。
+**新增：** FIFA Online 4 的 25 LIVE 和 26 LIVE 球员卡作为两个新赛季（属性按 +0 计，使用 FO4 的特性和赛季徽章），26 LIVE 为默认赛季；另有 WC18：2018 世界杯大名单中最好的 300 名球员（+1 时每张卡为其赛事最终评分 - 5）。见 `tools/fo4_season.py`。
 
 这是 **FIFA Online 3 印尼版**（Garena，客户端版本 654420）的本地私服，用 Python 编写。Garena 已于
 2020-06-30 关闭官方服务器；本项目重新实现了客户端所连接的后端，让游戏可以在一台电脑上离线游玩。
@@ -206,6 +206,30 @@
   道具，例如 Top 300、Top 100 和 Best 卡包、联赛 65+ 与 GK 65+ 卡包、联赛模拟券、换队券以及经验胶囊。奖励放进背包
   （"Hadiah naik level Lv.N"）；赛后界面会在升级弹窗中显示，信息图标会列出之后几级的奖励。服务器用不到的 FO3 道具
   （教练包、Red Ball、更衣室和奖励加成券、经验转移）不发放。EP 奖励随经济页的球员价格变化。
+- **俱乐部**（issue #36）：Klub 可以用了。可以自己创建俱乐部（10,000 EP；"Klub telah dibuat" 之后的 "Konfirmasi"
+  不再一直是灰色），也可以加入由虚拟经理经营的 60 个 AI 俱乐部之一，每个俱乐部都有会长、成员、等级、简介和新闻。
+  没有俱乐部的经理会申请加入你的俱乐部（Manajemen > permohonan；俱乐部设为无需审核即可加入时会直接加入）。
+  成员按各自的上线时段在线，积累活跃点数，在留言板发帖，并在聊天窗口的 Klub 标签页里聊天：回复你的问候和消息，
+  欢迎新成员，为你的比赛结果祝贺或打气，使用的是管理后台设定的聊天语言（印尼语、英语、越南语）。
+  每周的俱乐部点数会带来比赛加成（经理经验、球员经验、EP），你自己一天攒满 30 点时会往背包发 1,000 EP。尚未实现：
+  俱乐部比赛、俱乐部设施和俱乐部排名。
+- **与 AI 的友谊赛**（issue #36）：Multiple > Persahabatan 的按钮又出现了。Quick match 和 Random match
+  会为你找到一位虚拟经理；自建房间可以打 vs COM（AI 选择器中选的俱乐部和等级，Amateur 到 Legendary），
+  也可以和你从列表中邀请的好友比赛。结果在 Info Manager 中计为友谊赛，不计入排位评分，对手也会像在排位中那样聊天。
+- **King of the Hill**（issue #36）：Esports 地区联赛每月一个赛季。从印尼的 19 个地区中选一个；
+  该地区的排行榜由当地的虚拟经理组成，按下 Mulai 会与其中一位评分接近你的 King of the Hill 评分的经理比赛。
+  奖励界面会显示赢得或失去的点数。每周和赛季奖励道具暂时还没有。
+- **登录公告图片**（issue #36）：管理后台的 Pengumuman（公告）页可以为登录时的"公告"弹窗上传 JPG 或 PNG 图片（适配
+  800×720 的弹窗，带预览），也可以删除它。
+- **在管理后台下载缺失的图片**（issue #36）：Aset（图片）页会在后台从 fifaaddict.com 下载缺失的球员头像、
+  俱乐部队徽、联赛标志和教练照片（一次一种；可随时停止、随时继续）。它运行的是 `tools/fa_faces.py`，
+  该工具现在也支持 `--leagues`。比赛设置界面的 "Default ball" 会显示 EA SPORTS 的球，小国旗改用大国旗图片，
+  Cup 界面也有了奖杯和皮肤。
+- **使用语言包时的奖励名称**（issue #36）：使用越南语语言包时，成就列表的每个奖励前都显示 "undefined"，还会出现
+  UI 错误，因为服务器只用印尼语和韩语给奖励道具命名。现在客户端的每种语言都有名称了。
+- **与 AI 进行 Exhibition**（issue #36）：Multiple > Exhibition 可以开房了。用箭头或 Pilih Team 选择授权俱乐部，
+  从列表邀请好友（虚拟经理，会带着自己选的俱乐部加入并立即准备），然后按 Siap，用两家俱乐部的真实阵容比赛。
+  每天 5 场；你的球员卡不会从这些比赛获得 EXP。Live Center 打开时不再出现那两个 UI 错误。
 - **教练团队（Staff）**（Tim > Manajemen Staff）：FO3 的教练系统重新启用。*Rekrut*（招募）：用 EP 购买教练包
   （Basic FW / MF / DF / GK / ALL、Pro、Premium、技术总监、Premium 体能），每天登录可免费领取一个 ALL 包，再踢
   3 场比赛可再领一个。*Staff yang dimiliki*（已有教练）：7 个职位框（FW、MF、DF、主教练、GK、体能教练、技术总监）；
@@ -242,7 +266,7 @@
 `tools/re/ealayer3.py`）、以及替换 TrackID 1 且音乐库比原版更小的 EALayer3，都会同样崩溃，所以原因不是
 音乐大小。请使用游戏自带的音乐：`python -I tools/eatrax_song.py --restore` 可以恢复。
 
-尚未实现：与其他玩家的在线对战（排位 PvP、友谊赛、King of the Hill）、Road to World、联赛模拟。
+尚未实现：与其他玩家的在线对战（排位 PvP、友谊赛、King of the Hill、俱乐部比赛）、Road to World、联赛模拟。
 
 ## 运行需求
 
@@ -288,7 +312,7 @@
 | `gen_teams.py` | 根据 `gamedata/fifadb.sqlite` 生成初始阵容和俱乐部概要。 |
 | `tools/eatrax_song.py` | 把一首歌以 EALayer3 格式放到 EA Trax 菜单音乐的第一首，替换 TrackID 1（以追加方式修改 `data_0.big` / `data_1.big`；`--restore` 恢复原文件）。会导致比赛后崩溃，见已知问题。 |
 | `tools/fa_sync.py` | 同步 fifaaddict.com 价格。 |
-| `tools/fo4_season.py` | 把 FIFA Online 4 的 26 LIVE 和 25 LIVE 球员卡（fifaaddict 数据，属性按 +0 计）加为两个新赛季，使用 FO4 的赛季徽章：`fetch`、`collect` + `import`、`build`、`install`（就地改写 `data_0.big` 中的条目，因为它的大小不能改变；以追加方式修改 `Label.big` 和 `Module.big`；`restore` 恢复这些文件）。`hud` 只修补 `Module.big`，用于之前已安装赛季的客户端：比赛中的球员名牌以前对所有 2017 和 FO4 球员卡都显示 '17 徽章，现在显示球员卡自己的赛季。 |
+| `tools/fo4_season.py` | 把 FIFA Online 4 的 26 LIVE 和 25 LIVE 球员卡（fifaaddict 数据，属性按 +0 计）加为两个新赛季，使用 FO4 的赛季徽章：`fetch`、`collect` + `import`、`build`、`install`（就地改写 `data_0.big` 中的条目，因为它的大小不能改变；以追加方式修改 `Label.big` 和 `Module.big`；`restore` 恢复这些文件）。`hud` 只修补 `Module.big`，用于之前已安装赛季的客户端：比赛中的球员名牌以前对所有 2017 和 FO4 球员卡都显示 '17 徽章，现在显示球员卡自己的赛季。`wc18` 为 `build` 读取 2018 世界杯大名单中最好的 300 名球员（futwiz 的 FIFA 18 世界杯评分，维基百科的大名单和俱乐部）：赛季 WC18（代码 78），+1 时卡面评分为世界杯评分 - 5，徽章是与 FO3 自己的世界杯徽章同款绿色的“18”；球队颜色为“2018 WC All-Star”（赛季）和“18 WC <国家>”（各国球员卡），特性取自球员的 FO3 卡和 FIFA 18 卡。 |
 | `tools/fa_faces.py` | 补充客户端缓存中缺少的球员小头像（fifaaddict 提供同样的 128x128 PNG）；`--crests` 补充缺少的俱乐部队徽（大多数俱乐部在缓存中没有，游戏会显示默认队徽）；`--staffs` 补充教练照片（缓存中只有服务器发放的 71 名教练中的 7 张）。可断点续传，`--remove` 撤销。 |
 | `tools/draft_icons.py` | 绘制选秀卡包的商店图标（客户端缓存里没有选秀图片），保存到 `assets/externalAssets/shop/`，服务器优先提供这些图片；`<icon> <tag> <picks>` 可再画一个，用于管理页面创建的卡包。需要 Pillow。 |
 | `tools/re/` | 逆向工程辅助工具：`bigdir.py`（BIg4 归档表）、`refpack.py`（RefPack 编解码）、`eadb.py`（EA "DB" 数据库表）、`abc*.py`（AS3 字节码解析 / 搜索 / 结构挖掘）、`gfxx.py`（界面 SWF）、`memgrab.py`、`dbwin.py`（客户端调试输出）、`relay_emu.py`（PvP 中继数据包编解码和测试中继）、`gamectl.ps1`（测试时操控客户端窗口）。 |

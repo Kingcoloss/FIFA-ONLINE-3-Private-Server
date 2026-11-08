@@ -14,11 +14,14 @@ crests the game already asked for, then every club with a 2017 squad (the club p
 With --staffs, the staff pictures (staffs/<stfid>.png; user: "boleh download"): the cache has 7 of
 the server's staff, fifaaddict has them all at fo3img/staffs/<its id>.png (its 10xx..40xx and
 9117..9122 are the client's 11xx..41xx and 9500..9505, http_config.STAFF_CATALOGUE).
+With --leagues, the league logos of the league and cup selection screens (league/ca/l<id>.png;
+issue #36: the cache has one) from fifaaddict's fo3img/league/l<id>.png.
 One request every --delay seconds; existing files are never touched; gamedata/fa_faces.json
-(fa_crests.json) records what was added or failed so a rerun resumes, and --remove deletes only
-the added files.
+(fa_crests.json, ...) records what was added or failed so a rerun resumes, and --remove deletes
+only the added files. The admin page's Aset tab runs this in the background; its Stop button
+creates gamedata/assets_fetch.stop, and the run saves its record and quits.
 
-Usage: python -I tools/fa_faces.py [--crests | --staffs] [--delay 0.5] [--limit N] [--remove]
+Usage: python -I tools/fa_faces.py [--crests | --staffs | --leagues] [--delay 0.5] [--limit N] [--remove]
 """
 import argparse, json, os, re, sys, time, urllib.request
 
@@ -31,7 +34,9 @@ EXT = os.path.join(hc.ASSETS, "externalAssets")
 FA = "https://fifaaddict.com/fo3img/"
 MANIFESTS = {"faces": os.path.join(ROOT, "gamedata", "fa_faces.json"),
              "crests": os.path.join(ROOT, "gamedata", "fa_crests.json"),
-             "staffs": os.path.join(ROOT, "gamedata", "fa_staffs.json")}
+             "staffs": os.path.join(ROOT, "gamedata", "fa_staffs.json"),
+             "leagues": os.path.join(ROOT, "gamedata", "fa_leagues.json")}
+STOP = os.path.join(ROOT, "gamedata", "assets_fetch.stop")  # admin.ASSET_STOP
 
 
 def _asked(pattern):
@@ -63,6 +68,16 @@ def wanted_crests():
                                          (f"crests/small/s{t}.png", f"{FA}crests/s{t}.png"))]
 
 
+def wanted_leagues():
+    """[(path under externalAssets, url)] of the league logos the league and cup selection screens
+    draw (Enums.EXTERNAL_LEAGUE_CA: league/ca/l<leagueid>.png; issue #36, the cache has one):
+    fifaaddict's fo3img/league/l<id>.png (147x94; the screens fit it to their box). Asked first,
+    then every league with a club the club picker lists."""
+    leagues = [lid for _, ls in hc.club_index() for lid, _ in ls]
+    ids = dict.fromkeys(_asked(r"league/(?:ca|be|fe|vi)/l(\d+)\.png") + leagues)
+    return [(f"league/ca/l{lid}.png", f"{FA}league/l{lid}.png") for lid in ids]
+
+
 def wanted_staffs():
     """[(path under externalAssets, url)] of every staff picture the server can hand out."""
     fa = lambda s: s - 100 if 1100 < s < 4900 else s - 383 if 9500 <= s <= 9505 else s
@@ -73,11 +88,12 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--crests", action="store_true", help="club crests instead of player faces")
     ap.add_argument("--staffs", action="store_true", help="staff pictures instead of player faces")
+    ap.add_argument("--leagues", action="store_true", help="league logos (league and cup selection screens)")
     ap.add_argument("--delay", type=float, default=0.5)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--remove", action="store_true", help="delete the files this tool added")
     a = ap.parse_args(ARGS)
-    kind = "crests" if a.crests else "staffs" if a.staffs else "faces"
+    kind = "crests" if a.crests else "staffs" if a.staffs else "leagues" if a.leagues else "faces"
     manifest = MANIFESTS[kind]
     man = json.load(open(manifest)) if os.path.isfile(manifest) else {"added": [], "failed": {}}
     man = {"added": [_rel(e) for e in man["added"]], "failed": {_rel(k): v for k, v in man["failed"].items()}}
@@ -90,13 +106,20 @@ def main():
         if os.path.isfile(manifest):
             os.remove(manifest)
         return
-    jobs = {"crests": wanted_crests, "staffs": wanted_staffs, "faces": wanted_faces}[kind]()
+    jobs = {"crests": wanted_crests, "staffs": wanted_staffs, "leagues": wanted_leagues, "faces": wanted_faces}[kind]()
     todo = [(rel, url) for rel, url in jobs if not os.path.isfile(os.path.join(EXT, rel)) and rel not in man["failed"]]
     if a.limit:
         todo = todo[:a.limit]
     print(len(todo), kind, "to fetch", flush=True)
+    def save():
+        os.makedirs(os.path.dirname(manifest), exist_ok=True)
+        with open(manifest, "w") as f:
+            json.dump(man, f)
     done = 0
     for i, (rel, url) in enumerate(todo):
+        if os.path.isfile(STOP):
+            print("stopped", flush=True)
+            break
         time.sleep(a.delay)
         req = urllib.request.Request(url, headers={"User-Agent": f"Mozilla/5.0 (FO3 private server {kind} sync)"})
         try:
@@ -112,11 +135,10 @@ def main():
                 f.write(body)
             man["added"].append(rel)
             done += 1
-        if i % 50 == 49 or i == len(todo) - 1:
-            os.makedirs(os.path.dirname(manifest), exist_ok=True)
-            with open(manifest, "w") as f:
-                json.dump(man, f)
+        if i % 10 == 9:
+            save()
             print(f"{i + 1}/{len(todo)} fetched {done}, failed {len(man['failed'])}", flush=True)
+    save()
     print("done:", done, "added,", len(man["failed"]), "failed in total")
 
 
