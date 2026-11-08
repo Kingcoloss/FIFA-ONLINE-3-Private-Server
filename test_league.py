@@ -34,14 +34,17 @@ def main():
         hc.ECONOMY_FILE = os.path.join(tmp, "economy.json"); hc.ECONOMY = dict(hc.ECONOMY_DEFAULT)  # not the live one
         hc.MATCH_REWARD_FILE = os.path.join(tmp, "match_rewards.json")  # default match rewards; admin test writes here
         hc.MISSIONS_FILE = os.path.join(tmp, "missions.json")  # default missions; admin test writes here
-        # the Shop admin part picks shop icons of the FO3 ID client's CDN copy; 3Sea ships none
-        # (fo3conf.ASSETS ""), so stand-in files let it test the server's side alone
-        if not os.path.isdir(os.path.join(hc.ASSETS, "externalAssets", "shop")):
+        # the Shop admin and picture parts use files of the FO3 ID client's CDN copy (shop icons,
+        # ball 6, a big flag); 3Sea ships none (fo3conf.ASSETS ""), so stand-in files let them test
+        # the server's side alone
+        if not os.path.isdir(os.path.join(hc.ASSETS, "externalAssets")):
             hc.ASSETS = os.path.join(tmp, "client_assets")
-            os.makedirs(os.path.join(hc.ASSETS, "externalAssets", "shop"))
-            for name in ("8194", "200005", "ID50071", "ID50121GP", "801"):
-                with open(os.path.join(hc.ASSETS, "externalAssets", "shop", name + ".png"), "wb") as f:
-                    f.write(b"\x89PNG\r\n\x1a\n")
+            for rel in ("shop/8194", "shop/200005", "shop/ID50071", "shop/ID50121GP", "shop/801", "balls/ball_6",
+                        "countries/14"):
+                f = os.path.join(hc.ASSETS, "externalAssets", *rel.split("/")) + ".png"
+                os.makedirs(os.path.dirname(f), exist_ok=True)
+                with open(f, "wb") as fh:
+                    fh.write(b"\x89PNG\r\n\x1a\n")
         # a fresh account through the client's club creation (the live state may hold no manager)
         hc._save({"coaches": [], "defaultcoachid": "", "teams": {}})
         # the 3Sea client asks for the King of the Hill region counts at start-up, before the
