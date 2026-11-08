@@ -15,6 +15,7 @@ Raw captures are written to captures/<port>_<ts>.bin for offline analysis.
 import os, socket, struct, sys, threading, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # find blaze.py under python -I
 import blaze
+import fo3conf
 
 REDIR_PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 28000
 NOTI_PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 28001
@@ -85,7 +86,7 @@ def login_persona_reply(hdr):
 
 def util_preauth_reply(hdr):
     """Tentative Util preAuth reply: client config the lobby reads on entry."""
-    conf = (blaze.enc_string("REGN", "ID")          # region
+    conf = (blaze.enc_string("REGN", fo3conf.REGION)  # region (FO3_REGION)
             + blaze.enc_int("SVER", 1)              # server/config version
             + blaze.enc_int("MAIT", 0))             # maintenance flag
     body = blaze.enc_struct("CONF", conf) + blaze.enc_int("TIME", int(time.time()))

@@ -11,6 +11,8 @@ Usage: start `python server.py` first, then `python test_client.py [port=28000]`
 """
 import socket, sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fo3conf
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import blaze
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 28000
@@ -54,7 +56,7 @@ assert dict(f["SESS"])["BUID"] == 1 and dict(f["SESS"])["DSNM"] == "player"
 hdr, f = exchange(0x0009, 0x0007, 3, blaze.enc_string("CVER", "20200217"))
 print("preAuth reply:", blaze.describe(hdr, b""), f)
 assert hdr["component"] == 0x0009 and hdr["msgtype_name"] == "REPLY" and hdr["msgid"] == 3
-assert dict(f["CONF"])["REGN"] == "ID"
+assert dict(f["CONF"])["REGN"] == fo3conf.REGION
 
 # 4) Authentication loginPersona
 hdr, f = exchange(0x0001, 0x006E, 4, blaze.enc_string("PNAM", "player"))

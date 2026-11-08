@@ -26,6 +26,7 @@ from contextlib import closing
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)  # `python -I` leaves the script dir off sys.path
 import gen_teams
+import fo3conf  # which client (3Sea or FO3 ID), its paths, language, region, bind address
 TLS = "--tls" in sys.argv
 _args = [a for a in sys.argv[1:] if a != "--tls"]
 PORT = int(_args[0]) if _args and _args[0].isdigit() else 8080  # (imported by tools: their own args)
@@ -55,7 +56,7 @@ def ep_server_config(query, body):
     return _json({
         "redirector": {"host": REDIR_HOST, "port": REDIR_PORT},
         "notification": {"host": NOTI_HOST, "port": NOTI_PORT},
-        "region": "ID",
+        "region": fo3conf.REGION,
         "status": "ok",
     })
 
@@ -72,12 +73,14 @@ def ep_locale(query, body):
     return _json({"result": True, "language": LANGUAGE, "url": f"https://APSEODESK172/{CDN_PREFIX}"})
 
 
-LANGUAGE = os.environ.get("FO3_LANGUAGE", "ind")
+LANGUAGE = fo3conf.LANGUAGE  # FO3_LANGUAGE: "tha" for 3Sea, "ind" for FO3 ID
 
 
-GAME = os.environ.get("FO3_GAME", r"D:\FO3ID\32795")  # the FO3 ID client install
-# The client's own downloaded copy of the Garena CDN (externalAssets/...).
-ASSETS = os.environ.get("FO3_ASSETS", os.path.join(GAME, "_cache", "games", "fo3id"))
+GAME = fo3conf.GAME  # the client install (FO3_GAME), read only
+# The client's own downloaded copy of the Garena CDN (externalAssets/...); the 3Sea client has none.
+ASSETS = fo3conf.ASSETS
+# fifadb's licensing and name tables of the client's region and language (permth, namestha for 3Sea)
+PERM, NAMES = fo3conf.PERM_TABLE, fo3conf.NAMES_TABLE
 CDN_PREFIX = "cdn/"
 
 
@@ -116,7 +119,7 @@ def asset_path(rel):
     rel = re.sub(r"^externalAssets/countries/smallFlags/(\d+\.png)$", r"externalAssets/countries/\1", rel)
     other = re.sub(r"crests/(large|small)/", lambda m: f"crests/{'small' if m[1] == 'large' else 'large'}/", rel)
     for r in dict.fromkeys((rel, other)):
-        for root in (OWN_ASSETS, ASSETS):
+        for root in filter(None, (OWN_ASSETS, ASSETS)):  # 3Sea: no client cache
             f = os.path.normpath(os.path.join(root, r))
             if f.startswith(os.path.normpath(root) + os.sep) and os.path.isfile(f):
                 return f
@@ -704,15 +707,31 @@ def client_json(path, name):
 @functools.lru_cache(maxsize=None)
 def ball_names():
     """{ball id: the client's name (BALL_NAME_TYPE<id> in its language pack)} of BALLS."""
-    src = asset_path(LANG_PACK)
-    s = client_json(src, LANG_ENTRY) if src else {}
+    s = client_strings()
     return {b: s.get(f"BALL_NAME_TYPE{b}") or f"Ball {b}" for b in BALLS}
 
 
 @functools.lru_cache(maxsize=None)
+def client_strings():
+    """The client's UI strings in LANGUAGE: the language pack's entry (externalAssets, the FO3 ID
+    cache), else the loose data/ui/external/LANGUAGESTRING_<LANG>.json the 3Sea client ships."""
+    src = asset_path(LANG_PACK)
+    s = client_json(src, LANG_ENTRY) if src else {}
+    if not s:
+        try:
+            with open(os.path.join(GAME, *LANG_ENTRY.split("/")), encoding="utf-8-sig") as f:
+                d = json.load(f)
+            s = d if isinstance(d, dict) else {}
+        except (OSError, ValueError):
+            s = {}
+    return s
+
+
+@functools.lru_cache(maxsize=None)
 def client_stadium_names():
-    """{"<id>": name} of data/ui/localization/STADIUMNAMES_IND.json (Localization.STADIUMNAME)."""
-    return client_json(os.path.join(GAME, "data", "ui", "localization", "ind.big"), "data/ui/localization/STADIUMNAMES_IND.json")
+    """{"<id>": name} of data/ui/localization/STADIUMNAMES_<LANG>.json (Localization.STADIUMNAME)."""
+    return client_json(os.path.join(GAME, "data", "ui", "localization", f"{LANGUAGE}.big"),
+                       f"data/ui/localization/STADIUMNAMES_{LANGUAGE.upper()}.json")
 
 
 # The client's Indonesian strings come from the server at every start (externalAssets/
@@ -721,10 +740,11 @@ def client_stadium_names():
 # 3 (overcast by day, dusk by night). The server serves a copy with LANG_FIXES (built once, again
 # when the original or LANG_FIXES change: LANG_FIXED + ".key"; only those two keys use them).
 # Liga/Cup's screen still shows weather 3 as "Salju": its code reuses the snow label.
-LANG_PACK, LANG_ENTRY = "externalAssets/language_ind.big", "data/ui/external/LANGUAGESTRING_IND.json"
+LANG_PACK = f"externalAssets/language_{LANGUAGE}.big"
+LANG_ENTRY = f"data/ui/external/LANGUAGESTRING_{LANGUAGE.upper()}.json"
 LANG_FIXES = {b'"COMMON_TIME_DAY": "Waktu"': b'"COMMON_TIME_DAY": "Siang"',
-              b'"COMMON_WEATHER_DUSK": "Malam"': b'"COMMON_WEATHER_DUSK": "Mendung"'}
-LANG_FIXED = os.path.join(HERE, "gamedata", "language_ind.big")
+              b'"COMMON_WEATHER_DUSK": "Malam"': b'"COMMON_WEATHER_DUSK": "Mendung"'} if LANGUAGE == "ind" else {}
+LANG_FIXED = os.path.join(HERE, "gamedata", f"language_{LANGUAGE}.big")
 LANG_LOCK = threading.Lock()
 
 
@@ -953,13 +973,13 @@ def price_formula(ovr):
 @functools.lru_cache(maxsize=None)
 def market_spids():
     """Every tradeable card (Market, packs, trades): each one the client's own Market search can
-    show (TransferUtil: permid.transferable = 1 and a namesind row; season 0 = engine cards) plus
+    show (TransferUtil: PERM.transferable = 1 and a NAMES row; season 0 = engine cards) plus
     each one fifaaddict lists. fifaaddict alone left out 6,599 cards, 4,313 of them '17 (user:
     "jangan sampai ada pemain yang tidak ada di pack, trade, dan market"); prices come from the
     rating either way (card_price)."""
     with closing(_db()) as c:
-        own = {s for (s,) in c.execute("""SELECT p.spid FROM players p JOIN permid m ON m.spid = p.spid
-            AND m.transferable = 1 WHERE p.spid >= 1000000 AND p.playerid IN (SELECT playerid FROM namesind)""")}
+        own = {s for (s,) in c.execute(f"""SELECT p.spid FROM players p JOIN {PERM} m ON m.spid = p.spid
+            AND m.transferable = 1 WHERE p.spid >= 1000000 AND p.playerid IN (SELECT playerid FROM {NAMES})""")}
     return frozenset(own | set(fa_prices()))
 
 
@@ -2018,7 +2038,7 @@ def _db():
 def league_teams(leagueid, mine):
     """My club + the strongest clubs of its league in fifadb (base cards, full squads)."""
     with closing(_db()) as c:
-        rows = c.execute("""SELECT p.teamid FROM players p JOIN permid m ON m.spid = p.spid AND m.licensed = 1
+        rows = c.execute(f"""SELECT p.teamid FROM players p JOIN {PERM} m ON m.spid = p.spid AND m.licensed = 1
                             WHERE p.leagueid = ? AND p.spid < 1000000 GROUP BY p.teamid
                             HAVING COUNT(*) >= 16 ORDER BY MAX(p.overallrating) DESC""", (leagueid,)).fetchall()
     return [mine] + [r[0] for r in rows if r[0] != mine][:LEAGUE_SIZE - 1]
@@ -2185,7 +2205,7 @@ def club_index():
     if not _CLUBS:
         with closing(_db()) as c:  # current-season cards + 2017 cards of the players without one
             rows = c.execute(f"""SELECT p.spid, p.leagueid, p.teamid, p.nationalteamid, p.nationality, {POSOVR}
-                                 FROM players p JOIN permid m ON m.spid = p.spid AND m.licensed = 1
+                                 FROM players p JOIN {PERM} m ON m.spid = p.spid AND m.licensed = 1
                                  WHERE p.spid / 1000000 = ?1 OR (p.spid / 1000000 = ?2 AND p.playerid NOT IN
                                        (SELECT playerid FROM players WHERE spid / 1000000 = ?1))""",
                              (gen_teams.CURRENT_SEASON, gen_teams.LEGACY_SEASON)).fetchall()
@@ -2876,7 +2896,7 @@ def ep_cup_list(query, body):
 def cup_pool(metaid, mine):
     """15 AI clubs: the strongest clubs in fifadb (cup 1) or the next tier (cup 2)."""
     with closing(_db()) as c:
-        rows = c.execute("""SELECT p.teamid FROM players p JOIN permid m ON m.spid = p.spid AND m.licensed = 1
+        rows = c.execute(f"""SELECT p.teamid FROM players p JOIN {PERM} m ON m.spid = p.spid AND m.licensed = 1
                             WHERE p.spid < 1000000 GROUP BY p.teamid HAVING COUNT(*) >= 16
                             ORDER BY MAX(p.overallrating) DESC LIMIT 60""").fetchall()
     ids = [r[0] for r in rows if r[0] != mine]
@@ -3444,9 +3464,9 @@ def settle_offers(st, now=None):
 
 @functools.lru_cache(maxsize=4096)
 def card_name(spid):
-    """The card's short name (namesind), as the client shows it."""
+    """The card's short name (NAMES), as the client shows it."""
     with closing(_db()) as c:
-        r = c.execute("SELECT n.short FROM players p JOIN namesind n ON n.playerid = p.playerid WHERE p.spid = ?",
+        r = c.execute(f"SELECT n.short FROM players p JOIN {NAMES} n ON n.playerid = p.playerid WHERE p.spid = ?",
                       (int(spid),)).fetchone()
     return r[0] if r else str(spid)
 
@@ -4464,7 +4484,7 @@ def pack_pool(itemid):
         # "all" packs take every Market card; the others only cards licensed for the ID region
         # (permid), which leaves e.g. 37 of the 395 '06 cards
         with closing(_db()) as c:
-            rows = c.execute(f"""SELECT p.spid, {POSOVR} AS ovr FROM players p LEFT JOIN permid m ON m.spid = p.spid
+            rows = c.execute(f"""SELECT p.spid, {POSOVR} AS ovr FROM players p LEFT JOIN {PERM} m ON m.spid = p.spid
                                  WHERE ovr >= ?1 AND p.preferredposition1 BETWEEN ?2 AND ?3
                                  AND (?4 IS NULL OR p.leagueid = ?4) AND (?5 OR m.licensed = 1)""",
                              (f.get("ovr", 0) - GRADE_BOOST[1], lo, hi, f.get("league"), bool(f.get("all")))).fetchall()
@@ -7244,7 +7264,7 @@ def ladder_opponent(st, i, rng=random):
     return rng.choice(sorted(virtual_managers(), key=lambda m: abs(m["elo"][i] - elo))[:5])
 
 
-MESSENGER_PUSH = ("127.0.0.1", 28003)  # messenger.py PUSH_PORT
+MESSENGER_PUSH = ("127.0.0.1", fo3conf.MESSENGER_PUSH_PORT)  # messenger.py PUSH_PORT
 LADDER_SEARCH = (3, 7)  # seconds "searching" before the opponent is found
 
 
@@ -8689,6 +8709,8 @@ for _i in range(KICKERS):
     ENDPOINTS[f"/game/my/team/kickers/{_i}"] = lambda q, b, i=_i: ep_team_role(i, q, b)
 for _i in range(TACTIC_SLOTS):
     ENDPOINTS[f"/game/my/tactic/{_i}"] = lambda q, b, i=_i: ep_tactic(i, q, b)
+ENDPOINTS["/info/my/services/messenger/2"] = lambda q, b: _json(  # messenger.py, on FO3_MESSENGER_PORT
+    {"result": True, "address": fo3conf.MESSENGER_HOST, "port": fo3conf.MESSENGER_PORT})
 ENDPOINTS.update({
     "/league2/me": ep_l2_me, "/league2/reward": ep_l2_reward, "/league2/calendar": ep_l2_calendar,
     "/league2/match": ep_l2_match, "/league2/match/sim": lambda q, b: ep_l2_match(q, b, sim=True),
@@ -8815,17 +8837,20 @@ if __name__ == "__main__":
     # Windows SO_REUSEADDR lets a second copy bind the same port and split the client's
     # requests between two servers; refuse instead (a second play.bat then just fails)
     http.server.ThreadingHTTPServer.allow_reuse_address = os.name != "nt"
-    srv = http.server.ThreadingHTTPServer(("0.0.0.0", PORT), H)
+    srv = http.server.ThreadingHTTPServer((fo3conf.HTTP_BIND, PORT), H)
     if TLS:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.load_cert_chain(CERT)
         # Lazy handshake: a failed handshake (e.g. client rejects the cert) then
         # surfaces as a logged traceback in the handler thread instead of vanishing.
         srv.socket = ctx.wrap_socket(srv.socket, server_side=True, do_handshake_on_connect=False)
-    print(f"http config stub on 0.0.0.0:{PORT}{' (https)' if TLS else ''}, log -> {LOG}", flush=True)
-    if not os.path.isdir(os.path.join(ASSETS, "externalAssets")):
-        print(f"WARNING: no client cache at {ASSETS}: crests, faces and shop images will show the "
-              "game's defaults. Set FO3_GAME to your FO3 ID folder (or FO3_ASSETS).", flush=True)
+    print(f"http config stub on {fo3conf.HTTP_BIND}:{PORT}{' (https)' if TLS else ''}, log -> {LOG}", flush=True)
+    print(fo3conf.summary(), flush=True)
+    if not os.path.isdir(os.path.join(GAME, "data")):
+        print(f"WARNING: no client at {GAME}: set FO3_GAME to the game folder.", flush=True)
+    if not (ASSETS and os.path.isdir(os.path.join(ASSETS, "externalAssets"))):
+        print(f"WARNING: no client cache at {ASSETS or '(none)'}: crests, faces and shop images will show "
+              "the game's defaults (FO3_ASSETS).", flush=True)
     if ADMIN_PORT:
         import admin
         admin.start(sys.modules[__name__], ADMIN_PORT)

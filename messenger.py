@@ -8,7 +8,7 @@ The client opens with {"cmd":"auth","sessionid":...} then pings. The UI
 auth needs "result" truthy (no "reason") to reach NOTIFICATION_SERVER_CONNECTED.
 
 Needs the `cryptography` package (Blowfish).
-Usage: python messenger.py [port=28002]   |   python messenger.py --selftest
+Usage: python messenger.py [port=FO3_MESSENGER_PORT, default 28002]   |   python messenger.py --selftest
 """
 import json, os, socket, socketserver, struct, sys, threading, time, warnings
 
@@ -19,8 +19,11 @@ except ImportError:
     from cryptography.hazmat.primitives.ciphers.algorithms import Blowfish
 from cryptography.hazmat.primitives.ciphers import Cipher, modes
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fo3conf
+
 _args = [a for a in sys.argv[1:] if not a.startswith("--")]
-PORT = int(_args[0]) if _args else 28002
+PORT = int(_args[0]) if _args else fo3conf.MESSENGER_PORT
 KEY = b"kueec"
 LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "captures", "messenger.log")
 # Server pushes: http_config sends {"cmd": "push", "uri", "body"} as one UDP datagram to this

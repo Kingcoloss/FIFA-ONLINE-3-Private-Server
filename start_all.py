@@ -44,8 +44,8 @@ def shutdown():
 
 def main():
     start("http_config.py", ["443", "--tls"])  # https://APSEODESK172 (hardcoded in fifazf.exe)
-    start("messenger.py", [])  # :28002, address handed out by /info/my/services/messenger/2
-    print("[start_all] http_config.py (:443 https, admin :8088) + messenger.py (:28002) up. Ctrl-C to stop.")
+    start("messenger.py", [])  # FO3_MESSENGER_PORT (28002), address handed out by /info/my/services/messenger/2
+    print("[start_all] http_config.py (:443 https, admin :8088) + messenger.py up. Ctrl-C to stop.")
 
     if selftest:
         time.sleep(3)

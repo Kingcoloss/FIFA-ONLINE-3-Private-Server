@@ -14,10 +14,13 @@ Usage: python gen_teams.py [teamid ...]   (default: clubs whose crest is in the 
 """
 import json, os, sqlite3, sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fo3conf
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 DB = os.path.join(HERE, "gamedata", "fifadb.sqlite")
 OUT = os.path.join(HERE, "responses")
-CRESTS = r"D:\FO3ID\32795\_cache\games\fo3id\externalAssets\crests\large"
+CRESTS = os.path.join(fo3conf.ASSETS, "externalAssets", "crests", "large") if fo3conf.ASSETS else ""  # none for 3Sea
 DEFAULT_TEAMS = [241, 243, 1, 9, 45, 22]  # Barcelona, Real Madrid, Arsenal, Liverpool, Juventus, Dortmund
 
 # 4-4-2: (Enums.PLAYERPOSITION index, pitch x, y). x/y are FIFA-style formation offsets (0..1,
@@ -49,7 +52,7 @@ NUMBERS = {0: 1, 3: 2, 4: 4, 6: 5, 7: 3, 12: 7, 13: 8, 15: 6, 16: 11, 24: 9, 26:
 
 
 def jersey_name(c, playerid):
-    r = c.execute("SELECT jersey FROM namesind WHERE playerid = ?", (playerid,)).fetchone()
+    r = c.execute(f"SELECT jersey FROM {fo3conf.NAMES_TABLE} WHERE playerid = ?", (playerid,)).fetchone()
     return r[0] if r else ""
 
 
@@ -99,7 +102,7 @@ def team(c, teamid):
         return None
     # with 26 LIVE current, a player who has a 26 LIVE card plays for that card's club only (his
     # 2017 card is at his 2017 club); then 2017 cards, then older ones
-    rows = c.execute("""SELECT p.* FROM players p JOIN permid m ON m.spid = p.spid AND m.licensed = 1
+    rows = c.execute(f"""SELECT p.* FROM players p JOIN {fo3conf.PERM_TABLE} m ON m.spid = p.spid AND m.licensed = 1
                         WHERE ?1 IN (p.teamid, p.nationalteamid)
                         AND (?2 = ?3 OR p.spid / 1000000 = ?2
                              OR p.playerid NOT IN (SELECT playerid FROM players WHERE spid / 1000000 = ?2))

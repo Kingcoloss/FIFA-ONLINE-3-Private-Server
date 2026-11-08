@@ -1587,12 +1587,12 @@ def main():
             with hc.closing(hc._db()) as c:
                 t1 = dict(c.execute("SELECT spid, trait1 FROM players WHERE spid IN (88158023, 78158023)"))
             assert t1[78158023] & t1[88158023] == t1[88158023] and t1[78158023]  # Messi: finesse shot, playmaker ...
-        # every card the client itself can trade (its Market search: permid.transferable = 1 and a
+        # every card the client itself can trade (its Market search: PERM.transferable = 1 and a
         # name) is on the Market, in the trades and in a pack (user: "jangan sampai ada pemain yang
         # tidak ada di pack, trade, dan market"); fifaaddict alone left out 6,599, 4,313 of them '17
         with hc.closing(hc._db()) as c:
-            tradeable ={s for (s,) in c.execute("""SELECT p.spid FROM players p JOIN permid m ON m.spid = p.spid
-                AND m.transferable = 1 WHERE p.spid >= 1000000 AND p.playerid IN (SELECT playerid FROM namesind)""")}
+            tradeable ={s for (s,) in c.execute(f"""SELECT p.spid FROM players p JOIN {hc.PERM} m ON m.spid = p.spid
+                AND m.transferable = 1 WHERE p.spid >= 1000000 AND p.playerid IN (SELECT playerid FROM {hc.NAMES})""")}
         assert tradeable <= market and set(hc.fa_prices()) <= market
         assert {s for rows in hc.trade_pool().values() for s, _ in rows} == market
         assert {s for s, _ in hc.pack_pool(hc.ALL_PLAYERS_PACK)} == market
