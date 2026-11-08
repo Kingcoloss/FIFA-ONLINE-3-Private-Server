@@ -165,8 +165,8 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
 - **Multiple > Rank: các HLV khác và trận đấu thật** (issue #30): màn hình xếp hạng trước đây dừng ở lỗi UI
   vì máy chủ không gửi hạng đấu, phần thưởng và thành tích ladder. Giờ màn hình mở được, và các HLV ảo lấp
   đầy bảng xếp hạng: top 3 (VS Manager Top) và xếp hạng bạn bè gồm 20 người, mỗi người có tên, câu lạc bộ,
-  hạng đấu và thành tích thay đổi dần trong ngày khi họ thi đấu. Lúc đầu có 100 HLV, thêm 850 người khác, rồi mỗi
-  ngày thêm 0-3 người mới, tối đa 1.000. Mỗi người đá theo lối chơi riêng (kiểm soát bóng, phản công, pressing tầm cao, bóng dài,
+  hạng đấu và thành tích thay đổi dần trong ngày khi họ thi đấu. Lúc đầu có 100 HLV, thêm 1.850 người khác, rồi mỗi
+  ngày thêm 0-3 người mới, tối đa 2.000 (tăng gấp đôi theo issue #36). Mỗi người đá theo lối chơi riêng (kiểm soát bóng, phản công, pressing tầm cao, bóng dài,
   dựng xe buýt hoặc tấn công tổng lực: sơ đồ, chiến thuật và cách chạy chỗ) trong bộ áo của câu lạc bộ mình,
   với thẻ ngẫu nhiên từ mọi câu lạc bộ và mùa giải quanh rating của họ, mỗi thẻ có cấp thẻ riêng (từ +1 với
   người mới đến +6 trở lên) và level riêng. Ngày qua ngày, họ mua bán thẻ, nâng cấp thẻ (nâng cấp thất bại

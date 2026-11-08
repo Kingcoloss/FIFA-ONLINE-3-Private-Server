@@ -167,8 +167,8 @@ Added, passing the tests but not yet checked in the client:
 - **Multiple > Rank: other managers and real matches** (issue #30): the ranked screen stopped on a UI
   error, as the server sent no divisions, rewards or ladder record. It now opens, and virtual managers
   fill its rankings: the top 3 (VS Manager Top) and a friends ranking of 20, each with a name, a club,
-  a division and a record that moves through the day as they play. 100 start, joined by 850
-  more and then 0-3 newcomers a day, up to 1,000. Each one plays his own style (possession, counter, high press, long ball, park
+  a division and a record that moves through the day as they play. 100 start, joined by 1,850
+  more and then 0-3 newcomers a day, up to 2,000 (doubled for issue #36). Each one plays his own style (possession, counter, high press, long ball, park
   the bus or all-out attack: formation, tactics and runs) in his club's kit, with random cards of any
   club and season around his rating, each card at its own grade (+1 for beginners up to +6 and more)
   and level. From day to day they buy and sell cards, upgrade them (a failed upgrade from +5 drops a

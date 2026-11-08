@@ -176,8 +176,8 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   berhenti di error UI karena server tidak mengirim divisi, hadiah, dan rekor ladder. Sekarang
   layarnya terbuka, dan manajer virtual mengisi peringkatnya: 3 teratas (VS Manager Top) dan
   peringkat teman berisi 20 manajer, masing-masing dengan nama, klub, divisi, dan rekor yang berubah
-  sepanjang hari seiring mereka bermain. Awalnya ada 100, ditambah 850 lainnya, lalu tiap hari bergabung 0-3
-  manajer baru, sampai 1.000. Tiap manajer punya gaya main sendiri (penguasaan bola, serangan balik, pressing tinggi,
+  sepanjang hari seiring mereka bermain. Awalnya ada 100, ditambah 1.850 lainnya, lalu tiap hari bergabung 0-3
+  manajer baru, sampai 2.000 (digandakan untuk issue #36). Tiap manajer punya gaya main sendiri (penguasaan bola, serangan balik, pressing tinggi,
   umpan panjang, parkir bus, atau menyerang total: formasi, taktik, dan pergerakan pemain), memakai
   kit klubnya dan kartu acak dari klub dan musim mana pun di sekitar ratingnya, tiap kartu dengan
   grade (+1 untuk pemula sampai +6 ke atas) dan level masing-masing. Dari hari ke hari mereka membeli

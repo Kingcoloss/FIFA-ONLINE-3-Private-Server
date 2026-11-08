@@ -6244,10 +6244,10 @@ VM_TAGS = ("FC", "10", "99", "07", "Gol", "Striker", "Juara", "Master", "Pro", "
 # manager's squad changes day by day (vm_team). All of it is seeded by manager and day: nothing
 # is stored, every server run sees the same crowd on the same day.
 VM_EPOCH = calendar.timegm((2026, 11, 1, 0, 0, 0))
-VM_MAX = 1000  # the crowd stops growing here (user: "max player ai online 1000")
+VM_MAX = 2000  # the crowd stops growing here (user: "max player ai online 1000"; issue #36: doubled)
 # The rest of the population beside the first crowd (VM_EXTRA): there from day 0 with this
 # season's record so far, like the first crowd, so the rankings and the Rank searches hold some
-# 1,000 managers while the first crowd (the friends) and the newcomers keep their ids and names.
+# 2,000 managers (two groups) while the first crowd (the friends) and the newcomers keep their ids and names.
 # Ids from vm2000; names from VM_WORDS2 x VM_TAGS2 (950, none of the first pool's, none holding a
 # word the chat overlay masks: "Captain" has "tai").
 VM_EXTRA, VM_EXTRA_ID = 850, 2000
@@ -6257,6 +6257,20 @@ VM_WORDS2 = ("Bromo", "Rinjani", "Toba", "Lombok", "Sumba", "Flores", "Ambon", "
              "Orion", "Zeus", "Apollo", "Kaiser", "Sultan", "Pendekar", "Satria", "Jagoan", "Surya", "Arjuna",
              "Badak", "Buaya", "Merpati", "Pinisi", "Keris", "Topan", "Gelora", "Senayan", "Mustang", "Jaguar")
 VM_TAGS2 = tuple(t for t in VM_TAGS if t != "Captain")
+# A second group of the population (issue #36: "Could you consider doubling the number of AI virtual
+# players"): VM_EXTRA2 more from vm4000, named from VM_WORDS3 x VM_TAGS2 without the pairs the chat
+# overlay masks (FORBIDDENWORDS_CHAT_ENG/IND: VM_NAMES3_MASKED); the first group keeps its ids and names.
+VM_EXTRA2, VM_EXTRA2_ID = 1000, 4000
+VM_WORDS3 = ("Merapi", "Semeru", "Kerinci", "Batur", "Bunaken", "Lawu", "Cebu", "Davao", "Luzon", "Hue", "Nhatrang",
+             "Vungtau", "Cantho", "Haiphong", "Krabi", "Chiangmai", "Ubud", "Tidore", "Ternate", "Banda", "Natuna",
+             "Krakatau", "Jambi", "Riau", "Palu", "Kendari", "Sorong", "Merauke", "Kupang", "Sumbawa", "Wakatobi",
+             "Cakra", "Sakti", "Gemilang", "Kilat", "Rimau", "Harimau", "Kijang", "Rusa", "Cendrawasih", "Kakatua",
+             "Nuri", "Camar", "Marlin", "Barracuda", "Orca", "Puma", "Lynx", "Raven", "Condor", "Atlas", "Vortex",
+             "Turbo", "Sniper", "Maestro", "Rebel", "Spartan", "Viking", "Gladiator", "Ronin", "Shogun", "Mamba",
+             "Raptor", "Hydra", "Kraken", "Zenith", "Nebula", "Galaxy", "Cosmos", "Pulsar")
+VM_NAMES3_MASKED = {"MerapiStriker", "SemeruKing", "LawuKing", "CebuKing", "VungtauKing", "CanthoJuara", "CanthoJr",
+                    "KrakatauKing", "RiauKing", "PaluKing", "KendariLegend", "MeraukeBoss", "RimauKing", "HarimauKing",
+                    "NuriLegend", "AtlasStriker"}
 VM_JOIN = (0, 1, 1, 2, 3)  # managers who join on one day (one is drawn)
 VM_JOIN_TIER = (0.7, 0.25, 0.05)  # a newcomer's tier odds: mostly beginners
 VM_LIFE = (0.12, 0.08, 0.03)  # a day's odds: a transfer, an upgrade try, a starter's level up
@@ -6403,14 +6417,22 @@ def vm_base():
 
 @functools.lru_cache(maxsize=None)
 def vm_extra():
-    """The rest of the population (VM_EXTRA managers, VM_TIERS shares, ids from VM_EXTRA_ID),
-    there from day 0 with this season's record so far, like the first crowd."""
-    rnd = random.Random(f"{VM_SEED}/extra")
-    names = rnd.sample([w + t for w in VM_WORDS2 for t in VM_TAGS2], VM_EXTRA)
+    """The rest of the population (VM_EXTRA managers from VM_EXTRA_ID, then VM_EXTRA2 from
+    VM_EXTRA2_ID; VM_TIERS shares each), there from day 0 with this season's record so far, like
+    the first crowd."""
+    return (vm_group("extra", VM_EXTRA, VM_EXTRA_ID, [w + t for w in VM_WORDS2 for t in VM_TAGS2])
+            + vm_group("extra2", VM_EXTRA2, VM_EXTRA2_ID,
+                       [w + t for w in VM_WORDS3 for t in VM_TAGS2 if w + t not in VM_NAMES3_MASKED]))
+
+
+def vm_group(seed, n, first_id, pool):
+    """n managers from first_id, named from pool, VM_TIERS shares (seeded by seed)."""
+    rnd = random.Random(f"{VM_SEED}/{seed}")
+    names = rnd.sample(pool, n)
     out = []
     for tier, (share, *_) in enumerate(VM_TIERS):
-        for _ in range(round(share * VM_EXTRA) if tier < 2 else VM_EXTRA - len(out)):
-            out.append(vm_make(rnd, VM_EXTRA_ID + len(out), names[len(out)], tier))
+        for _ in range(round(share * n) if tier < 2 else n - len(out)):
+            out.append(vm_make(rnd, first_id + len(out), names[len(out)], tier))
     return out
 
 
@@ -6425,7 +6447,7 @@ def vm_newcomers(day):
     for d in range(1, day + 1):
         rnd = random.Random(f"vmjoin/{d}")
         for _ in range(rnd.choice(VM_JOIN)):
-            if VM_COUNT + VM_EXTRA + len(out) >= VM_MAX:
+            if VM_COUNT + VM_EXTRA + VM_EXTRA2 + len(out) >= VM_MAX:
                 return out
             tier = rnd.choices(range(len(VM_TIERS)), VM_JOIN_TIER)[0]
             name = free.pop(rnd.randrange(len(free)))
@@ -6670,12 +6692,15 @@ def vm_squad(vid, day):
     chosen = []
     for slot in xi + [{"pos": POS_SUB}] * 7:
         chosen.append(card(slot, rnd, {c[3] for c in chosen}))
-    if star and star not in {c[3] for c in chosen}:  # his favourite player: his best card near his rating
+    if star and star not in {c[3] for c in chosen[:len(roles)]}:  # his favourite player in his XI: his best card near his rating
         cards = [(c, k) for k, role in enumerate(roles) for c in pool.get(role, ())
                  if c.pid == star and centre - 4 <= c.ovr <= centre + 10]
         if cards:
             c, k = max(cards, key=lambda x: (x[0].ovr, -x[1]))
-            chosen[k][1:4] = [c.ovr, c.spid, c.pid]
+            out, chosen[k][1:4] = chosen[k][1:4], [c.ovr, c.spid, c.pid]
+            for b in chosen[len(roles):]:  # drawn for the bench before: the starter he replaces sits there
+                if b[3] == star:
+                    b[1:4] = out
     for d in range(joined + 1, day + 1):
         r = random.Random(f"{vid}/life/{d}")
         if r.random() < VM_LIFE[0]:  # a transfer: one out, one in (the Market); never his star
@@ -7753,7 +7778,7 @@ def ai_clubs(day, lang):
         r = random.Random("clubof" + m["_id"])
         if r.random() < CLUB_IN:
             c = clubs[f"club{r.choices(range(CLUB_AI), weights)[0] + 1:04d}"]
-            if len(c["members"]) < c["limit"]:
+            if len(c["members"]) < c["limit"] - 2:  # two seats left: I can always join
                 c["members"].append({"id": m["_id"], "name": m["name"], "level": m["level"], "vm": m,  # joined in its life
                                      "joined": c["created"] + r.randint(0, max(0, (VM_EPOCH - c["created"]) // 86400)) * 86400})
     for c in clubs.values():
