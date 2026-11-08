@@ -1552,8 +1552,12 @@ def main():
         # (user: "tidak ada r. gullid di world legend" -- WL and 15 more were missing)
         # issue #14: the Market filter's season combo hands value to TransferUtil.seasonQuery(Array)
         # ("cannot convert 39 to Array"); labels starting with $ are the client's season names
+        # 3Sea's fifadb has 9 Market cards of season 26 ("Europe Legend" in its UI strings; not
+        # FO4's 26 LIVE, which is season 300) that permid keeps off the FO3 ID Market
         seasons = body(hc.from_file("/static/roster"))["seasons"]
-        assert all(isinstance(e["value"], list) for e in seasons) and seasons[23]["season"] == "$TRANSFERMARKET_SEASON_39"
+        assert all(isinstance(e["value"], list) for e in seasons)
+        assert [e["season"] for e in seasons if e["value"] == [39]] == ["$TRANSFERMARKET_SEASON_39"]
+        assert [e["season"] for e in seasons if e["value"] == [26]] == ["$TRANSFERMARKET_SEASON_26"]
         roster = {c for e in seasons for c in e["value"]}
         market = hc.market_spids()
         assert {s // 1000000 for s in market} <= roster, sorted({s // 1000000 for s in market} - roster)

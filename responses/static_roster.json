@@ -14,6 +14,7 @@
  {"season": "$TRANSFERMARKET_SEASON_22", "value": [22], "open": "2013-01-01T00:00:00.000Z", "close": "2099-12-31T00:00:00.000Z"},
  {"season": "$TRANSFERMARKET_SEASON_23", "value": [23], "open": "2013-01-01T00:00:00.000Z", "close": "2099-12-31T00:00:00.000Z"},
  {"season": "$TRANSFERMARKET_SEASON_24", "value": [24], "open": "2013-01-01T00:00:00.000Z", "close": "2099-12-31T00:00:00.000Z"},
+ {"season": "$TRANSFERMARKET_SEASON_26", "value": [26], "open": "2013-01-01T00:00:00.000Z", "close": "2099-12-31T00:00:00.000Z"},
  {"season": "$TRANSFERMARKET_SEASON_27", "value": [27], "open": "2013-01-01T00:00:00.000Z", "close": "2099-12-31T00:00:00.000Z"},
  {"season": "$TRANSFERMARKET_SEASON_28", "value": [28], "open": "2013-01-01T00:00:00.000Z", "close": "2099-12-31T00:00:00.000Z"},
  {"season": "$TRANSFERMARKET_SEASON_29", "value": [29], "open": "2013-01-01T00:00:00.000Z", "close": "2099-12-31T00:00:00.000Z"},
