@@ -30,7 +30,7 @@ sys.path.insert(0, ROOT)
 ARGS, sys.argv = sys.argv[1:], sys.argv[:1]  # http_config reads a port from argv at import
 import http_config as hc
 
-EXT = os.path.join(hc.ASSETS, "externalAssets")
+EXT = os.path.join(hc.FETCHED_ASSETS, "externalAssets")  # the client's CDN copy, or gamedata/assets (3Sea)
 FA = "https://fifaaddict.com/fo3img/"
 MANIFESTS = {"faces": os.path.join(ROOT, "gamedata", "fa_faces.json"),
              "crests": os.path.join(ROOT, "gamedata", "fa_crests.json"),

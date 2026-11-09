@@ -37,8 +37,8 @@ def main():
         # the Shop admin and picture parts use files of the FO3 ID client's CDN copy (shop icons,
         # ball 6, a big flag); 3Sea ships none (fo3conf.ASSETS ""), so stand-in files let them test
         # the server's side alone
-        if not os.path.isdir(os.path.join(hc.ASSETS, "externalAssets")):
-            hc.ASSETS = os.path.join(tmp, "client_assets")
+        if not (hc.ASSETS and os.path.isdir(os.path.join(hc.ASSETS, "externalAssets"))):
+            hc.ASSETS = hc.FETCHED_ASSETS = os.path.join(tmp, "client_assets")  # not the fetched pictures either
             for rel in ("shop/8194", "shop/200005", "shop/ID50071", "shop/ID50121GP", "shop/801", "balls/ball_6",
                         "countries/14"):
                 f = os.path.join(hc.ASSETS, "externalAssets", *rel.split("/")) + ".png"
