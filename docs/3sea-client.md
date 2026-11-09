@@ -54,5 +54,7 @@ These need the real client and are checked in Phase 0:
   `language_tha.big` to send;
 - whether region `TH` is what the client expects in `/info/server/config`.
 
-Known gaps: no crests, faces or Shop pictures (3Sea ships no CDN cache), and the virtual
+Known gaps: 3Sea ships no CDN cache, so crests, faces, staff pictures and league logos are the
+game's placeholders until the admin page's Aset tab fetches them from fifaaddict.com into this
+repository's `externalAssets` folder (the server serves them from there). Shop pictures stay missing. The virtual
 managers' chat has no Thai lines yet.

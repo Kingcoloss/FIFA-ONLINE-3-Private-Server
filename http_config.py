@@ -79,6 +79,11 @@ LANGUAGE = fo3conf.LANGUAGE  # FO3_LANGUAGE: "tha" for 3Sea, "ind" for FO3 ID
 GAME = fo3conf.GAME  # the client install (FO3_GAME), read only
 # The client's own downloaded copy of the Garena CDN (externalAssets/...); the 3Sea client has none.
 ASSETS = fo3conf.ASSETS
+# Where tools/fa_faces.py (the admin page's Aset tab) saves the pictures it fetches, under
+# <FETCHED_ASSETS>/externalAssets: that copy when there is one, else this repository (3Sea; the user
+# keeps them in git). With ASSETS empty they went to <cwd>/externalAssets and nothing served them,
+# so 1,106 fetched crests, faces, staff pictures and league logos stayed placeholders.
+FETCHED_ASSETS = ASSETS or HERE
 # fifadb's licensing and name tables of the client's region and language (permth, namestha for 3Sea)
 PERM, NAMES = fo3conf.PERM_TABLE, fo3conf.NAMES_TABLE
 CDN_PREFIX = "cdn/"
@@ -105,9 +110,9 @@ def notice_url():
 
 
 def asset_path(rel):
-    """OWN_ASSETS/rel or ASSETS/rel, whichever exists, else None. A club crest the cache lacks
-    in one size is its other size (issue #29: the cache has 190 small crests but 49 large ones,
-    and the cup screens ask for the large one: Napoli, Bayern, Man United showed none). A Rekrut
+    """OWN_ASSETS/rel, ASSETS/rel or FETCHED_ASSETS/rel, whichever exists, else None. A club crest
+    the cache lacks in one size is its other size (issue #29: the cache has 190 small crests but 49
+    large ones, and the cup screens ask for the large one: Napoli, Bayern, Man United showed none). A Rekrut
     pack tile (shop/staffpack_<stfid>) is that staff's picture: the client has no staff pack art.
     Issue #36: the game setting screen's "Default ball" (ball 0) has no picture ("NOT FOUND"): it
     shows the plain EA SPORTS ball's (ball 6); a small flag (countries/smallFlags, none cached) is
@@ -118,9 +123,14 @@ def asset_path(rel):
     rel = re.sub(r"^externalAssets/balls/ball_0\.png$", "externalAssets/balls/ball_6.png", rel)
     rel = re.sub(r"^externalAssets/countries/smallFlags/(\d+\.png)$", r"externalAssets/countries/\1", rel)
     other = re.sub(r"crests/(large|small)/", lambda m: f"crests/{'small' if m[1] == 'large' else 'large'}/", rel)
+    roots = [(root, "") for root in filter(None, (OWN_ASSETS, ASSETS))]  # 3Sea: no client cache
+    if FETCHED_ASSETS not in (OWN_ASSETS, ASSETS):  # the repository itself: its externalAssets folder only
+        roots.append((os.path.join(FETCHED_ASSETS, "externalAssets"), "externalAssets/"))
     for r in dict.fromkeys((rel, other)):
-        for root in filter(None, (OWN_ASSETS, ASSETS)):  # 3Sea: no client cache
-            f = os.path.normpath(os.path.join(root, r))
+        for root, prefix in roots:
+            if not r.startswith(prefix):
+                continue
+            f = os.path.normpath(os.path.join(root, r[len(prefix):]))
             if f.startswith(os.path.normpath(root) + os.sep) and os.path.isfile(f):
                 return f
     return None
@@ -8862,7 +8872,8 @@ if __name__ == "__main__":
         print(f"WARNING: no client at {GAME}: set FO3_GAME to the game folder.", flush=True)
     if not (ASSETS and os.path.isdir(os.path.join(ASSETS, "externalAssets"))):
         print(f"WARNING: no client cache at {ASSETS or '(none)'}: crests, faces and shop images will show "
-              "the game's defaults (FO3_ASSETS).", flush=True)
+              f"the game's defaults (FO3_ASSETS); the admin page's Aset tab fetches crests and faces into "
+              f"{FETCHED_ASSETS}.", flush=True)
     if ADMIN_PORT:
         import admin
         admin.start(sys.modules[__name__], ADMIN_PORT)
