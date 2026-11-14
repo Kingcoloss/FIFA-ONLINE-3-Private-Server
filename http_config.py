@@ -20,7 +20,7 @@ https://APSEODESK172 (port 443) for /info/server/locale etc. — no launch arg
 overrides it — so run `http_config.py 443 --tls` and map APSEODESK172 to
 127.0.0.1 in the hosts file.
 """
-import bisect, calendar, collections, copy, functools, gzip, html, http.server, math, os, random, re, socket, sqlite3, ssl, statistics, sys, threading, time, urllib.parse
+import bisect, calendar, collections, copy, functools, glob, gzip, html, http.server, math, os, random, re, shutil, socket, sqlite3, ssl, statistics, sys, threading, time, urllib.parse
 from contextlib import closing
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -139,6 +139,8 @@ def asset_path(rel):
 def cdn_file(rel):
     """(content-type, bytes) of an asset, or None (-> 404, client shows its default)."""
     f = asset_path(rel)
+    if f is None and rel == LANG_PACK:  # a language the client cache has no pack for (Thai on FO3 ID)
+        f = built_language_pack()
     if f is None:
         return None
     if rel == LANG_PACK:  # with the game setting screens' labels fixed (issue #31)
@@ -725,7 +727,7 @@ def ball_names():
 def client_strings():
     """The client's UI strings in LANGUAGE: the language pack's entry (externalAssets, the FO3 ID
     cache), else the loose data/ui/external/LANGUAGESTRING_<LANG>.json the 3Sea client ships."""
-    src = asset_path(LANG_PACK)
+    src = asset_path(LANG_PACK) or built_language_pack()
     s = client_json(src, LANG_ENTRY) if src else {}
     if not s:
         try:
@@ -756,6 +758,63 @@ LANG_FIXES = {b'"COMMON_TIME_DAY": "Waktu"': b'"COMMON_TIME_DAY": "Siang"',
               b'"COMMON_WEATHER_DUSK": "Malam"': b'"COMMON_WEATHER_DUSK": "Mendung"'} if LANGUAGE == "ind" else {}
 LANG_FIXED = os.path.join(HERE, "gamedata", f"language_{LANGUAGE}.big")
 LANG_LOCK = threading.Lock()
+
+
+# A language the client cache has no pack for, though the client ships its strings: the FO3 ID
+# client's data/ui/localization/language.big holds LANGUAGESTRING_<CHI ENG IND KOR THA VIE>.json
+# (Thai: 11,220 keys, with fonts_th.big and tha.big beside it) but its cache only
+# language_ind.big. The server builds language_<lang>.big from the pack it has: that language's
+# own strings, and for the keys only the newer pack has (608 for Thai: later items, balls,
+# seasons) the English base string, else the pack's own.
+LANG_BUILT = os.path.join(HERE, "gamedata", f"language_{LANGUAGE}.built.big")
+
+
+def built_language_pack():
+    """gamedata/language_<lang>.built.big, or None (no other pack to start from, or the client
+    ships no strings in LANGUAGE, as on 3Sea, which reads its own loose file)."""
+    try:
+        base_big = os.path.join(GAME, "data", "ui", "localization", "language.big")
+        own = f"data/ui/localization/LANGUAGESTRING_{LANGUAGE.upper()}.json"
+        tpl = next((f for f in sorted(glob.glob(os.path.join(ASSETS, "externalAssets", "language_*.big")))
+                    if os.path.basename(f) != os.path.basename(LANG_PACK)), None) if ASSETS else None
+        if not tpl or not os.path.isfile(base_big):
+            return None
+        key = repr([(os.path.abspath(p), os.stat(p).st_size, os.stat(p).st_mtime_ns) for p in (base_big, tpl)]
+                   + [1]).encode()
+        with LANG_LOCK:
+            if os.path.isfile(LANG_BUILT) and os.path.isfile(LANG_BUILT + ".key"):
+                with open(LANG_BUILT + ".key", "rb") as f:
+                    if f.read() == key:
+                        return LANG_BUILT
+            if os.path.join(HERE, "tools", "re") not in sys.path:
+                sys.path.insert(0, os.path.join(HERE, "tools", "re"))
+            import bigdir
+            tpl_entry = next(n for n, *_ in bigdir.entries(tpl))
+            names = {n for n, *_ in bigdir.entries(base_big)}
+            if own not in names or len(tpl_entry) != len(LANG_ENTRY):
+                return None
+            load = lambda p, n: json.loads(bigdir.read(p, n).decode("utf-8-sig"))
+            strings = load(base_big, own)
+            eng = load(base_big, "data/ui/localization/LANGUAGESTRING_ENG.json")
+            newer_raw = bigdir.read(tpl, tpl_entry)
+            newer = json.loads(newer_raw.decode("utf-8-sig"))
+            bom = b"\xef\xbb\xbf" if newer_raw.startswith(b"\xef\xbb\xbf") else b""
+            for k, v in newer.items():
+                if k not in strings:
+                    strings[k] = eng.get(k, v)
+            tmp = LANG_BUILT + ".tmp"
+            os.makedirs(os.path.dirname(LANG_BUILT), exist_ok=True)
+            shutil.copyfile(tpl, tmp)
+            bigdir.patch(tmp, {tpl_entry: bom + json.dumps(strings, ensure_ascii=False, indent=1).encode("utf-8")})
+            bigdir.rename(tmp, tpl_entry, LANG_ENTRY)
+            os.replace(tmp, LANG_BUILT)
+            with open(LANG_BUILT + ".key", "wb") as f:
+                f.write(key)
+            print(f"language pack: built {LANG_BUILT} ({len(strings)} strings in {LANGUAGE})", flush=True)
+            return LANG_BUILT
+    except Exception as e:
+        print(f"language pack build: {e!r}", flush=True)
+        return None
 
 
 def language_pack(src):

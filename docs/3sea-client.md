@@ -35,6 +35,18 @@ client it came from (`fifadb.source.json`); `play.bat` extracts it again when th
 
 The server only reads the client folder. Nothing in this setup writes into it.
 
+## Thai on the FO3 ID client
+
+The FO3 ID client ships the UI strings of six languages in
+`data/ui/localization/language.big` (CHI ENG IND KOR THA VIE), with `fonts_th.big` and
+`tha.big` beside them, but its cache has only the Indonesian pack
+(`externalAssets/language_ind.big`). `python fo3conf.py language tha` (this PC's
+`fo3.local.env`) switches the game to Thai: the server then builds
+`gamedata/language_tha.built.big` from the Thai strings, with the English base string for each
+of the 608 keys only the newer Indonesian pack has (later items, balls, seasons). The region
+stays ID (`permid`); card names come from `namestha`. Text the server writes itself (virtual
+managers' chat, some screens) stays Indonesian. `python fo3conf.py language default` goes back.
+
 ## Setup
 
 1. Python 3 with `pip install cryptography`.

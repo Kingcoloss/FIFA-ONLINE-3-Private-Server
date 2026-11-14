@@ -27,6 +27,9 @@ The https port stays 443: fifazf.exe has it built in.
 
     python fo3conf.py                  what this PC uses, and every client found
     python fo3conf.py set <folder> [3sea|fo3id]   use that client on this PC (fo3.local.env)
+    python fo3conf.py language tha     the game's language on this PC (tha ind eng vie kor chi, or
+                                       default); the FO3 ID client ships all six, and the server
+                                       builds the language pack its cache lacks (http_config.py)
     python fo3conf.py env              the resolved settings as NAME=value lines (play.bat)
 """
 import json, os, string, sys
@@ -208,6 +211,14 @@ def _main(argv):
             raise SystemExit(f"client {kind!r}: use one of {', '.join(PROFILES)}")
         write_local({"FO3_GAME": folder, "FO3_CLIENT": kind})
         print(f"{LOCAL_FILE}: FO3_GAME={folder}, client {kind or detect_client(folder) + ' (from the folder)'}")
+        return
+    if cmd == "language":
+        langs = ("tha", "ind", "eng", "vie", "kor", "chi")
+        if len(argv) < 2 or argv[1].lower() not in langs + ("default",):
+            raise SystemExit(f"usage: python fo3conf.py language <{'|'.join(langs)}|default>")
+        lang = "" if argv[1].lower() == "default" else argv[1].lower()
+        write_local({"FO3_LANGUAGE": lang})
+        print(f"{LOCAL_FILE}: FO3_LANGUAGE={lang or '(the client profile' + chr(39) + 's own)'}")
         return
     if cmd == "env":  # play.bat: `for /f` sets these; a client found the first time is kept
         if GAME_FROM == "found" and not _GAME_SET:

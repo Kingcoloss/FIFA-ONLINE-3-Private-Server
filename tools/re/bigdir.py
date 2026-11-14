@@ -100,6 +100,23 @@ def patch(path, files, align=0x800, in_place=False, at=None):
     return placed
 
 
+def rename(path, old, new):
+    """Give entry `old` the name `new` (same length: the table keeps its size)."""
+    assert len(old) == len(new), (old, new)
+    t = bytearray(table(path))
+    for p, name, off, size, usize in _walk(t):
+        if name == old:
+            k = size & 0xFF
+            for i, ch in enumerate(new.encode("latin1")):
+                d = ch ^ k
+                t[p + 16 + i] = ((d << 4) | (d >> 4)) & 0xFF
+                k = ((d or size & 0xFF) - 0x66) & 0xFF
+            with open(path, "r+b") as f:
+                f.write(t)
+            return
+    raise KeyError(old)
+
+
 def read(path, name):
     for n, off, size, usize in entries(path):
         if n == name:
