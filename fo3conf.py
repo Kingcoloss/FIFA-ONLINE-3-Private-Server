@@ -31,7 +31,7 @@ The https port stays 443: fifazf.exe has it built in.
                                        default); the FO3 ID client ships all six, and the server
                                        builds the language pack its cache lacks (http_config.py)
     python fo3conf.py assets <folder>  serve another client's CDN copy (crests, faces, Shop art):
-                                       an FO3 ID client folder or its _cache\games\fo3id; for
+                                       an FO3 ID client folder or its _cache\\games\\fo3id; for
                                        3Sea, which has none (`none` undoes it). Only read.
     python fo3conf.py env              the resolved settings as NAME=value lines (play.bat)
 """
