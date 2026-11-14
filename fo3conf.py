@@ -30,9 +30,9 @@ The https port stays 443: fifazf.exe has it built in.
     python fo3conf.py language tha     the game's language on this PC (tha ind eng vie kor chi, or
                                        default); the FO3 ID client ships all six, and the server
                                        builds the language pack its cache lacks (http_config.py)
-    python fo3conf.py assets <folder>  serve another client's CDN copy (crests, faces, Shop art):
-                                       an FO3 ID client folder or its _cache\\games\\fo3id; for
-                                       3Sea, which has none (`none` undoes it). Only read.
+    python fo3conf.py assets <folder>  copy an FO3 ID client's CDN copy (crests, faces, Shop art)
+                                       into gamedata/cdn, served to a client without one (3Sea);
+                                       the client can go after that
     python fo3conf.py env              the resolved settings as NAME=value lines (play.bat)
 """
 import json, os, string, sys
@@ -40,6 +40,7 @@ import json, os, string, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOCAL_FILE = os.path.join(HERE, "fo3.local.env")
 FIFADB_SOURCE = os.path.join(HERE, "gamedata", "fifadb.source.json")  # written by extract_fifadb.py
+SERVER_CDN = os.path.join(HERE, "gamedata", "cdn")  # a client CDN copy kept with the server (not in git: EA data)
 
 PROFILES = {
     "3sea": {"game": r"F:\FOServer\3Sea FIFA Online 3", "cache": None, "language": "tha", "region": "TH",
@@ -151,9 +152,16 @@ GAME_SET_MISSING = bool(_GAME_SET) and GAME_FROM != "set"  # FO3_GAME points at 
 CLIENT = _CLIENT_SET or (detect_client(GAME) if GAME_FROM != "missing" else "3sea")
 _P = PROFILES[CLIENT]
 
-ASSETS = _env("FO3_ASSETS", os.path.join(GAME, "_cache", "games", _P["cache"]) if _P["cache"] else "")
-if ASSETS and not os.path.isdir(ASSETS):
-    ASSETS = ""  # no CDN copy in this install: the game's placeholders, as on 3Sea
+_OWN_CACHE = os.path.join(GAME, "_cache", "games", _P["cache"]) if _P["cache"] else ""
+ASSETS = _env("FO3_ASSETS")
+if not ASSETS or not os.path.isdir(ASSETS):
+    # the client's own CDN copy, else the copy kept with the server (gamedata/cdn, made by
+    # `python fo3conf.py assets <FO3 ID client>`), else none: the game's placeholders
+    ASSETS = next((d for d in (_OWN_CACHE, SERVER_CDN) if d and os.path.isdir(os.path.join(d, "externalAssets"))), "")
+# the client's own copy (FO3 ID): the Aset tab saves its fetched pictures into it, as before;
+# a borrowed one is only read
+ASSETS_OWN = bool(ASSETS) and bool(_OWN_CACHE) and os.path.normcase(os.path.abspath(ASSETS)) == os.path.normcase(
+    os.path.abspath(_OWN_CACHE))
 LANGUAGE = _env("FO3_LANGUAGE", _P["language"]).lower()
 REGION = _env("FO3_REGION", _P["region"]).upper()
 LAUNCH_REGION = _env("FO3_LAUNCH_REGION", _P["launch_region"]).lower()
@@ -215,19 +223,26 @@ def _main(argv):
         write_local({"FO3_GAME": folder, "FO3_CLIENT": kind})
         print(f"{LOCAL_FILE}: FO3_GAME={folder}, client {kind or detect_client(folder) + ' (from the folder)'}")
         return
-    if cmd == "assets":  # another client's CDN copy (FO3 ID's _cache) for a client without one (3Sea)
+    if cmd == "assets":  # keep another client's CDN copy (FO3 ID's _cache) with the server, for 3Sea
         if len(argv) < 2:
-            raise SystemExit("usage: python fo3conf.py assets <client folder | cache folder | none>")
-        path = "" if argv[1].lower() == "none" else os.path.abspath(argv[1])
+            raise SystemExit("usage: python fo3conf.py assets <client folder | cache folder>")
+        import shutil
+        path = os.path.abspath(argv[1])
         games = os.path.join(path, "_cache", "games")
-        if path and os.path.isdir(games):  # a client folder: its _cache\games\<publisher>
+        if os.path.isdir(games):  # a client folder: its _cache\games\<publisher>
             subs = [os.path.join(games, d) for d in sorted(os.listdir(games))
                     if os.path.isdir(os.path.join(games, d, "externalAssets"))]
             path = subs[0] if subs else path
-        if path and not os.path.isdir(os.path.join(path, "externalAssets")):
+        src = os.path.join(path, "externalAssets")
+        if not os.path.isdir(src):
             raise SystemExit(f"{path!r} has no externalAssets folder")
-        write_local({"FO3_ASSETS": path})
-        print(f"{LOCAL_FILE}: FO3_ASSETS={path or '(the client profile' + chr(39) + 's own)'}")
+        dst = os.path.join(SERVER_CDN, "externalAssets")
+        if os.path.normcase(os.path.abspath(src)) != os.path.normcase(os.path.abspath(dst)):
+            shutil.copytree(src, dst, dirs_exist_ok=True)  # read only on the client's side
+        n = sum(len(f) for _, _, f in os.walk(dst))
+        if _LOCAL.get("FO3_ASSETS"):
+            write_local({"FO3_ASSETS": ""})  # the copy is used by default now
+        print(f"copied {src} -> {dst} ({n} files); served when the client has no CDN copy of its own")
         return
     if cmd == "language":
         langs = ("tha", "ind", "eng", "vie", "kor", "chi")

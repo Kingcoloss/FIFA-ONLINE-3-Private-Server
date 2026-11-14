@@ -83,7 +83,9 @@ ASSETS = fo3conf.ASSETS
 # <FETCHED_ASSETS>/externalAssets: that copy when there is one, else this repository (3Sea; the user
 # keeps them in git). With ASSETS empty they went to <cwd>/externalAssets and nothing served them,
 # so 1,106 fetched crests, faces, staff pictures and league logos stayed placeholders.
-FETCHED_ASSETS = ASSETS or HERE
+# A CDN copy that is not the client's own (3Sea serving FO3 ID's, kept in gamedata/cdn) is only
+# read: fetched pictures still go to the repository and are served before it.
+FETCHED_ASSETS = ASSETS if ASSETS and fo3conf.ASSETS_OWN else HERE
 # fifadb's licensing and name tables of the client's region and language (permth, namestha for 3Sea)
 PERM, NAMES = fo3conf.PERM_TABLE, fo3conf.NAMES_TABLE
 CDN_PREFIX = "cdn/"
@@ -123,9 +125,11 @@ def asset_path(rel):
     rel = re.sub(r"^externalAssets/balls/ball_0\.png$", "externalAssets/balls/ball_6.png", rel)
     rel = re.sub(r"^externalAssets/countries/smallFlags/(\d+\.png)$", r"externalAssets/countries/\1", rel)
     other = re.sub(r"crests/(large|small)/", lambda m: f"crests/{'small' if m[1] == 'large' else 'large'}/", rel)
-    roots = [(root, "") for root in filter(None, (OWN_ASSETS, ASSETS))]  # 3Sea: no client cache
-    if FETCHED_ASSETS not in (OWN_ASSETS, ASSETS):  # the repository itself: its externalAssets folder only
-        roots.append((os.path.join(FETCHED_ASSETS, "externalAssets"), "externalAssets/"))
+    roots = [(OWN_ASSETS, "")]
+    if FETCHED_ASSETS not in (OWN_ASSETS, ASSETS):  # the repository itself: its externalAssets folder only,
+        roots.append((os.path.join(FETCHED_ASSETS, "externalAssets"), "externalAssets/"))  # before a borrowed copy
+    if ASSETS:  # the client's own cache, or the FO3 ID copy kept in gamedata/cdn (3Sea)
+        roots.append((ASSETS, ""))
     for r in dict.fromkeys((rel, other)):
         for root, prefix in roots:
             if not r.startswith(prefix):

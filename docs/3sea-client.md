@@ -49,13 +49,13 @@ managers' chat, some screens) stays Indonesian. `python fo3conf.py language defa
 
 ## FO3 ID's pictures for 3Sea
 
-3Sea ships no CDN copy. With an FO3 ID client on the same PC, `python fo3conf.py assets
-"<FO3 ID client folder>"` (this PC's `fo3.local.env`: `FO3_ASSETS=...\_cache\games\fo3id`) has
-the server serve that copy's crests, faces, staff, balls, league logos and Shop art to the 3Sea
-client; nothing is copied into either client folder. The pictures the Aset tab fetched
-(`externalAssets/` in this repository) still fill what that copy lacks. 3Sea keeps its own Thai
-strings: the server builds no language pack when the client has its loose
-`data/ui/external/LANGUAGESTRING_THA.json`. `python fo3conf.py assets none` undoes it.
+3Sea ships no CDN copy. `python fo3conf.py assets "<FO3 ID client folder>"` copies that
+client's `_cache\games\fo3id\externalAssets` (1,450 files, 37 MB) into `gamedata\cdn` (not in
+git: EA data), and the server serves it to a client without a copy of its own: crests, faces,
+staff, balls, league logos and Shop art. The FO3 ID client can be removed afterwards. The
+pictures the Aset tab fetched (`externalAssets/` in this repository) are served before it, and
+new fetches still go to the repository. 3Sea keeps its own Thai strings: the server builds no
+language pack when the client has its loose `data/ui/external/LANGUAGESTRING_THA.json`.
 
 ## Setup
 
