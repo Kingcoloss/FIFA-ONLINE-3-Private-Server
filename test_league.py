@@ -1638,7 +1638,9 @@ def main():
             icon = hc.item_def(d)["itemicon"]
             assert icon == hc.item_def(d)["bundleicon"] and hc.asset_path(f"externalAssets/shop/{icon}.png").startswith(hc.OWN_ASSETS)
         small = os.path.join(hc.ASSETS, "externalAssets", "crests", "small", "s11.png")  # issue #29: Man United
-        if os.path.isfile(small) and not os.path.isfile(small.replace("small", "large")):  # has no large crest
+        fetched = os.path.join(hc.FETCHED_ASSETS, "externalAssets", "crests", "large", "s11.png")  # served first (3Sea)
+        if (os.path.isfile(small) and not os.path.isfile(small.replace("small", "large"))  # has no large crest
+                and not (hc.FETCHED_ASSETS != hc.ASSETS and os.path.isfile(fetched))):
             assert hc.asset_path("externalAssets/crests/large/s11.png") == small
         top5 = body(hc.route(f"/item/draftpack/{dp}/players/5")("", b""))  # the default picks: the 5 most valuable
         assert len(top5) == 5 and all(p["spid"] // 1000000 == 88 and p["price"] == hc.card_price(p["spid"]) for p in top5)
