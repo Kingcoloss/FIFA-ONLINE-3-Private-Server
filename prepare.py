@@ -35,7 +35,7 @@ def same_dir(a, b):
 
 def ensure_fifadb():
     src = fo3conf.fifadb_source().get("game")
-    if os.path.isfile(FIFADB) and (not src or same_dir(src, fo3conf.GAME)):
+    if os.path.isfile(FIFADB) and src and same_dir(src, fo3conf.GAME):  # no record: extract once to be sure
         return True
     say(f"extracting the player database from {fo3conf.GAME} ...")
     return subprocess.call([sys.executable, os.path.join(HERE, "extract_fifadb.py"), fo3conf.GAME],
