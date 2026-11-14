@@ -1619,7 +1619,9 @@ def cmd_selftest(a=None):
         icon, wc10 = wc18_icon(gfx, dds), _frame_icons(gfx, dds, ("47season",))["47season"]
         assert icon.size == wc10.size and icon.tobytes() != wc10.tobytes()
         print("WC18 badge ok")
-    module = os.path.join(r"D:\FO3ID\32795", MODULE_BIG)
+    sys.path.insert(0, ROOT)
+    import fo3conf  # this PC's client, only read here
+    module = os.path.join(fo3conf.GAME, MODULE_BIG)
     if os.path.exists(module):  # the getSeason patch against the client's Module.gfx, in memory
         import bigdir
         gfx = bigdir.read(module, MODULE_GFX)

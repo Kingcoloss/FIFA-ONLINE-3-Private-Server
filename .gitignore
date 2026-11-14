@@ -12,3 +12,6 @@ launcher/*.exe
 __pycache__/
 *.pyc
 .impeccable/
+
+# This PC's own settings (client folder and so on), see fo3conf.py
+fo3.local.env

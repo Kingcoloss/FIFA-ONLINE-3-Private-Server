@@ -8869,7 +8869,7 @@ if __name__ == "__main__":
     print(f"http config stub on {fo3conf.HTTP_BIND}:{PORT}{' (https)' if TLS else ''}, log -> {LOG}", flush=True)
     print(fo3conf.summary(), flush=True)
     if not os.path.isdir(os.path.join(GAME, "data")):
-        print(f"WARNING: no client at {GAME}: set FO3_GAME to the game folder.", flush=True)
+        print(f"WARNING: no client at {GAME}: run `python fo3conf.py set <client folder>`.", flush=True)
     if not (ASSETS and os.path.isdir(os.path.join(ASSETS, "externalAssets"))):
         print(f"WARNING: no client cache at {ASSETS or '(none)'}: crests, faces and shop images will show "
               f"the game's defaults (FO3_ASSETS); the admin page's Aset tab fetches crests and faces into "

@@ -2,10 +2,13 @@
 rem Phase 1 of the .NET move (strangler): the .NET host (dotnetVersion\src\FO3.Host) owns
 rem https://APSEODESK172:443 and the messenger, and forwards every game request to the Python
 rem server, which then listens on 127.0.0.1:18080 only (its admin page stays on :8088).
-rem Setup as for play.bat (docs\3sea-client.md), plus the .NET 10 SDK. Each server gets its own
+rem Setup as for play.bat (prepare.py does most of it), plus the .NET 10 SDK. Each server gets its own
 rem window; close both to stop. Unhandled requests: https://127.0.0.1/_fo3/fallbacks
 cd /d "%~dp0"
 powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'start_all\.py|http_config\.py|messenger\.py|FO3\.Host' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+rem this PC's client, fifadb, certificate and launcher, as in play.bat
+call python prepare.py > "%TEMP%\fo3_prepare.env" || (echo. & echo Fix what is listed above, then run play_dotnet.bat again. & pause & exit /b 1)
+for /f "usebackq tokens=1,* delims==" %%a in ("%TEMP%\fo3_prepare.env") do set "%%a=%%b"
 if "%FO3_HTTP_BIND%"=="" set FO3_HTTP_BIND=0.0.0.0
 if "%FO3_MESSENGER_PORT%"=="" set FO3_MESSENGER_PORT=28002
 set FO3_HOST_BIND=%FO3_HTTP_BIND%

@@ -1,18 +1,24 @@
 # Moving the server to another PC
 
-Everything that is code is in git (branch `claude/project-thread-hp2use`). What is not in git
-stays out on purpose: this repository is public, and these files are either extracted from the
-game client, a private key, or your own save. They are rebuilt or copied by hand.
+Everything that is code is in git (branch `develop`). What is not in git stays out on purpose:
+this repository is public, and these files are either extracted from the game client, a private
+key, your own save, or this PC's own settings. `play.bat` rebuilds most of them by itself
+(`prepare.py`); the rest is copied by hand.
+
+The PCs do not need the same client. Any 3Sea or FO3 ID client in any folder works: it is found
+and its kind is read from the folder (docs/3sea-client.md, "Any client, any folder").
 
 | Not in git | Why | On the new PC |
 |---|---|---|
-| `gamedata/fifadb.sqlite`, `formations.json`, `stadiums.json` | extracted from the client (EA data) | rebuilt from the client (step 3); the two caches come back on first run |
-| `gamedata/state.json` | your save: managers, clubs, EP, items | copy it over (step 6) |
-| `gamedata/shop.json`, `economy.json`, `match_rewards.json`, `missions.json`, `daily_rewards.json`, `vm_chat.json`, `notice.png` | your admin page settings, if you saved any | copy them over (step 6) |
+| `fo3.local.env` | this PC's client folder (and any other `FO3_*` setting) | written by `play.bat` when it finds the client, or `python fo3conf.py set "<folder>"` |
+| `gamedata/fifadb.sqlite`, `fifadb.source.json` | extracted from the client (EA data) | `play.bat` extracts it, and again when the client changes |
+| `gamedata/formations.json`, `stadiums.json` | caches from the client | come back on first run |
+| `gamedata/state.json` | your save: managers, clubs, EP, items | copy it over (step 4) |
+| `gamedata/shop.json`, `economy.json`, `match_rewards.json`, `missions.json`, `daily_rewards.json`, `vm_chat.json`, `notice.png` | your admin page settings, if you saved any | copy them over (step 4) |
 | `gamedata/fa_prices.json` | fifaaddict prices, if you fetched them | copy, or run `python tools/fa_sync.py` again |
 | `gamedata/fa_crests.json`, `fa_faces.json`, `fa_staffs.json`, `fa_leagues.json` | the Aset tab's record of what it fetched; the pictures themselves are in git (`externalAssets/`) | copy them if you want the record; a new fetch skips the pictures already there |
-| `certs/server.pem` | TLS private key | make a new one (step 4) |
-| `launcher/fifalauncher.exe` | build output | build again (step 5) |
+| `certs/server.pem` | TLS private key | `play.bat` makes a new one |
+| `launcher/fifalauncher.exe` | build output | `play.bat` builds it (again when its source changes) |
 | `captures/` | logs and golden recordings of your sessions | copy if you want them for the .NET golden tests |
 
 ## Steps
@@ -23,23 +29,16 @@ game client, a private key, or your own save. They are rebuilt or copied by hand
 
        git clone https://github.com/Kingcoloss/FIFA-ONLINE-3-Private-Server
        cd FIFA-ONLINE-3-Private-Server
-       git checkout claude/project-thread-hp2use
+       git checkout develop
 
-3. Copy or install the 3Sea client on the new PC. If its folder is not
-   `F:\FOServer\3Sea FIFA Online 3`, set `FO3_GAME` to it (in `play.bat` or as a user environment
-   variable). Then extract the player database: `python extract_fifadb.py "<client folder>"`
-   (60,174 cards for 3Sea build 655130).
-4. TLS certificate for `APSEODESK172`, as in the README:
-
-       openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=APSEODESK172" -addext "subjectAltName=DNS:APSEODESK172" -keyout key.pem -out cert.pem
-       python -c "open('certs/server.pem','w').write(open('cert.pem').read()+open('key.pem').read())"
-
-5. Build the launcher once (the build line is at the top of `launcher/fifalauncher.cs`) and add
-   `127.0.0.1 APSEODESK172` to the hosts file as admin.
-6. Copy your save and settings from the old PC's `gamedata` folder into the new one (the files in
+3. Have a client on the PC (3Sea or FO3 ID, any folder) and add `127.0.0.1 APSEODESK172` to the
+   hosts file as administrator. `python fo3conf.py` shows the client it finds; when it finds none,
+   or the wrong one, `python fo3conf.py set "<client folder>"`.
+4. Copy your save and settings from the old PC's `gamedata` folder into the new one (the files in
    the table above, not `fifadb.sqlite`). Without `state.json` the game starts with a new account.
-7. `python run_tests.py` should pass all five suites. Then `play.bat` (Python only) or
-   `play_dotnet.bat` (the .NET host in front of Python).
+5. `play.bat` (Python only) or `play_dotnet.bat` (the .NET host in front of Python). The first
+   start extracts the player database, makes the certificate and builds the launcher, and stops
+   with a list when something it cannot do is missing. `python run_tests.py` runs the five suites.
 
 The game's own display settings live in `graphics.ini` in the client folder (`FULLSCREEN=0` is
 windowed); the in-game Options > Visual screen changes them too.

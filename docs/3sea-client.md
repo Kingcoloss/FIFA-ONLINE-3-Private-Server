@@ -3,11 +3,12 @@
 The server was built against the Garena FO3 ID client (build 654420, region ID, Indonesian).
 The 3Sea community client (build 655130, region TH, Thai) is the same game build
 (`FO3_SEA_STREAM`, Blaze CVER 20200217), so most of the server applies as it is. The points
-that differ are settings in `fo3conf.py`, and 3Sea is the default:
+that differ are settings in `fo3conf.py`. Which client a PC has is found by itself (see
+"Any client, any folder" below); these are the two profiles:
 
 | | FO3 ID | 3Sea (default) | Setting |
 |---|---|---|---|
-| Client folder | `D:\FO3ID\32795` | `F:\FOServer\3Sea FIFA Online 3` | `FO3_GAME` |
+| Client folder (searched first; any folder is found) | `D:\FO3ID\32795` | `F:\FOServer\3Sea FIFA Online 3` | `FO3_GAME` |
 | Downloaded CDN copy (crests, faces, Shop art) | `_cache\games\fo3id` | none | `FO3_ASSETS` |
 | Language sent to the client | `ind` | `tha` | `FO3_LANGUAGE` |
 | UI strings | `externalAssets/language_ind.big` (cache) | loose `data/ui/external/LANGUAGESTRING_THA.json` | follows the language |
@@ -15,22 +16,35 @@ that differ are settings in `fo3conf.py`, and 3Sea is the default:
 | fifadb licensing / name tables | `permid`, `namesind` | `permth`, `namestha` | follow region and language |
 | Game command line | `region id`, `PUBLISHING_REGION=ID` | `region th`, `PUBLISHING_REGION=TH` | `FO3_LAUNCH_REGION` |
 
-`FO3_CLIENT=fo3id` switches every default back to the FO3 ID client.
+## Any client, any folder
+
+The PCs this runs on do not have the same client, so nothing is tied to one folder:
+
+1. environment variables (`FO3_GAME`, `FO3_CLIENT`, ...) win;
+2. then `fo3.local.env` in the repository folder (this PC's own `NAME=value` lines, not in
+   git), written by `python fo3conf.py set "<client folder>" [3sea|fo3id]` or by `play.bat`
+   the first time it finds a client;
+3. else `fifazf.exe` is searched for: the two usual folders, every drive two folders deep, and
+   the Desktop, Downloads, Games and Documents folders;
+4. the profile comes from the folder: a loose `data/ui/external/LANGUAGESTRING_THA.json` is
+   3Sea, `fo3id.version` or `_cache\games\fo3id` is FO3 ID. `FO3_CLIENT` overrides it.
+
+`python fo3conf.py` shows what this PC uses and every client it found. `fifalauncher.exe` reads
+the same settings, so one build works on every PC. `gamedata\fifadb.sqlite` remembers which
+client it came from (`fifadb.source.json`); `play.bat` extracts it again when the client changes.
 
 The server only reads the client folder. Nothing in this setup writes into it.
 
 ## Setup
 
 1. Python 3 with `pip install cryptography`.
-2. Extract the player database from the client (read only):
-   `python extract_fifadb.py "F:\FOServer\3Sea FIFA Online 3"`.
-   3Sea's `data_0.big` keeps `data/db2/fifadb.db.db2` at the same offset and size as the FO3 ID
-   build (checked 2026-11-08: 60,174 cards).
-3. The rest is as in the README: `certs\server.pem` for `APSEODESK172`, the hosts entry
-   `127.0.0.1 APSEODESK172`, and `launcher\fifalauncher.exe` built from
-   `launcher\fifalauncher.cs`. Keep the built launcher in this repo's `launcher` folder, not in
-   the game folder; it finds `fifazf.exe` through `FO3_GAME`.
-4. Run `play.bat`.
+2. As administrator, the hosts entry `127.0.0.1 APSEODESK172`.
+3. Run `play.bat`. Its first step, `prepare.py`, does the rest when it is missing: finds the
+   client, extracts the player database from it (read only; 3Sea's `data_0.big` keeps
+   `data/db2/fifadb.db.db2` at the same offset and size as the FO3 ID build, checked
+   2026-11-08: 60,174 cards), makes `certs\server.pem` for `APSEODESK172` and builds
+   `launcher\fifalauncher.exe` from `launcher\fifalauncher.cs` (kept in this repo's `launcher`
+   folder, not in the game folder). It stops with what is missing, such as the hosts entry.
 
 ## Ports
 

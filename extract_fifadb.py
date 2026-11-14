@@ -10,9 +10,9 @@ Found 2026-10-29 (client build 654420):
 The result has players (60k cards, spid = season*1e6 + FIFA playerid), names<lang>,
 perm<region>, playerhistory — what the UI queries via ConnectionPool "fifadb".
 
-Needs `cryptography`. Usage: python extract_fifadb.py [game_dir] [out=gamedata/fifadb.sqlite]
+Needs `cryptography`. Usage: python extract_fifadb.py [game_dir=this PC's client] [out=gamedata/fifadb.sqlite]
 """
-import os, sqlite3, sys, warnings
+import json, os, sqlite3, sys, warnings
 
 warnings.filterwarnings("ignore")
 try:
@@ -22,8 +22,11 @@ except ImportError:
 from cryptography.hazmat.primitives.ciphers import Cipher, modes
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-GAME = sys.argv[1] if len(sys.argv) > 1 else r"D:\FO3ID\32795"
-OUT = sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, "gamedata", "fifadb.sqlite")
+import fo3conf  # no game_dir given: this PC's client (FO3_GAME, fo3.local.env, or the one found)
+
+GAME = sys.argv[1] if len(sys.argv) > 1 else fo3conf.GAME
+DEFAULT_OUT = os.path.join(HERE, "gamedata", "fifadb.sqlite")
+OUT = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_OUT
 OFFSET, SIZE = 0xEF9F80, 0x25B4A35
 KEY = b"ef4ccfc3c726d060adc11853"
 
@@ -88,7 +91,12 @@ def main():
         f.write(db)
     c = sqlite3.connect(OUT)
     assert c.execute("pragma integrity_check").fetchone()[0] == "ok"
-    print(OUT, c.execute("select count(*) from players").fetchone()[0], "players")
+    n = c.execute("select count(*) from players").fetchone()[0]
+    c.close()
+    print(OUT, n, "players", "from", GAME)
+    if os.path.abspath(OUT) == os.path.abspath(DEFAULT_OUT):  # the server warns when the client changes
+        with open(fo3conf.FIFADB_SOURCE, "w", encoding="utf-8") as f:
+            json.dump({"game": os.path.abspath(GAME), "client": fo3conf.detect_client(GAME), "players": n}, f)
 
 
 if __name__ == "__main__":
