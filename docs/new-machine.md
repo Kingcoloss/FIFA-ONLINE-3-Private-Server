@@ -17,7 +17,7 @@ and its kind is read from the folder (docs/3sea-client.md, "Any client, any fold
 | `gamedata/shop.json`, `economy.json`, `match_rewards.json`, `missions.json`, `daily_rewards.json`, `vm_chat.json`, `notice.png` | your admin page settings, if you saved any | copy them over (step 4) |
 | `gamedata/fa_prices.json` | fifaaddict prices, if you fetched them | copy, or run `python tools/fa_sync.py` again |
 | `gamedata/fa_crests.json`, `fa_faces.json`, `fa_staffs.json`, `fa_leagues.json` | the Aset tab's record of what it fetched; the pictures themselves are in git (`externalAssets/`) | copy them if you want the record; a new fetch skips the pictures already there |
-| `gamedata/cdn/` | an FO3 ID client's CDN copy (crests, faces, Shop art) served to 3Sea | copy it over, or `python fo3conf.py assets "<FO3 ID client>"` |
+| `gamedata/cdn/` | the FO3 ID CDN copy (crests, faces, Shop art) served to 3Sea | `play.bat` unpacks it from `cdn/fo3id-cdn.zip`, which is in git (docs/3sea-client.md) |
 | `certs/server.pem` | TLS private key | `play.bat` makes a new one |
 | `launcher/fifalauncher.exe` | build output | `play.bat` builds it (again when its source changes) |
 | `captures/` | logs and golden recordings of your sessions | copy if you want them for the .NET golden tests |

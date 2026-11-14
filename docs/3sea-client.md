@@ -47,15 +47,33 @@ of the 608 keys only the newer Indonesian pack has (later items, balls, seasons)
 stays ID (`permid`); card names come from `namestha`. Text the server writes itself (virtual
 managers' chat, some screens) stays Indonesian. `python fo3conf.py language default` goes back.
 
-## FO3 ID's pictures for 3Sea
+## FO3 ID's pictures for 3Sea (`cdn/fo3id-cdn.zip`)
 
-3Sea ships no CDN copy. `python fo3conf.py assets "<FO3 ID client folder>"` copies that
-client's `_cache\games\fo3id\externalAssets` (1,450 files, 37 MB) into `gamedata\cdn` (not in
-git: EA data), and the server serves it to a client without a copy of its own: crests, faces,
-staff, balls, league logos and Shop art. The FO3 ID client can be removed afterwards. The
-pictures the Aset tab fetched (`externalAssets/` in this repository) are served before it, and
-new fetches still go to the repository. 3Sea keeps its own Thai strings: the server builds no
-language pack when the client has its loose `data/ui/external/LANGUAGESTRING_THA.json`.
+The game does not ship most of its pictures: club crests, player faces, staff, balls, league
+logos, trophies, uniforms and Shop art came from Garena's CDN at run time, and each client kept
+what it downloaded in `_cache\games\<publisher>\externalAssets`. The CDN is gone. The FO3 ID
+client still has its copy (1,450 files, 37 MB, the one this server was built on); 3Sea ships
+none, so without help its screens show placeholders.
+
+So the server keeps that copy itself:
+
+- `cdn/fo3id-cdn.zip` (in git, 39 MB) holds the FO3 ID client's `externalAssets` as it was.
+- `play.bat` (`prepare.py`) unpacks it into `gamedata\cdn` (not in git) when the client has no
+  copy of its own and `gamedata\cdn` is missing. No FO3 ID client is needed on the PC.
+- The server (`http_config.py`, `asset_path`) answers each picture the client asks for at
+  `https://APSEODESK172/cdn/externalAssets/...` from, in order: the server's own `assets/`,
+  the pictures the admin page's Aset tab fetched from fifaaddict (`externalAssets/` in this
+  repository, also where new fetches go), then `gamedata\cdn`. A picture in none of them is a
+  404 and the game shows its placeholder.
+- An FO3 ID client uses its own `_cache` instead (and the Aset tab saves into it, as before).
+- `python fo3conf.py assets "<FO3 ID client>"` copies a client's cache into `gamedata\cdn`;
+  `python tools/cdn_zip.py pack` then rebuilds the zip from it (same files give the same zip).
+- 3Sea keeps its own Thai strings: the copy's `language_ind.big` is not used for it, and the
+  server builds no language pack when the client has its loose
+  `data/ui/external/LANGUAGESTRING_THA.json`.
+
+The zip is EA's data out of the game client, like the fifaaddict pictures already in
+`externalAssets/`; this repository is public, so pushing it publishes those files.
 
 ## Setup
 

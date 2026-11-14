@@ -2,7 +2,8 @@
 
     1. find the client (fo3conf.py: FO3_GAME, fo3.local.env, or a search) and keep it in
        fo3.local.env, so the next start does not search again
-    2. gamedata/fifadb.sqlite: extract it when it is missing or came from another client
+    2. gamedata/fifadb.sqlite: extract it when it is missing or came from another client;
+       gamedata/cdn: unpack cdn/fo3id-cdn.zip when the client has no CDN copy of its own (3Sea)
     3. certs/server.pem: make a self-signed certificate for APSEODESK172 when there is none
     4. launcher/fifalauncher.exe: build it when it is missing or older than its source
     5. the hosts entry for APSEODESK172: only checked (writing it needs an administrator)
@@ -40,6 +41,18 @@ def ensure_fifadb():
     say(f"extracting the player database from {fo3conf.GAME} ...")
     return subprocess.call([sys.executable, os.path.join(HERE, "extract_fifadb.py"), fo3conf.GAME],
                            stdout=sys.stderr) == 0
+
+
+def ensure_cdn():
+    """gamedata/cdn from cdn/fo3id-cdn.zip (in git) when the client has no CDN copy of its own."""
+    if fo3conf.ASSETS_OWN or os.path.isdir(os.path.join(fo3conf.SERVER_CDN, "externalAssets")):
+        return True
+    sys.path.insert(0, os.path.join(HERE, "tools"))
+    import cdn_zip
+    if os.path.isfile(cdn_zip.ZIP):
+        say(f"unpacking {cdn_zip.ZIP} into {fo3conf.SERVER_CDN} ...")
+        say(f"  {cdn_zip.unpack()} files")
+    return True
 
 
 def ensure_cert():
@@ -105,7 +118,7 @@ def main():
     if fo3conf.GAME_FROM == "found" and not os.environ.get("FO3_GAME", "").strip():
         fo3conf.write_local({"FO3_GAME": fo3conf.GAME})
         say(f"kept this client in {fo3conf.LOCAL_FILE}")
-    ok = ensure_fifadb() & ensure_cert() & ensure_launcher()
+    ok = ensure_fifadb() & ensure_cdn() & ensure_cert() & ensure_launcher()
     hosts = hosts_ok()
     if not os.path.isfile(os.path.join(HERE, "gamedata", "state.json")):
         say("note: no gamedata/state.json yet, so the game starts with a new account "
