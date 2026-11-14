@@ -47,6 +47,16 @@ of the 608 keys only the newer Indonesian pack has (later items, balls, seasons)
 stays ID (`permid`); card names come from `namestha`. Text the server writes itself (virtual
 managers' chat, some screens) stays Indonesian. `python fo3conf.py language default` goes back.
 
+## FO3 ID's pictures for 3Sea
+
+3Sea ships no CDN copy. With an FO3 ID client on the same PC, `python fo3conf.py assets
+"<FO3 ID client folder>"` (this PC's `fo3.local.env`: `FO3_ASSETS=...\_cache\games\fo3id`) has
+the server serve that copy's crests, faces, staff, balls, league logos and Shop art to the 3Sea
+client; nothing is copied into either client folder. The pictures the Aset tab fetched
+(`externalAssets/` in this repository) still fill what that copy lacks. 3Sea keeps its own Thai
+strings: the server builds no language pack when the client has its loose
+`data/ui/external/LANGUAGESTRING_THA.json`. `python fo3conf.py assets none` undoes it.
+
 ## Setup
 
 1. Python 3 with `pip install cryptography`.

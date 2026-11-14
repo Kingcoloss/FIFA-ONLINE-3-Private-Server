@@ -770,15 +770,15 @@ LANG_BUILT = os.path.join(HERE, "gamedata", f"language_{LANGUAGE}.built.big")
 
 
 def built_language_pack():
-    """gamedata/language_<lang>.built.big, or None (no other pack to start from, or the client
-    ships no strings in LANGUAGE, as on 3Sea, which reads its own loose file)."""
+    """gamedata/language_<lang>.built.big, or None (no other pack to start from, the client ships
+    no strings in LANGUAGE, or it has its own loose data/ui/external file, as 3Sea has)."""
     try:
         base_big = os.path.join(GAME, "data", "ui", "localization", "language.big")
         own = f"data/ui/localization/LANGUAGESTRING_{LANGUAGE.upper()}.json"
         tpl = next((f for f in sorted(glob.glob(os.path.join(ASSETS, "externalAssets", "language_*.big")))
                     if os.path.basename(f) != os.path.basename(LANG_PACK)), None) if ASSETS else None
-        if not tpl or not os.path.isfile(base_big):
-            return None
+        if not tpl or not os.path.isfile(base_big) or os.path.isfile(os.path.join(GAME, *LANG_ENTRY.split("/"))):
+            return None  # 3Sea with FO3 ID's cache borrowed: it reads its own loose, newer strings
         key = repr([(os.path.abspath(p), os.stat(p).st_size, os.stat(p).st_mtime_ns) for p in (base_big, tpl)]
                    + [1]).encode()
         with LANG_LOCK:

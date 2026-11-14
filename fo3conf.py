@@ -30,6 +30,9 @@ The https port stays 443: fifazf.exe has it built in.
     python fo3conf.py language tha     the game's language on this PC (tha ind eng vie kor chi, or
                                        default); the FO3 ID client ships all six, and the server
                                        builds the language pack its cache lacks (http_config.py)
+    python fo3conf.py assets <folder>  serve another client's CDN copy (crests, faces, Shop art):
+                                       an FO3 ID client folder or its _cache\games\fo3id; for
+                                       3Sea, which has none (`none` undoes it). Only read.
     python fo3conf.py env              the resolved settings as NAME=value lines (play.bat)
 """
 import json, os, string, sys
@@ -211,6 +214,20 @@ def _main(argv):
             raise SystemExit(f"client {kind!r}: use one of {', '.join(PROFILES)}")
         write_local({"FO3_GAME": folder, "FO3_CLIENT": kind})
         print(f"{LOCAL_FILE}: FO3_GAME={folder}, client {kind or detect_client(folder) + ' (from the folder)'}")
+        return
+    if cmd == "assets":  # another client's CDN copy (FO3 ID's _cache) for a client without one (3Sea)
+        if len(argv) < 2:
+            raise SystemExit("usage: python fo3conf.py assets <client folder | cache folder | none>")
+        path = "" if argv[1].lower() == "none" else os.path.abspath(argv[1])
+        games = os.path.join(path, "_cache", "games")
+        if path and os.path.isdir(games):  # a client folder: its _cache\games\<publisher>
+            subs = [os.path.join(games, d) for d in sorted(os.listdir(games))
+                    if os.path.isdir(os.path.join(games, d, "externalAssets"))]
+            path = subs[0] if subs else path
+        if path and not os.path.isdir(os.path.join(path, "externalAssets")):
+            raise SystemExit(f"{path!r} has no externalAssets folder")
+        write_local({"FO3_ASSETS": path})
+        print(f"{LOCAL_FILE}: FO3_ASSETS={path or '(the client profile' + chr(39) + 's own)'}")
         return
     if cmd == "language":
         langs = ("tha", "ind", "eng", "vie", "kor", "chi")
